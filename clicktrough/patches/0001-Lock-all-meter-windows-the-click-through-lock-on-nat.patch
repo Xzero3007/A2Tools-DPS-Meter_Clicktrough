@@ -1,0 +1,622 @@
+From edec2290d8b56e4099b60931dd6d3d48911e1db6 Mon Sep 17 00:00:00 2001
+From: A2Tools patch <patch@localhost>
+Date: Tue, 20 Oct 2026 10:26:21 +0000
+Subject: [PATCH 1/3] Lock all meter windows; the click-through lock on native
+ Wayland
+
+---
+ docs/linux.md                          |   2 +-
+ index.html                             |   7 ++
+ public/src/js/core.js                  |  13 +++-
+ src-tauri/src/app.rs                   | 102 ++++++++++++++++++++++---
+ src-tauri/src/platform/linux/window.rs |  77 +++++++++++++++----
+ src-tauri/src/plugins/mod.rs           |   2 +
+ src-tauri/src/plugins/widgets.rs       |   5 +-
+ src/data/i18n/ui/de.json               |   2 +
+ src/data/i18n/ui/en.json               |   2 +
+ src/data/i18n/ui/es.json               |   2 +
+ src/data/i18n/ui/fr.json               |   2 +
+ src/data/i18n/ui/ja.json               |   2 +
+ src/data/i18n/ui/ko.json               |   2 +
+ src/data/i18n/ui/pt.json               |   2 +
+ src/data/i18n/ui/ru.json               |   2 +
+ src/data/i18n/ui/zh-Hans.json          |   2 +
+ src/data/i18n/ui/zh-Hant.json          |   2 +
+ 17 files changed, 198 insertions(+), 30 deletions(-)
+
+diff --git a/docs/linux.md b/docs/linux.md
+index 2dac013..9345e75 100644
+--- a/docs/linux.md
++++ b/docs/linux.md
+@@ -247,7 +247,7 @@ To remove it:
+ | Automatic updates | Works for the packages; builds from source update with `git pull` |
+ | Class icons | Works (missing in the 2.0.34 package and earlier; fixed in 2.0.35) |
+ | Global hotkeys | From 2.0.59, once turned on in Settings → Keybinds, through your desktop's global shortcuts: see [Global hotkeys](#global-hotkeys) |
+-| Click-through lock | From 2.0.42, when the meter runs through XWayland (`GDK_BACKEND=x11 a2tools-dps-meter`): turn on the lock button in Settings. On native Wayland an app cannot see where the pointer is outside its own window, so the button stays hidden there |
++| Click-through lock | Turn on the lock button in Settings, or use the lock keybind. Works on X11, XWayland and native Wayland (the lock is an input region, which needs no pointer position). **Lock all meter windows** locks Details, Battle History and plugin windows with it; Settings stays clickable |
+ | Discord activity | From 2.0.42: your class, level and server in your Discord status, through the Discord app on the same computer |
+ | Screenshots | Works from 2.0.41, to the clipboard and a folder (`~/Pictures/A2Tools DPS Meter` by default). On Linux the meter pictures itself on a plain background, since Wayland lets no app copy the screen |
+ | Auto-hide when the game loses focus | Not yet (the meter stays visible) |
+diff --git a/index.html b/index.html
+index 1b58364..af4cdb6 100644
+--- a/index.html
++++ b/index.html
+@@ -739,6 +739,13 @@
+                       <span class="settingsToggleTrack" aria-hidden="true"></span>
+                     </span>
+                   </label>
++                  <label class="settingsToggle lockSetting" style="display:none">
++                    <span class="settingsToggleLabel settingsLabel" data-i18n="settings.lockAllWindows" title="While the meter is locked, Details, Battle History and plugin windows let clicks through too. Unlock with the lock button or its keybind." data-i18n-title="settings.tips.lockAllWindows">Lock all meter windows</span>
++                    <span class="settingsToggleControl">
++                      <input type="checkbox" class="lockAllWindowsCheckbox" />
++                      <span class="settingsToggleTrack" aria-hidden="true"></span>
++                    </span>
++                  </label>
+                 </div>
+               </section>
+               <section class="settingsSection" id="settingsSection-appearance" role="tabpanel" aria-labelledby="settingsTab-appearance" data-section="appearance" hidden>
+diff --git a/public/src/js/core.js b/public/src/js/core.js
+index c3d1dc4..c091912 100644
+--- a/public/src/js/core.js
++++ b/public/src/js/core.js
+@@ -54,6 +54,7 @@ const REMOTE_APPLIED_SETTING_CONTROLS = {
+   "dpsMeter.barTextureOffset": ".textureOffsetCheckbox",
+   "dpsMeter.showSuspendBtn": ".showSuspendBtnCheckbox",
+   "dpsMeter.showLockBtn": ".showLockBtnCheckbox",
++  "dpsMeter.lockAllWindows": ".lockAllWindowsCheckbox",
+   // Set from the main window by the account offer.
+   "dpsMeter.autoUpload": ".autoUploadCheckbox",
+ };
+@@ -144,6 +145,7 @@ class DpsApp {
+       detailsMonitor: "dpsMeter.detailsMonitor",
+       showSuspendBtn: "dpsMeter.showSuspendBtn",
+       showLockBtn: "dpsMeter.showLockBtn",
++      lockAllWindows: "dpsMeter.lockAllWindows",
+       overlayLocked: "dpsMeter.overlayLocked",
+     };
+ 
+@@ -6730,11 +6732,14 @@ class DpsApp {
+   // Locked, the overlay lets clicks through to the game and cannot be
+   // dragged; only its lock button stays clickable (the backend watches the
+   // pointer, see OverlayLock in app.rs), and a hotkey toggles it too. Offered
+-  // only where the backend can do that: Windows, not Wayland.
++  // only where the backend can do that: Windows, and Linux (by an input
++  // region, on X11 and native Wayland alike). With "Lock all meter windows"
++  // Details, History and plugins' windows lock with it (the backend does it).
+ 
+   initOverlayLock() {
+     this._overlayLocked = false;
+     this.showLockBtnCheckbox = document.querySelector(".showLockBtnCheckbox");
++    this.lockAllWindowsCheckbox = document.querySelector(".lockAllWindowsCheckbox");
+     const isOverlay = window.A2_VIEW === "main";
+     Promise.resolve(window.javaBridge?.overlayLockSupported?.())
+       .then((supported) => {
+@@ -6752,6 +6757,12 @@ class DpsApp {
+             if (!isChecked) this._setOverlayLocked(false);
+           });
+         }
++        if (this.lockAllWindowsCheckbox) {
++          this.lockAllWindowsCheckbox.checked = this.safeGetSetting(this.storageKeys.lockAllWindows) === "true";
++          this.lockAllWindowsCheckbox.addEventListener("change", (event) => {
++            this.safeSetSetting(this.storageKeys.lockAllWindows, String(!!event.target?.checked));
++          });
++        }
+         if (!isOverlay) return;
+         this._applyLockBtnVisibility(show);
+         window.addEventListener("resize", () => this._sendLockBtnRect());
+diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
+index a11a7a1..c4c752a 100644
+--- a/src-tauri/src/app.rs
++++ b/src-tauri/src/app.rs
+@@ -329,15 +329,59 @@ fn screenshot_tool(app: &tauri::AppHandle, in_front: bool) {
+         *lock.applied.lock() = None;
+         sync_click_through(app, &lock, false);
+     }
+-    // Plugins' icons, by their lock and area.
+-    crate::plugins::widgets::reapply_locks(app);
+-    // Settings, History, Details, and plugins' windows: all or nothing.
++    // Settings, History, Details, plugins' windows and icons.
++    sync_other_windows(app);
++}
++
++/// "Lock all meter windows": while the overlay is locked, Details, Battle
++/// History, plugins' windows and plugins' icons let clicks through too, and
++/// the lock's hotkey (or the overlay's lock button) gives them the mouse back.
++/// Settings never locks: it is where the lock is turned off.
++pub const LOCK_ALL_WINDOWS_KEY: &str = "dpsMeter.lockAllWindows";
++
++/// The overlay is locked and "Lock all meter windows" is on.
++static ALL_WINDOWS_LOCKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
++
++pub fn all_windows_locked() -> bool {
++    ALL_WINDOWS_LOCKED.load(std::sync::atomic::Ordering::Relaxed)
++}
++
++/// Whether a meter window other than the overlay ignores the mouse, or None
++/// for a window this does not manage (the overlay, plugins' icons).
++fn other_window_ignores(label: &str, screenshot: bool, all_locked: bool) -> Option<bool> {
++    if label == "settings" {
++        return Some(screenshot);
++    }
++    let tool = TOOL_WINDOWS.contains(&label) || label.starts_with("details-") || crate::plugins::is_plugin_window(label);
++    tool.then_some(screenshot || all_locked)
++}
++
++/// Every window besides the overlay as the screenshot tool and the lock say:
++/// all or nothing for the tool windows, by their lock and area for plugins'
++/// icons. Called when either changes, and when a tool window opens.
++pub fn sync_other_windows(app: &tauri::AppHandle) {
++    use std::sync::atomic::Ordering;
++    let locked = app.try_state::<AppState>().is_some_and(|s| {
++        s.overlay_lock.locked.load(Ordering::SeqCst)
++            && s.settings.get(LOCK_ALL_WINDOWS_KEY).as_deref() == Some("true")
++    });
++    ALL_WINDOWS_LOCKED.store(locked, Ordering::Relaxed);
++    let screenshot = screenshot_tool_in_front();
+     for (label, window) in app.webview_windows() {
+-        let tool = TOOL_WINDOWS.contains(&label.as_str()) || label.starts_with("details-") || crate::plugins::is_plugin_window(&label);
+-        if tool && !platform::window::click_through_except(&window, in_front, None) && !cfg!(target_os = "linux") {
+-            let _ = window.set_ignore_cursor_events(in_front);
++        let Some(ignore) = other_window_ignores(&label, screenshot, locked) else { continue };
++        if !platform::window::click_through_except(&window, ignore, None) && !cfg!(target_os = "linux") {
++            let _ = window.set_ignore_cursor_events(ignore);
+         }
+     }
++    crate::plugins::widgets::reapply_locks(app);
++}
++
++/// Whether the click-through lock can work here. On Linux it is an input
++/// region (`platform::window::click_through_except`), which needs no pointer
++/// position and so works on native Wayland too; elsewhere the pointer watch
++/// needs the pointer's position outside the window (see `OverlayLock`).
++fn lock_supported() -> bool {
++    cfg!(target_os = "linux") || platform::window::cursor_position().is_some()
+ }
+ 
+ fn sync_click_through(app: &tauri::AppHandle, lock: &OverlayLock, over_button: bool) {
+@@ -390,7 +434,12 @@ fn apply_overlay_lock(app: &tauri::AppHandle, locked: bool) {
+     let lock = state.overlay_lock.clone();
+     lock.locked.store(locked, Ordering::SeqCst);
+     sync_click_through(app, &lock, false);
+-    tracing::info!("Overlay {}", if locked { "locked (click-through)" } else { "unlocked" });
++    sync_other_windows(app);
++    tracing::info!(
++        "Overlay {}{}",
++        if locked { "locked (click-through)" } else { "unlocked" },
++        if all_windows_locked() { ", with every meter window" } else { "" }
++    );
+     // No pointer watch where the window keeps the button by its input region.
+     if cfg!(target_os = "linux") {
+         return;
+@@ -984,7 +1033,7 @@ pub(crate) fn toggle_overlay_lock(app: &tauri::AppHandle) {
+     let locked = app
+         .try_state::<AppState>()
+         .is_some_and(|s| s.overlay_lock.locked.load(std::sync::atomic::Ordering::SeqCst));
+-    if platform::window::cursor_position().is_none() && !locked {
++    if !lock_supported() && !locked {
+         return; // the lock is not offered here
+     }
+     apply_overlay_lock(app, !locked);
+@@ -1056,6 +1105,9 @@ fn update_settings(
+         if HOTKEY_KEYS.contains(&key.as_str()) {
+             restart_global_hotkeys(&app);
+         }
++        if key == LOCK_ALL_WINDOWS_KEY {
++            sync_other_windows(&app);
++        }
+         let _ = app.emit("setting-changed", serde_json::json!({ "key": key, "value": value }));
+         #[cfg(feature = "online")]
+         if key.starts_with(crate::stream_overlay::ENABLED_KEY) {
+@@ -1312,11 +1364,10 @@ fn suspend_capture(state: tauri::State<'_, AppState>, suspended: bool) {
+     tracing::info!("Capture {}", if suspended { "suspended" } else { "resumed" });
+ }
+ 
+-/// Whether the click-through lock can work here (it needs the pointer's
+-/// position outside the window; see `OverlayLock`).
++/// Whether the click-through lock can work here (see `lock_supported`).
+ #[tauri::command]
+ fn overlay_lock_supported() -> bool {
+-    platform::window::cursor_position().is_some()
++    lock_supported()
+ }
+ 
+ /// Where the mouse pointer is from the calling window's top-left, in screen
+@@ -2424,6 +2475,8 @@ fn tool_window_ready(app: tauri::AppHandle, label: String) -> bool {
+     let Some(window) = app.get_webview_window(&label) else { return false };
+     let _ = window.show();
+     let _ = window.set_focus();
++    // Opened while every meter window is locked: locked too.
++    sync_other_windows(&app);
+     true
+ }
+ 
+@@ -2471,6 +2524,8 @@ fn announce_details_placement(app: &tauri::AppHandle, monitor_index: usize) {
+ fn details_window_ready(app: tauri::AppHandle, window: tauri::Window) {
+     let _ = window.show();
+     tracing::info!("{} window revealed (frontend ready)", window.label());
++    // Opened while every meter window is locked: locked too.
++    sync_other_windows(&app);
+     // Only the monitor-pinned singleton has a placement to confirm; a fight
+     // window is placed by cascade and the History window by its own geometry.
+     if window.label() == "details" {
+@@ -3990,6 +4045,31 @@ mod tests {
+         assert!(!click_through(false, false, false));
+     }
+ 
++    /// "Lock all meter windows" locks Details, History and plugin windows
++    /// with the overlay, never Settings (where the lock is turned off); a
++    /// screenshot tool in front still lets clicks through all of them. The
++    /// overlay and plugins' icons have locks of their own.
++    #[test]
++    fn locking_every_window_leaves_settings_clickable() {
++        for label in ["details", "history", "details-fight_1", "plugin-event-timers"] {
++            assert_eq!(other_window_ignores(label, false, true), Some(true), "{label}");
++            assert_eq!(other_window_ignores(label, false, false), Some(false), "{label}");
++            assert_eq!(other_window_ignores(label, true, false), Some(true), "{label}");
++        }
++        assert_eq!(other_window_ignores("settings", false, true), Some(false));
++        assert_eq!(other_window_ignores("settings", true, false), Some(true));
++        assert_eq!(other_window_ignores("main", false, true), None);
++        assert_eq!(other_window_ignores("pw_ping_widget", false, true), None);
++    }
++
++    /// On Linux the lock is an input region, which needs no pointer position:
++    /// it is offered on native Wayland too, where there is none.
++    #[cfg(target_os = "linux")]
++    #[test]
++    fn the_lock_is_offered_on_linux_without_a_pointer_position() {
++        assert!(lock_supported());
++    }
++
+     #[cfg(feature = "online")]
+     #[test]
+     fn a_panicking_upload_still_frees_its_fight() {
+diff --git a/src-tauri/src/platform/linux/window.rs b/src-tauri/src/platform/linux/window.rs
+index f3ccddd..16b074c 100644
+--- a/src-tauri/src/platform/linux/window.rs
++++ b/src-tauri/src/platform/linux/window.rs
+@@ -160,22 +160,52 @@ fn query_pointer() -> Option<(i32, i32, u32)> {
+ /// Under XWayland the pointer can be read only while it is over an X11
+ /// window, so the pointer watch the lock uses elsewhere lost it over the
+ /// desktop or a native Wayland window and the button could not be clicked.
+-/// An input region needs no pointer. Returns whether it was applied.
++/// An input region needs no pointer, so this works on native Wayland too.
++/// Returns whether it was applied.
++///
++/// The region is the window widget's (as tao's own call sets it), not its
++/// GDK window's: GTK sets the GDK window's input shape again from the
++/// widget's (cut to its client-side decoration) each time that decoration
++/// changes, on a resize or when the window is shown again, and on Wayland
++/// that put back the whole window, so a locked meter took the mouse again
++/// as soon as it grew a row. And Wayland gets a new input region only with
++/// the window's next frame, so one is drawn at once: an idle window stayed
++/// clickable until something on it changed.
+ ///
+ /// A window `hide_in_place` hid never takes the mouse, whatever asks: it is
+ /// invisible but still there, and took every click over it once a screenshot
+ /// tool left the front (`screenshot_tool` gives every window the mouse back).
++/// What it is told meanwhile is kept for `reveal_in_place`.
+ pub fn click_through_except(window: &tauri::WebviewWindow, ignore: bool, keep: Option<(f64, f64, f64, f64, f64)>) -> bool {
+-    use gtk::{cairo, prelude::*};
+-    let (ignore, keep) = if is_hidden_in_place(window) { (true, None) } else { (ignore, keep) };
+     let window = window.clone();
+     super::dialog::on_gtk_thread(move || {
+         let gtk_window = window.gtk_window().ok()?;
+-        if !ignore {
+-            gtk_window.input_shape_combine_region(None);
+-            return Some(());
+-        }
+-        let surface = gtk_window.window()?;
++        let label = window.label().to_string();
++        wanted_regions().lock().unwrap_or_else(|p| p.into_inner()).insert(label.clone(), (ignore, keep));
++        // Hidden in place it ignores the mouse whatever it is told (an
++        // invisible window must not take the game's clicks); revealed, it
++        // gets what it was told meanwhile (`reveal_in_place`).
++        let hidden = hidden_in_place().lock().unwrap_or_else(|p| p.into_inner()).contains(&label);
++        let (ignore, keep) = if hidden { (true, None) } else { (ignore, keep) };
++        apply_input_region(&gtk_window, ignore, keep);
++        Some(())
++    })
++    .flatten()
++    .is_some()
++}
++
++type Keep = Option<(f64, f64, f64, f64, f64)>;
++
++/// What each window was last told by `click_through_except`, by label.
++fn wanted_regions() -> &'static std::sync::Mutex<std::collections::HashMap<String, (bool, Keep)>> {
++    static WANTED: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, (bool, Keep)>>> =
++        std::sync::OnceLock::new();
++    WANTED.get_or_init(Default::default)
++}
++
++fn apply_input_region(gtk_window: &gtk::ApplicationWindow, ignore: bool, keep: Keep) {
++    use gtk::{cairo, prelude::*};
++    if ignore {
+         // CSS pixels to GDK's: the page's scale over GDK's own.
+         let rect = keep.and_then(|(x, y, w, h, page_scale)| {
+             let k = page_scale / f64::from(gtk_window.scale_factor().max(1));
+@@ -184,11 +214,11 @@ pub fn click_through_except(window: &tauri::WebviewWindow, ignore: bool, keep: O
+             (right > left && bottom > top).then(|| cairo::RectangleInt::new(left, top, right - left, bottom - top))
+         });
+         let region = cairo::Region::create_rectangle(&rect.unwrap_or_else(|| cairo::RectangleInt::new(0, 0, 1, 1)));
+-        surface.input_shape_combine_region(&region, 0, 0);
+-        Some(())
+-    })
+-    .flatten()
+-    .is_some()
++        gtk_window.input_shape_combine_region(Some(&region));
++    } else {
++        gtk_window.input_shape_combine_region(None);
++    }
++    gtk_window.queue_draw();
+ }
+ 
+ pub fn start_drag(window: &tauri::WebviewWindow) {
+@@ -267,7 +297,14 @@ pub fn hide_in_place(window: &tauri::WebviewWindow) {
+         return;
+     }
+     hidden_in_place().lock().unwrap_or_else(|p| p.into_inner()).insert(window.label().to_string());
+-    click_through_except(window, true, None);
++    // Not `click_through_except`, which would keep (true, None) as what the
++    // window wants and leave it locked when it is revealed.
++    let target = window.clone();
++    super::dialog::on_gtk_thread(move || {
++        if let Ok(gtk_window) = target.gtk_window() {
++            apply_input_region(&gtk_window, true, None);
++        }
++    });
+     let _ = window.set_skip_taskbar(true);
+ }
+ 
+@@ -278,7 +315,17 @@ pub fn reveal_in_place(window: &tauri::WebviewWindow) -> bool {
+     if !was {
+         return false;
+     }
+-    click_through_except(window, false, None);
++    // The click-through it was last told (a locked Details or History stays
++    // locked when the game comes back to the front), else the mouse.
++    let wanted = wanted_regions().lock().unwrap_or_else(|p| p.into_inner()).get(window.label()).copied();
++    match wanted {
++        Some((ignore, keep)) => {
++            let _ = click_through_except(window, ignore, keep);
++        }
++        None => {
++            let _ = click_through_except(window, false, None);
++        }
++    }
+     let _ = window.set_skip_taskbar(false);
+     let target = window.clone();
+     super::dialog::on_gtk_thread(move || {
+diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
+index f6f5fe8..e4f8a0a 100644
+--- a/src-tauri/src/plugins/mod.rs
++++ b/src-tauri/src/plugins/mod.rs
+@@ -1702,6 +1702,8 @@ pub fn plugin_hello(app: tauri::AppHandle, window: tauri::WebviewWindow, plugin:
+         if manifest.permissions.iter().any(|p| p == "events:character") { character(&app) } else { None };
+     let reviewed = host.with(&id, |l| l.reviewed).unwrap_or(false);
+     let language = app.try_state::<AppState>().and_then(|s| s.settings.get("dpsMeter.language")).unwrap_or_else(|| "en".into());
++    // Opened while every meter window is locked: locked too.
++    crate::app::sync_other_windows(&app);
+     Ok(serde_json::json!({
+         "manifest": manifest,
+         "replay": replay,
+diff --git a/src-tauri/src/plugins/widgets.rs b/src-tauri/src/plugins/widgets.rs
+index 28cdb54..825ff81 100644
+--- a/src-tauri/src/plugins/widgets.rs
++++ b/src-tauri/src/plugins/widgets.rs
+@@ -103,8 +103,9 @@ fn areas() -> &'static Mutex<HashMap<String, Area>> {
+ /// `platform::window::hide_in_place`), so a widget is locked again once its
+ /// page has loaded (`plugin_widget_hello`) and each time it is shown again.
+ fn apply_lock(window: &tauri::WebviewWindow, locked: bool) {
+-    // A screenshot tool in front: clicks go through, whatever the lock.
+-    let locked = locked || crate::app::screenshot_tool_in_front();
++    // A screenshot tool in front, or every meter window locked with the
++    // overlay: clicks go through, whatever the widget's own lock.
++    let locked = locked || crate::app::screenshot_tool_in_front() || crate::app::all_windows_locked();
+     let area = areas().lock().unwrap_or_else(|p| p.into_inner()).get(window.label()).copied();
+     let applied = match (locked, area) {
+         (true, _) => crate::platform::window::click_through_except(window, true, None),
+diff --git a/src/data/i18n/ui/de.json b/src/data/i18n/ui/de.json
+index 5ce41e3..d16c50b 100644
+--- a/src/data/i18n/ui/de.json
++++ b/src/data/i18n/ui/de.json
+@@ -290,6 +290,7 @@
+     "hideWhenSolo": "Nur in einer Gruppe anzeigen",
+     "showSuspendBtn": "Taste „Erfassung pausieren“ anzeigen",
+     "showLockBtn": "Taste für Durchklick-Sperre anzeigen",
++    "lockAllWindows": "Alle Meter-Fenster sperren",
+     "playerLimit": {
+       "label": "Max. angezeigte Spieler"
+     },
+@@ -537,6 +538,7 @@
+       "roundDps": "13.412 wird als 13k angezeigt.",
+       "showSuspendBtn": "Eine Taste am Meter, die das Lesen des Spielverkehrs anhält, bis du sie erneut drückst.",
+       "showLockBtn": "Eine Taste, mit der das Meter die Maus ignoriert, sodass Klicks im Spiel ankommen.",
++      "lockAllWindows": "Solange das Meter gesperrt ist, lassen auch Details, Kampfverlauf und Plugin-Fenster Klicks durch. Entsperren mit der Sperr-Taste oder ihrem Tastenkürzel.",
+       "windowOpacity": "Wie durchsichtig der Hintergrund des Meters ist. Balken und Text bleiben, wie sie sind.",
+       "titleOpacity": "Wie durchsichtig die Titelleiste des Meters ist, getrennt vom Hintergrund darunter. Bis du ihn bewegst, folgt er dem Hintergrund.",
+       "meterOpacity": "Wie deckend die farbigen Schadensbalken sind.",
+diff --git a/src/data/i18n/ui/en.json b/src/data/i18n/ui/en.json
+index 0ee53e9..830a134 100644
+--- a/src/data/i18n/ui/en.json
++++ b/src/data/i18n/ui/en.json
+@@ -300,6 +300,7 @@
+     "hideWhenSolo": "Show only in a party",
+     "showSuspendBtn": "Show pause capture button",
+     "showLockBtn": "Show click-through lock button",
++    "lockAllWindows": "Lock all meter windows",
+     "playerLimit": {
+       "label": "Max players shown"
+     },
+@@ -549,6 +550,7 @@
+       "roundDps": "13,412 shows as 13k.",
+       "showSuspendBtn": "A button on the meter that stops reading game traffic until you press it again.",
+       "showLockBtn": "A button that makes the meter ignore the mouse, so clicks go through to the game.",
++      "lockAllWindows": "While the meter is locked, Details, Battle History and plugin windows let clicks through too. Unlock with the lock button or its keybind.",
+       "windowOpacity": "How see-through the meter's background is. Bars and text stay as they are.",
+       "titleOpacity": "How see-through the meter's title bar is, apart from the background under it. Until you move it, it follows the background.",
+       "meterOpacity": "How solid the coloured damage bars are.",
+diff --git a/src/data/i18n/ui/es.json b/src/data/i18n/ui/es.json
+index 1f24401..a825465 100644
+--- a/src/data/i18n/ui/es.json
++++ b/src/data/i18n/ui/es.json
+@@ -290,6 +290,7 @@
+     "hideWhenSolo": "Mostrar solo en grupo",
+     "showSuspendBtn": "Mostrar botón de pausar captura",
+     "showLockBtn": "Mostrar botón de bloqueo (clic a través)",
++    "lockAllWindows": "Bloquear todas las ventanas del medidor",
+     "playerLimit": {
+       "label": "Máx. jugadores mostrados"
+     },
+@@ -537,6 +538,7 @@
+       "roundDps": "13.412 se muestra como 13k.",
+       "showSuspendBtn": "Un botón en el medidor que deja de leer el tráfico del juego hasta que lo pulses de nuevo.",
+       "showLockBtn": "Un botón que hace que el medidor ignore el ratón, para que los clics lleguen al juego.",
++      "lockAllWindows": "Mientras el medidor está bloqueado, Detalles, el historial de combates y las ventanas de plugins también dejan pasar los clics. Desbloquea con el botón de bloqueo o su atajo.",
+       "windowOpacity": "Cuán transparente es el fondo del medidor. Las barras y el texto no cambian.",
+       "titleOpacity": "Qué tan transparente es la barra de título del medidor, aparte del fondo de debajo. Hasta que lo muevas, sigue al fondo.",
+       "meterOpacity": "Cuán sólidas son las barras de daño de color.",
+diff --git a/src/data/i18n/ui/fr.json b/src/data/i18n/ui/fr.json
+index 07e1308..aa07c57 100644
+--- a/src/data/i18n/ui/fr.json
++++ b/src/data/i18n/ui/fr.json
+@@ -290,6 +290,7 @@
+     "hideWhenSolo": "Afficher seulement en groupe",
+     "showSuspendBtn": "Afficher le bouton de pause de capture",
+     "showLockBtn": "Afficher le bouton de verrouillage (clic au travers)",
++    "lockAllWindows": "Verrouiller toutes les fenêtres du compteur",
+     "playerLimit": {
+       "label": "Joueurs affichés max."
+     },
+@@ -537,6 +538,7 @@
+       "roundDps": "13 412 s'affiche 13k.",
+       "showSuspendBtn": "Un bouton sur le compteur qui arrête la lecture du trafic du jeu jusqu'à ce que tu appuies à nouveau.",
+       "showLockBtn": "Un bouton qui fait ignorer la souris au compteur, pour que les clics passent au jeu.",
++      "lockAllWindows": "Tant que le compteur est verrouillé, Détails, l'historique des combats et les fenêtres des plugins laissent aussi passer les clics. Déverrouillez avec le bouton de verrouillage ou son raccourci.",
+       "windowOpacity": "La transparence du fond du compteur. Les barres et le texte ne changent pas.",
+       "titleOpacity": "La transparence de la barre de titre du meter, à part du fond en dessous. Tant que vous ne le bougez pas, il suit le fond.",
+       "meterOpacity": "L'opacité des barres de dégâts colorées.",
+diff --git a/src/data/i18n/ui/ja.json b/src/data/i18n/ui/ja.json
+index 6af7779..cf53c9d 100644
+--- a/src/data/i18n/ui/ja.json
++++ b/src/data/i18n/ui/ja.json
+@@ -290,6 +290,7 @@
+     "hideWhenSolo": "パーティー中のみ表示",
+     "showSuspendBtn": "キャプチャ一時停止ボタンを表示",
+     "showLockBtn": "クリック透過ロックボタンを表示",
++    "lockAllWindows": "メーターの全ウィンドウをロック",
+     "playerLimit": {
+       "label": "表示する最大プレイヤー数"
+     },
+@@ -537,6 +538,7 @@
+       "roundDps": "13,412 は 13k と表示されます。",
+       "showSuspendBtn": "押すとゲーム通信の読み取りを止め、もう一度押すと再開するボタンをメーターに表示します。",
+       "showLockBtn": "メーターがマウスを無視し、クリックがゲームに届くようにするボタンです。",
++      "lockAllWindows": "メーターのロック中は、詳細・戦闘履歴・プラグインのウィンドウもクリックを透過します。ロックボタンかそのショートカットで解除します。",
+       "windowOpacity": "メーター背景の透け具合です。バーと文字はそのままです。",
+       "titleOpacity": "メーターのタイトルバーの透け具合を、下の背景とは別に設定します。動かすまでは背景の不透明度に合わせます。",
+       "meterOpacity": "色付きのダメージバーの不透明度です。",
+diff --git a/src/data/i18n/ui/ko.json b/src/data/i18n/ui/ko.json
+index 43d5524..a6941ef 100644
+--- a/src/data/i18n/ui/ko.json
++++ b/src/data/i18n/ui/ko.json
+@@ -295,6 +295,7 @@
+     "hideWhenSolo": "파티 중에만 표시",
+     "showSuspendBtn": "수집 일시정지 버튼 표시",
+     "showLockBtn": "클릭 통과 잠금 버튼 표시",
++    "lockAllWindows": "미터의 모든 창 잠금",
+     "playerLimit": {
+       "label": "최대 표시 인원"
+     },
+@@ -544,6 +545,7 @@
+       "roundDps": "13,412는 13k로 표시됩니다.",
+       "showSuspendBtn": "다시 누를 때까지 게임 트래픽 읽기를 멈추는 버튼을 미터에 표시합니다.",
+       "showLockBtn": "미터가 마우스를 무시하게 하여 클릭이 게임으로 전달되도록 하는 버튼입니다.",
++      "lockAllWindows": "미터가 잠겨 있는 동안 상세 정보, 전투 기록, 플러그인 창도 클릭을 통과시킵니다. 잠금 버튼이나 단축키로 해제하세요.",
+       "windowOpacity": "미터 배경의 투명도입니다. 막대와 글자는 그대로입니다.",
+       "titleOpacity": "미터 제목 표시줄의 투명도를 아래 배경과 따로 정합니다. 움직이기 전까지는 배경 불투명도를 따릅니다.",
+       "meterOpacity": "색이 있는 피해량 막대의 불투명도입니다.",
+diff --git a/src/data/i18n/ui/pt.json b/src/data/i18n/ui/pt.json
+index 4eddc60..b798c27 100644
+--- a/src/data/i18n/ui/pt.json
++++ b/src/data/i18n/ui/pt.json
+@@ -290,6 +290,7 @@
+     "hideWhenSolo": "Mostrar só em grupo",
+     "showSuspendBtn": "Mostrar botão de pausar captura",
+     "showLockBtn": "Mostrar botão de bloqueio (clique através)",
++    "lockAllWindows": "Bloquear todas as janelas do medidor",
+     "playerLimit": {
+       "label": "Máx. de jogadores exibidos"
+     },
+@@ -537,6 +538,7 @@
+       "roundDps": "13.412 aparece como 13k.",
+       "showSuspendBtn": "Um botão no medidor que para de ler o tráfego do jogo até você apertar de novo.",
+       "showLockBtn": "Um botão que faz o medidor ignorar o mouse, para os cliques irem ao jogo.",
++      "lockAllWindows": "Enquanto o medidor está bloqueado, Detalhes, o histórico de batalhas e as janelas de plugins também deixam os cliques passar. Desbloqueie com o botão de bloqueio ou o seu atalho.",
+       "windowOpacity": "Quão transparente é o fundo do medidor. Barras e texto não mudam.",
+       "titleOpacity": "O quanto a barra de título do medidor é transparente, separada do fundo abaixo. Até você mexer, ela segue o fundo.",
+       "meterOpacity": "Quão sólidas são as barras coloridas de dano.",
+diff --git a/src/data/i18n/ui/ru.json b/src/data/i18n/ui/ru.json
+index 9266177..84b8c38 100644
+--- a/src/data/i18n/ui/ru.json
++++ b/src/data/i18n/ui/ru.json
+@@ -295,6 +295,7 @@
+     "hideWhenSolo": "Показывать только в группе",
+     "showSuspendBtn": "Показывать кнопку паузы захвата",
+     "showLockBtn": "Показывать кнопку блокировки (сквозной клик)",
++    "lockAllWindows": "Блокировать все окна метра",
+     "playerLimit": {
+       "label": "Макс. игроков на экране"
+     },
+@@ -542,6 +543,7 @@
+       "roundDps": "13 412 показывается как 13k.",
+       "showSuspendBtn": "Кнопка на счётчике, которая останавливает чтение трафика игры до повторного нажатия.",
+       "showLockBtn": "Кнопка, после которой счётчик игнорирует мышь и клики проходят в игру.",
++      "lockAllWindows": "Пока метр заблокирован, окна «Подробности», истории боёв и плагинов тоже пропускают клики. Разблокировать — кнопкой блокировки или её сочетанием клавиш.",
+       "windowOpacity": "Насколько прозрачен фон счётчика. Полосы и текст не меняются.",
+       "titleOpacity": "Насколько прозрачна строка заголовка метра, отдельно от фона под ней. Пока вы его не сдвинете, он следует за фоном.",
+       "meterOpacity": "Насколько плотные цветные полосы урона.",
+diff --git a/src/data/i18n/ui/zh-Hans.json b/src/data/i18n/ui/zh-Hans.json
+index 52f8579..8285337 100644
+--- a/src/data/i18n/ui/zh-Hans.json
++++ b/src/data/i18n/ui/zh-Hans.json
+@@ -295,6 +295,7 @@
+     "hideWhenSolo": "仅在队伍中显示",
+     "showSuspendBtn": "显示暂停捕获按钮",
+     "showLockBtn": "显示点击穿透锁定按钮",
++    "lockAllWindows": "锁定所有统计窗口",
+     "playerLimit": {
+       "label": "最大显示人数"
+     },
+@@ -544,6 +545,7 @@
+       "roundDps": "13,412 显示为 13k。",
+       "showSuspendBtn": "在计量器上显示一个按钮，按下后停止读取游戏流量，再按一次恢复。",
+       "showLockBtn": "让计量器忽略鼠标、点击直接作用于游戏的按钮。",
++      "lockAllWindows": "统计锁定期间，详情、战斗记录和插件窗口也会让点击穿透。用锁定按钮或其快捷键解锁。",
+       "windowOpacity": "计量器背景的透明程度。条形和文字不受影响。",
+       "titleOpacity": "统计窗口标题栏的透明程度，与下方背景分开设置。移动它之前，它跟随背景不透明度。",
+       "meterOpacity": "彩色伤害条的不透明程度。",
+diff --git a/src/data/i18n/ui/zh-Hant.json b/src/data/i18n/ui/zh-Hant.json
+index 3f436b9..7d692a7 100644
+--- a/src/data/i18n/ui/zh-Hant.json
++++ b/src/data/i18n/ui/zh-Hant.json
+@@ -295,6 +295,7 @@
+     "hideWhenSolo": "僅在隊伍中顯示",
+     "showSuspendBtn": "顯示暫停擷取按鈕",
+     "showLockBtn": "顯示點擊穿透鎖定按鈕",
++    "lockAllWindows": "鎖定所有統計視窗",
+     "playerLimit": {
+       "label": "最大顯示人數"
+     },
+@@ -544,6 +545,7 @@
+       "roundDps": "13,412 顯示為 13k。",
+       "showSuspendBtn": "在計量器上顯示一個按鈕，按下後停止讀取遊戲流量，再按一次恢復。",
+       "showLockBtn": "讓計量器忽略滑鼠、點擊直接作用於遊戲的按鈕。",
++      "lockAllWindows": "統計鎖定期間，詳情、戰鬥紀錄與外掛視窗也會讓點擊穿透。以鎖定按鈕或其快捷鍵解鎖。",
+       "windowOpacity": "計量器背景的透明程度。條形和文字不受影響。",
+       "titleOpacity": "統計視窗標題列的透明程度，與下方背景分開設定。移動它之前，它跟隨背景不透明度。",
+       "meterOpacity": "彩色傷害條的不透明程度。",
+-- 
+2.43.0
+

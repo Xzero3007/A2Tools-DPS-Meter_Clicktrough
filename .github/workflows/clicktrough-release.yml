@@ -1,0 +1,163 @@
+name: Clicktrough release
+
+# Baut jede neue Version des Original-Meters (taengu/A2Tools-DPS-Meter) mit den
+# Anpassungen aus clicktrough/patches neu und veröffentlicht das Arch-Paket
+# als Release dieses Repos. Das Meter aus diesem Repo holt seine Updates von
+# hier (releases/latest/download/latest-v2.json, siehe Patch 0003).
+#
+# Passt ein Patch nicht mehr auf eine neue Version, wird nichts veröffentlicht:
+# Das installierte Meter bleibt, wie es ist, und es öffnet sich ein Issue.
+on:
+  schedule:
+    # Alle zwei Stunden nachsehen, ob das Original eine neue Version hat.
+    - cron: "23 */2 * * *"
+  push:
+    branches: [main]
+    paths:
+      - "clicktrough/patches/**"
+      - ".github/workflows/clicktrough-release.yml"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Version des Originals, z. B. v2.0.76 (leer = neueste)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: clicktrough-release
+  cancel-in-progress: false
+
+env:
+  UPSTREAM: https://github.com/taengu/A2Tools-DPS-Meter.git
+
+jobs:
+  # Leicht und schnell: gibt es etwas zu bauen?
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      build: ${{ steps.plan.outputs.build }}
+      tag: ${{ steps.plan.outputs.tag }}
+      release: ${{ steps.plan.outputs.release }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WANTED: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          tag="${WANTED:-}"
+          if [ -z "$tag" ]; then
+            # Nur echte Versionen (v2.0.76), keine Test-Tags.
+            tag=$(git ls-remote --tags --refs "$UPSTREAM" 'v*' | sed 's#.*refs/tags/##' \
+              | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n1)
+          fi
+          # Ein Release je Version des Originals und Stand der Patches.
+          hash=$(cat clicktrough/patches/*.patch | sha256sum | cut -c1-8)
+          release="${tag}-ct-${hash}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+          if gh release view "$release" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Schon gebaut: $release"
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Zu bauen: $release"
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: plan
+    if: needs.plan.outputs.build == 'true'
+    runs-on: ubuntu-24.04
+    container: archlinux:base-devel
+    timeout-minutes: 90
+    env:
+      TAG: ${{ needs.plan.outputs.tag }}
+      RELEASE: ${{ needs.plan.outputs.release }}
+      REVISION: ${{ github.run_number }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Werkzeuge
+        run: |
+          pacman -Syu --noconfirm --needed git github-cli rust nodejs npm pkgconf \
+            webkit2gtk-4.1 gtk3 libpcap libcap hicolor-icon-theme gst-plugins-base gst-plugins-good
+          git config --global --add safe.directory '*'
+      - uses: actions/checkout@v7
+        with:
+          path: fork
+      - name: Original holen und Patches anwenden
+        run: |
+          set -euo pipefail
+          # Volle Historie: das PKGBUILD zählt die Commits für die Paketversion.
+          git clone --filter=blob:none "$UPSTREAM" src
+          cd src
+          git checkout -q --detach "$TAG"
+          git -c user.name="Clicktrough" -c user.email="clicktrough@users.noreply.github.com" \
+            am ../fork/clicktrough/patches/*.patch
+          # Welcher Build dieses Repos das ist: das Meter erkennt daran ein
+          # neueres Paket derselben Version.
+          sed -i "s/const CT_REVISION = 0;/const CT_REVISION = ${REVISION};/" public/src/js/checkRelease.js
+          grep -q "const CT_REVISION = ${REVISION};" public/src/js/checkRelease.js
+          sed -i "s/^pkgrel=.*/pkgrel=${REVISION}/" packaging/arch/PKGBUILD
+      - name: Arch-Paket bauen
+        run: |
+          set -euo pipefail
+          useradd -m builder
+          chown -R builder src
+          su - builder -c "cd '$GITHUB_WORKSPACE/src/packaging/arch' && makepkg --noconfirm --nodeps"
+          ls -la src/packaging/arch/*.pkg.tar.zst
+      - name: Tests
+        run: su - builder -c "cd '$GITHUB_WORKSPACE/src' && node --test tests/*.test.mjs"
+      - name: Veröffentlichen
+        run: |
+          set -euo pipefail
+          pkg=$(ls src/packaging/arch/*.pkg.tar.zst | head -n1)
+          name=$(basename "$pkg")
+          sha=$(sha256sum "$pkg" | cut -d' ' -f1)
+          version="${TAG#v}"
+          url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE}/${name}"
+          printf '{"version":"%s","revision":%s,"archUrl":"%s","archSha256":"%s","msiUrl":"","debUrl":"","rpmUrl":""}\n' \
+            "$version" "$REVISION" "$url" "$sha" > latest-v2.json
+          cat latest-v2.json
+          previous=$(git -C src tag -l 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | grep -B1 -x "$TAG" | head -n1)
+          {
+            echo "A2Tools DPS Meter **${version}** vom Original-Autor, neu gebaut mit den Anpassungen dieses Repos (Build ${REVISION})."
+            echo
+            echo "**Anpassungen:**"
+            git -C src log --reverse --format='- %s' "${TAG}..HEAD"
+            echo
+            echo "**Erstinstallation:** \`${name}\` herunterladen, dann \`sudo pacman -U ${name}\`."
+            echo "Danach kommen Updates über den grünen Knopf im Titel des Meters."
+            if [ -n "$previous" ] && [ "$previous" != "$TAG" ]; then
+              echo
+              echo "**Änderungen des Originals seit ${previous}:**"
+              git -C src log --no-merges --format='- %s' "${previous}..${TAG}" | grep -v -i -E 'manifest|^- [0-9]+\.[0-9]+\.[0-9]+$' || true
+            fi
+          } > notes.md
+          gh release create "$RELEASE" "$pkg" latest-v2.json -R "$GITHUB_REPOSITORY" \
+            --title "A2Tools ${version} · Clicktrough ${REVISION}" --notes-file notes.md --latest --target "$GITHUB_SHA"
+      - name: Offene Fehler-Issues schließen
+        if: success()
+        run: |
+          for n in $(gh issue list -R "$GITHUB_REPOSITORY" --state open --label clicktrough-build --json number --jq '.[].number' 2>/dev/null); do
+            gh issue close "$n" -R "$GITHUB_REPOSITORY" --comment "Gebaut und veröffentlicht: ${RELEASE}" || true
+          done
+      - name: Fehler melden
+        if: failure()
+        run: |
+          title="Build für ${TAG} fehlgeschlagen"
+          body="Der Build ${RELEASE} ist fehlgeschlagen, es wurde nichts veröffentlicht. Das installierte Meter bleibt, wie es ist.
+
+          Wahrscheinlich passt ein Patch nicht mehr auf die neue Version des Originals.
+          Lauf: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          gh label create clicktrough-build -R "$GITHUB_REPOSITORY" --color B60205 --description "Automatischer Build" 2>/dev/null || true
+          existing=$(gh issue list -R "$GITHUB_REPOSITORY" --state open --label clicktrough-build --search "in:title ${TAG}" --json number --jq '.[0].number' 2>/dev/null || true)
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" -R "$GITHUB_REPOSITORY" --body "$body" || true
+          else
+            gh issue create -R "$GITHUB_REPOSITORY" --title "$title" --label clicktrough-build --body "$body" || true
+          fi

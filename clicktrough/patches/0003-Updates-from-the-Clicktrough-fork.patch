@@ -1,0 +1,81 @@
+From 8ac4d5052f3062d1c781abcd90a0c75f23f0b816 Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Fri, 23 Oct 2026 11:35:59 +0000
+Subject: [PATCH 3/3] Updates from the Clicktrough fork
+
+This build's update check reads the fork's manifest, which its release
+workflow writes for each release of the meter rebuilt with the fork's
+patches: the official package would replace them. A newer build of the
+same version (its revision) is an update too, and the update window and
+Settings name it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01TUNxq4V2zBL7bJg3yPJ3oC
+---
+ public/src/js/checkRelease.js | 22 ++++++++++++++++------
+ 1 file changed, 16 insertions(+), 6 deletions(-)
+
+diff --git a/public/src/js/checkRelease.js b/public/src/js/checkRelease.js
+index 7872b44..96d402d 100644
+--- a/public/src/js/checkRelease.js
++++ b/public/src/js/checkRelease.js
+@@ -1,5 +1,11 @@
+ (() => {
+-  const CDN_MANIFEST = "https://a2tools.app/latest-v2.json";
++  // This build updates from the Clicktrough fork, which rebuilds each release
++  // of the meter with its patches (the lock for every window, windows that
++  // keep their place): the official package would replace them.
++  const CDN_MANIFEST = "https://github.com/Xzero3007/A2Tools-DPS-Meter_Clicktrough/releases/latest/download/latest-v2.json";
++  // The fork's build of this version, so a newer build of the same version is
++  // an update too. Its release workflow sets it; 0 for a build of its own.
++  const CT_REVISION = 0;
+   const START_DELAY = 800,
+     RETRY = 500,
+     LIMIT = 5;
+@@ -51,6 +57,7 @@
+       const v = m.version?.startsWith("v") ? m.version : "v" + m.version;
+       // One package per platform; the backend picks the one it can install.
+       result = { latest: v, msi: m.msiUrl || "", arch: m.archUrl || "", deb: m.debUrl || "", rpm: m.rpmUrl || "" };
++      result.revision = Number(m.revision) || 0;
+       // SHA-256 of each package: the backend installs a download only when it matches.
+       result.hashes = { msi: m.msiSha256 || "", arch: m.archSha256 || "", deb: m.debSha256 || "", rpm: m.rpmSha256 || "" };
+     } catch (e) {
+@@ -65,14 +72,17 @@
+       latestInfo.value > currentInfo.value ||
+       (latestInfo.value === currentInfo.value &&
+         currentInfo.prerelease &&
+-        !latestInfo.prerelease);
++        !latestInfo.prerelease) ||
++      (latestInfo.value === currentInfo.value && result.revision > CT_REVISION);
+ 
+     if (!hasUpdate) return { state: "current", latest };
++    // Shown in the update window and Settings: which build of the fork.
++    const shown = result.revision ? `${latest} (Clicktrough ${result.revision})` : latest;
+ 
+     console.log("[A2Tools] Update available:", current, "->", latest);
+     const args = {
+       current,
+-      latest,
++      latest: shown,
+       msiUrl: result.msi,
+       archUrl: result.arch,
+       debUrl: result.deb,
+@@ -84,12 +94,12 @@
+     };
+     if (!ask) {
+       const offered = await window.__TAURI__.core.invoke("show_update_window", { ...args, ask: false });
+-      if (!offered) return { state: "update", latest };
++      if (!offered) return { state: "update", latest: shown };
+       pending = args;
+-      return { state: "offer", latest };
++      return { state: "offer", latest: shown };
+     }
+     const accepted = await window.__TAURI__.core.invoke("show_update_window", args);
+-    return { state: accepted ? "installing" : "update", latest };
++    return { state: accepted ? "installing" : "update", latest: shown };
+   };
+ 
+   let once = false;
+-- 
+2.43.0
+

@@ -1,0 +1,273 @@
+From 565af2697b620416e3b7220ecd3bd5fb548e7f57 Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Thu, 22 Oct 2026 13:04:42 +0000
+Subject: [PATCH 2/3] KDE: the meter's windows keep their top-left corner as
+ they resize
+
+KWin 6 keeps the centre of a Wayland window that resizes itself
+(XdgToplevelWindow::preferredSpontaneousGravity is Center), so the
+overlay, which sizes itself to its rows, crept up and down the screen as
+rows came and went. The focus script held a window at its place only
+for the first 4 s after placing it. It now puts each of the meter's
+windows back at its top-left corner after every resize of its own, as on
+Windows and X11, also with no saved place. A move without a resize
+(KWin's, a shortcut, another screen) and the player's drag stay.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01TUNxq4V2zBL7bJg3yPJ3oC
+---
+ src-tauri/src/platform/linux/focus.rs |  65 +++++++----
+ tests/kwin-focus-script.test.mjs      | 150 ++++++++++++++++++++++++++
+ 2 files changed, 192 insertions(+), 23 deletions(-)
+ create mode 100644 tests/kwin-focus-script.test.mjs
+
+diff --git a/src-tauri/src/platform/linux/focus.rs b/src-tauri/src/platform/linux/focus.rs
+index c53e707..d4d26e7 100644
+--- a/src-tauri/src/platform/linux/focus.rs
++++ b/src-tauri/src/platform/linux/focus.rs
+@@ -79,34 +79,48 @@ function onScreen(r) {
+     return r.x + 48 <= area.x + area.width && r.x + r.width >= area.x + 48
+         && r.y >= area.y - 8 && r.y + 32 <= area.y + area.height;
+ }
+-// How long a window is held at its place: the meter sizes its windows to
+-// their content just after they appear, and KWin keeps a resized window's
+-// centre where it was, so the overlay, 300 px tall at first, came down
+-// 120 px once it shrank to its rows (a CachyOS player, 2026-10-19).
++// How long a window is held at its place once put there: the meter sizes
++// its windows to their content just after they appear, and KWin may still
++// move a new window then, so any move but the player's goes back meanwhile.
+ var HOLD_MS = 4000;
+-function place(w) {
++function rect(g) {
++    return { x: Math.round(g.x), y: Math.round(g.y), width: Math.round(g.width), height: Math.round(g.height) };
++}
++// KWin keeps the centre of a window that resizes itself (an xdg_toplevel's
++// spontaneous resize has centre gravity, KWin 6), so the overlay, 300 px tall
++// at first, came down 120 px once it shrank to its rows (a CachyOS player,
++// 2026-10-19), and after that crept up and down the screen as rows came and
++// went: half of each change at its top. Each of the meter's windows keeps its
++// top-left corner instead, as on Windows and X11. A move that is no resize is
++// KWin's or the player's own (a shortcut, another screen) and stays.
++function hold(w, s) {
++    if (s.held || s.user || w.move || w.resize) return;
++    var now = rect(w.frameGeometry);
++    var moved = now.x !== s.keep.x || now.y !== s.keep.y;
++    var resized = now.width !== s.keep.width || now.height !== s.keep.height;
++    if (moved && (resized || Date.now() < s.until)) {
++        s.held = true;
++        w.frameGeometry = { x: s.keep.x, y: s.keep.y, width: now.width, height: now.height };
++        s.held = false;
++        s.keep = { x: s.keep.x, y: s.keep.y, width: now.width, height: now.height };
++        return;
++    }
++    s.keep = now;
++}
++function place(w, s) {
+     callDBus(SERVICE, PATH, IFACE, "Placement", String(w.caption), function (answer) {
+         var p = String(answer).split(",").map(Number);
+         if (p.length !== 4 || p.some(isNaN)) return;
+         var g = w.frameGeometry;
+         // A width or height of 0: the window keeps its own size.
+-        var r = { x: p[0], y: p[1], width: p[2] > 0 ? p[2] : g.width, height: p[3] > 0 ? p[3] : g.height };
+-        if (!onScreen(r)) return;
+-        w.frameGeometry = r;
+-        // Moved by a resize while held: back to its place, at its new size.
++        var r = rect({ x: p[0], y: p[1], width: p[2] > 0 ? p[2] : g.width, height: p[3] > 0 ? p[3] : g.height });
+         // Never against the player's own move or resize.
+-        var until = Date.now() + HOLD_MS;
+-        var held = false;
+-        if (w.interactiveMoveResizeStarted) w.interactiveMoveResizeStarted.connect(function () { until = 0; });
+-        else if (w.clientStartUserMovedResized) w.clientStartUserMovedResized.connect(function () { until = 0; });
+-        w.frameGeometryChanged.connect(function () {
+-            if (held || Date.now() > until || w.move || w.resize) return;
+-            var now = w.frameGeometry;
+-            if (Math.round(now.x) === r.x && Math.round(now.y) === r.y) return;
+-            held = true;
+-            w.frameGeometry = { x: r.x, y: r.y, width: now.width, height: now.height };
+-            held = false;
+-        });
++        if (!onScreen(r) || s.user) return;
++        s.keep = r;
++        s.until = Date.now() + HOLD_MS;
++        s.held = true;
++        w.frameGeometry = r;
++        s.held = false;
+     });
+ }
+ function follow(w) {
+@@ -121,9 +135,14 @@ function follow(w) {
+         fresh.push(w);
+         if (fresh.length > 32) fresh.shift();
+     }
++    // Where the window is to stay (`hold`), from the moment it appears.
++    var s = { keep: rect(w.frameGeometry), until: 0, held: false, user: false };
++    var started = w.interactiveMoveResizeStarted || w.clientStartUserMovedResized;
++    if (started) started.connect(function () { s.user = true; s.until = 0; });
+     var done = w.interactiveMoveResizeFinished || w.clientFinishUserMovedResized;
+-    if (done) done.connect(function () { remember(w); });
+-    place(w);
++    if (done) done.connect(function () { s.user = false; s.keep = rect(w.frameGeometry); remember(w); });
++    w.frameGeometryChanged.connect(function () { hold(w, s); });
++    place(w, s);
+ }
+ // A window of the meter going away (hidden: on KDE the meter unmaps the
+ // windows it hides) leaves its place behind, so it comes back there.
+diff --git a/tests/kwin-focus-script.test.mjs b/tests/kwin-focus-script.test.mjs
+new file mode 100644
+index 0000000..04980fa
+--- /dev/null
++++ b/tests/kwin-focus-script.test.mjs
+@@ -0,0 +1,150 @@
++import assert from "node:assert/strict";
++import { readFileSync } from "node:fs";
++import test from "node:test";
++import vm from "node:vm";
++
++// The KWin script the meter loads on KDE (src-tauri/src/platform/linux/focus.rs),
++// run against a small stand-in for KWin 6: a window that resizes itself keeps
++// its centre there (XdgToplevelWindow::preferredSpontaneousGravity, KWin 6.8).
++const rust = readFileSync(new URL("../src-tauri/src/platform/linux/focus.rs", import.meta.url), "utf8");
++const begin = rust.indexOf('const SCRIPT: &str = r#"') + 'const SCRIPT: &str = r#"'.length;
++const SCRIPT = rust.slice(begin, rust.indexOf('"#;', begin)).replace("__PID__", "42");
++
++const signal = () => {
++  const handlers = [];
++  return { connect: (fn) => handlers.push(fn), emit: (...args) => handlers.forEach((fn) => fn(...args)) };
++};
++
++function kwin({ placement = "" } = {}) {
++  let clock = 1_000_000;
++  const calls = [];
++  const pending = [];
++  const workspace = {
++    windowActivated: signal(),
++    windowAdded: signal(),
++    activeWindow: null,
++    virtualScreenGeometry: { x: 0, y: 0, width: 3840, height: 1080 },
++    windowList: () => [],
++  };
++  const callDBus = (...args) => {
++    const callback = typeof args[args.length - 1] === "function" ? args.pop() : null;
++    calls.push(args.slice(3));
++    // KWin answers a D-Bus call later, from its event loop.
++    if (callback) pending.push(() => callback(args[3] === "Placement" ? placement : ""));
++  };
++  const context = vm.createContext({ workspace, callDBus, Date: { now: () => clock }, String, Number, Math, isNaN });
++  vm.runInContext(SCRIPT, context);
++
++  const window = (x, y, width, height) => {
++    let geometry = { x, y, width, height };
++    const w = {
++      pid: 42,
++      caption: "A2Tools DPS Meter",
++      resourceClass: "a2tools-dps-meter",
++      move: false,
++      resize: false,
++      frameGeometryChanged: signal(),
++      interactiveMoveResizeStarted: signal(),
++      interactiveMoveResizeFinished: signal(),
++      get frameGeometry() {
++        return { ...geometry };
++      },
++      set frameGeometry(r) {
++        geometry = { ...r };
++        w.frameGeometryChanged.emit();
++      },
++      // The meter sizes itself to its rows: KWin keeps the centre.
++      grow(newWidth, newHeight) {
++        const cx = geometry.x + geometry.width / 2;
++        const cy = geometry.y + geometry.height / 2;
++        geometry = { x: cx - newWidth / 2, y: cy - newHeight / 2, width: newWidth, height: newHeight };
++        w.frameGeometryChanged.emit();
++      },
++      // The player drags it.
++      drag(toX, toY) {
++        w.interactiveMoveResizeStarted.emit();
++        w.move = true;
++        geometry = { ...geometry, x: toX, y: toY };
++        w.frameGeometryChanged.emit();
++        w.move = false;
++        w.interactiveMoveResizeFinished.emit();
++      },
++    };
++    workspace.windowAdded.emit(w);
++    return w;
++  };
++  const answer = () => pending.splice(0).forEach((fn) => fn());
++  const later = (ms) => {
++    clock += ms;
++  };
++  return { window, answer, later, calls };
++}
++
++const corner = (w) => {
++  const g = w.frameGeometry;
++  return [g.x, g.y];
++};
++
++test("the overlay keeps its top-left corner as its rows come and go", () => {
++  const k = kwin({ placement: "100,200,0,0" });
++  const meter = k.window(700, 400, 418, 300);
++  k.answer();
++  assert.deepEqual(corner(meter), [100, 200]);
++  k.later(10_000);
++  meter.grow(418, 87);
++  assert.deepEqual(corner(meter), [100, 200]);
++  for (const rows of [5, 8, 3, 12, 1]) {
++    meter.grow(418, 60 + rows * 27);
++    assert.deepEqual(corner(meter), [100, 200], `${rows} rows`);
++    assert.equal(meter.frameGeometry.height, 60 + rows * 27);
++  }
++});
++
++test("with no saved place it stays where KWin first put it", () => {
++  const k = kwin();
++  const meter = k.window(751, 390, 418, 300);
++  k.answer();
++  k.later(10_000);
++  meter.grow(418, 120);
++  meter.grow(418, 400);
++  assert.deepEqual(corner(meter), [751, 390]);
++});
++
++test("the player's drag is the new place, and is saved", () => {
++  const k = kwin({ placement: "100,200,0,0" });
++  const meter = k.window(0, 0, 418, 300);
++  k.answer();
++  k.later(10_000);
++  meter.drag(1500, 40);
++  assert.deepEqual(corner(meter), [1500, 40]);
++  assert.deepEqual(k.calls.at(-1), ["Geometry", "A2Tools DPS Meter", "1500", "40", "418", "300"]);
++  meter.grow(418, 141);
++  assert.deepEqual(corner(meter), [1500, 40]);
++});
++
++test("a move of KWin's own without a resize stays (another screen, a shortcut)", () => {
++  const k = kwin({ placement: "100,200,0,0" });
++  const meter = k.window(0, 0, 418, 300);
++  k.answer();
++  k.later(10_000);
++  meter.frameGeometry = { ...meter.frameGeometry, x: 2020, y: 200 };
++  assert.deepEqual(corner(meter), [2020, 200]);
++  meter.grow(418, 87);
++  assert.deepEqual(corner(meter), [2020, 200]);
++});
++
++test("just after it is placed, KWin's moves go back as before", () => {
++  const k = kwin({ placement: "100,200,0,0" });
++  const meter = k.window(0, 0, 418, 300);
++  k.answer();
++  meter.frameGeometry = { ...meter.frameGeometry, x: 960, y: 540 };
++  assert.deepEqual(corner(meter), [100, 200]);
++});
++
++test("a drag before the saved place arrives is not undone", () => {
++  const k = kwin({ placement: "100,200,0,0" });
++  const meter = k.window(0, 0, 418, 300);
++  meter.interactiveMoveResizeStarted.emit();
++  k.answer();
++  assert.deepEqual(corner(meter), [0, 0]);
++});
+-- 
+2.43.0
+
