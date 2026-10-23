@@ -130,7 +130,12 @@ jobs:
           # neueres Paket derselben Version.
           sed -i "s/const CT_REVISION = 0;/const CT_REVISION = ${REVISION};/" public/src/js/checkRelease.js
           grep -q "const CT_REVISION = ${REVISION};" public/src/js/checkRelease.js
-          sed -i "s/^pkgrel=.*/pkgrel=${REVISION}/" packaging/arch/PKGBUILD
+          # Die Paketversion trägt den Build (2.0.76.r727.ct5.g…), damit pacman
+          # einen neueren Build derselben Version als neuer sieht. (pkgrel
+          # setzt makepkg selbst auf 1 zurück, wenn pkgver() eine neue
+          # Version liefert.)
+          sed -i "s/printf '%s.r%s.g%s'/printf '%s.r%s.ct${REVISION}.g%s'/" packaging/arch/PKGBUILD
+          grep -q "ct${REVISION}.g%s" packaging/arch/PKGBUILD
       - name: Plugins anpassen und mitliefern
         if: needs.plan.outputs.plugins_commit != ''
         run: |
