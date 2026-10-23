@@ -8,6 +8,18 @@ automatisch mit diesen Anpassungen neu:
 | 0001 | **Schloss und Click-through für alle Meter-Fenster**, auch unter nativem Wayland (KDE): Ist das Meter gesperrt, lassen auch Details, Kampfverlauf, Plugin-Fenster und das Plugin-Dock Klicks durch. Einschalten: Einstellungen → Meter-Einstellungen → „Alle Meter-Fenster sperren“. |
 | 0002 | **Das Meter-Fenster bleibt an seinem Platz**, wenn es wächst oder schrumpft (KDE). KWin hält sonst die Mitte eines Fensters fest, das seine Größe selbst ändert, und das Meter wandert. |
 | 0003 | **Updates kommen aus diesem Repo** statt vom Original. Das offizielle Paket würde die Anpassungen sonst wieder ersetzen. |
+| 0004 | **Angepasste Plugins kommen mit dem Paket** (`data/ct-plugins`). Sie ersetzen die installierte Kopie desselben Plugins, auch ohne Entwicklermodus; deine Einstellungen und Alarme bleiben, weil die ID gleich ist. |
+
+### Angepasste Plugins
+
+| Plugin | Was anders ist |
+|---|---|
+| Event Timers | **Eingeklappt** (Steuerung aus) zeigt es unter den nächsten Events auch die **Bosse**: geplante Bosse, die laufen oder bald beginnen, und Weltbosse, die gerade da sind, im Zeitfenster stehen oder bald zurückkommen. Wie weit voraus: Einstellungen → „Folded: bosses due within“ (Aus, 30 min, 1 h, 2 h, 3 h; anfangs 1 h). |
+
+Die Anpassungen liegen in `clicktrough/plugins/<id>/`. Ändert der Autor so ein
+Plugin, baut der Automat das Paket neu, und das Update kommt über den grünen
+Knopf. In den Einstellungen steht bei so einem Plugin „Dev“, weil es nicht aus
+dem geprüften Katalog kommt.
 
 ## Erstinstallation (Arch, CachyOS, EndeavourOS)
 

@@ -1,0 +1,55 @@
+From 9fe0f9be44d609c9b85c4e963417c590a6a5e911 Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Fri, 23 Oct 2026 13:03:59 +0000
+Subject: [PATCH 4/4] Plugins this build ships: data/ct-plugins
+
+The Clicktrough fork ships patched copies of reviewed plugins (Event
+Timers: the bosses due soon in its folded view) in data/ct-plugins/<id>.
+They load with or without developer mode and win over the installed
+copy, as a developer folder does; a developer folder still wins over
+them. One that does not load leaves the installed copy in use.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01TUNxq4V2zBL7bJg3yPJ3oC
+---
+ src-tauri/src/plugins/mod.rs | 24 ++++++++++++++++++++++++
+ 1 file changed, 24 insertions(+)
+
+diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
+index e4f8a0a..21ad04f 100644
+--- a/src-tauri/src/plugins/mod.rs
++++ b/src-tauri/src/plugins/mod.rs
+@@ -521,6 +521,30 @@ impl PluginHost {
+                 }),
+             }
+         }
++        // The plugins this build ships (`data/ct-plugins/<id>`: the
++        // Clicktrough fork's patched copies of reviewed plugins), with or
++        // without developer mode: they win over the installed copy, as a
++        // developer folder does, and a developer folder over them.
++        let bundled = state
++            .i18n_data_dir
++            .as_ref()
++            .map(|data| data.join("ct-plugins"))
++            .and_then(|dir| std::fs::read_dir(dir).ok())
++            .into_iter()
++            .flatten()
++            .flatten()
++            .map(|entry| entry.path())
++            .filter(|path| path.is_dir() && path.file_name().is_some_and(|n| !n.to_string_lossy().starts_with('.')));
++        for dir in bundled {
++            match load_folder(&dir) {
++                Ok(l) if loaded.iter().any(|x: &Loaded| x.manifest.id == l.manifest.id) => {}
++                Ok(l) => {
++                    tracing::info!("Plugins: {} {} runs from this build's own copy", l.manifest.id, l.manifest.version);
++                    loaded.push(l);
++                }
++                Err(e) => tracing::warn!("Plugins: this build's {} does not load: {e}", dir.display()),
++            }
++        }
+         let installed = plugins_dir(app)
+             .ok()
+             .and_then(|dir| std::fs::read_dir(dir).ok())
+-- 
+2.43.0
+

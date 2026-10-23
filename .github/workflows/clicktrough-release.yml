@@ -2,7 +2,10 @@ name: Clicktrough release
 
 # Baut jede neue Version des Original-Meters (taengu/A2Tools-DPS-Meter) mit den
 # Anpassungen aus clicktrough/patches neu und veröffentlicht das Arch-Paket
-# als Release dieses Repos. Das Meter aus diesem Repo holt seine Updates von
+# als Release dieses Repos. Plugins mit Anpassungen (clicktrough/plugins/<id>)
+# kommen aus taengu/A2Tools-Plugins, werden angepasst und im Paket mitgeliefert
+# (data/ct-plugins, siehe Patch 0004); ändert sich so ein Plugin im Original,
+# wird ebenfalls neu gebaut. Das Meter aus diesem Repo holt seine Updates von
 # hier (releases/latest/download/latest-v2.json, siehe Patch 0003).
 #
 # Passt ein Patch nicht mehr auf eine neue Version, wird nichts veröffentlicht:
@@ -15,6 +18,7 @@ on:
     branches: [main]
     paths:
       - "clicktrough/patches/**"
+      - "clicktrough/plugins/**"
       - ".github/workflows/clicktrough-release.yml"
   workflow_dispatch:
     inputs:
@@ -33,6 +37,7 @@ concurrency:
 
 env:
   UPSTREAM: https://github.com/taengu/A2Tools-DPS-Meter.git
+  PLUGINS: https://github.com/taengu/A2Tools-Plugins.git
 
 jobs:
   # Leicht und schnell: gibt es etwas zu bauen?
@@ -42,6 +47,7 @@ jobs:
       build: ${{ steps.plan.outputs.build }}
       tag: ${{ steps.plan.outputs.tag }}
       release: ${{ steps.plan.outputs.release }}
+      plugins_commit: ${{ steps.plan.outputs.plugins_commit }}
     steps:
       - uses: actions/checkout@v7
       - id: plan
@@ -56,8 +62,22 @@ jobs:
             tag=$(git ls-remote --tags --refs "$UPSTREAM" 'v*' | sed 's#.*refs/tags/##' \
               | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n1)
           fi
-          # Ein Release je Version des Originals und Stand der Patches.
-          hash=$(cat clicktrough/patches/*.patch | sha256sum | cut -c1-8)
+          # Die angepassten Plugins: ihr Stand im Original (Baum-Hash je Ordner).
+          plugins_commit=""
+          plugins_state=""
+          if compgen -G "clicktrough/plugins/*/*.patch" >/dev/null; then
+            git clone -q --depth 1 --filter=blob:none --no-checkout "$PLUGINS" plugins-up
+            plugins_commit=$(git -C plugins-up rev-parse HEAD)
+            for d in clicktrough/plugins/*/; do
+              id=$(basename "$d")
+              plugins_state="$plugins_state $id:$(git -C plugins-up rev-parse "HEAD:plugins/$id")"
+            done
+          fi
+          echo "plugins_commit=$plugins_commit" >> "$GITHUB_OUTPUT"
+          # Ein Release je Version des Originals, Stand der Patches und Stand
+          # der angepassten Plugins.
+          hash=$( { cat clicktrough/patches/*.patch; cat clicktrough/plugins/*/*.patch 2>/dev/null || true; echo "$plugins_state"; } \
+            | sha256sum | cut -c1-8)
           release="${tag}-ct-${hash}"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "release=$release" >> "$GITHUB_OUTPUT"
@@ -79,6 +99,7 @@ jobs:
       TAG: ${{ needs.plan.outputs.tag }}
       RELEASE: ${{ needs.plan.outputs.release }}
       REVISION: ${{ github.run_number }}
+      PLUGINS_COMMIT: ${{ needs.plan.outputs.plugins_commit }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - name: Werkzeuge
@@ -103,6 +124,20 @@ jobs:
           sed -i "s/const CT_REVISION = 0;/const CT_REVISION = ${REVISION};/" public/src/js/checkRelease.js
           grep -q "const CT_REVISION = ${REVISION};" public/src/js/checkRelease.js
           sed -i "s/^pkgrel=.*/pkgrel=${REVISION}/" packaging/arch/PKGBUILD
+      - name: Plugins anpassen und mitliefern
+        if: needs.plan.outputs.plugins_commit != ''
+        run: |
+          set -euo pipefail
+          git clone -q --filter=blob:none "$PLUGINS" plugins-up
+          git -C plugins-up checkout -q --detach "$PLUGINS_COMMIT"
+          for d in fork/clicktrough/plugins/*/; do
+            id=$(basename "$d")
+            git -C plugins-up -c user.name="Clicktrough" -c user.email="clicktrough@users.noreply.github.com" \
+              am "$GITHUB_WORKSPACE/fork/clicktrough/plugins/$id/"*.patch
+            mkdir -p src/src/data/ct-plugins
+            cp -r "plugins-up/plugins/$id" "src/src/data/ct-plugins/$id"
+            echo "$id $(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "plugins-up/plugins/$id/manifest.json" | head -n1)"
+          done
       - name: Arch-Paket bauen
         run: |
           set -euo pipefail
@@ -111,7 +146,11 @@ jobs:
           su - builder -c "cd '$GITHUB_WORKSPACE/src/packaging/arch' && makepkg --noconfirm --nodeps"
           ls -la src/packaging/arch/*.pkg.tar.zst
       - name: Tests
-        run: su - builder -c "cd '$GITHUB_WORKSPACE/src' && node --test tests/*.test.mjs"
+        run: |
+          set -euo pipefail
+          su - builder -c "cd '$GITHUB_WORKSPACE/src' && node --test tests/*.test.mjs"
+          for f in src/src/data/ct-plugins/*/*.js; do [ -e "$f" ] && node --check "$f"; done
+          echo ok
       - name: Veröffentlichen
         run: |
           set -euo pipefail
@@ -129,6 +168,9 @@ jobs:
             echo
             echo "**Anpassungen:**"
             git -C src log --reverse --format='- %s' "${TAG}..HEAD"
+            if [ -n "$PLUGINS_COMMIT" ]; then
+              git -C plugins-up log --reverse --format='- %s' "${PLUGINS_COMMIT}..HEAD"
+            fi
             echo
             echo "**Erstinstallation:** \`${name}\` herunterladen, dann \`sudo pacman -U ${name}\`."
             echo "Danach kommen Updates über den grünen Knopf im Titel des Meters."
