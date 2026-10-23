@@ -14,7 +14,7 @@ automatisch mit diesen Anpassungen neu:
 
 | Plugin | Was anders ist |
 |---|---|
-| Event Timers | **Eingeklappt** (Steuerung aus) zeigt es unter den nächsten Events auch die **Bosse**: geplante Bosse, die laufen oder bald beginnen, und Weltbosse, die gerade da sind, im Zeitfenster stehen oder bald zurückkommen. Wie weit voraus: Einstellungen → „Folded: bosses due within“ (Aus, 30 min, 1 h, 2 h, 3 h; anfangs 1 h). |
+| Event Timers | **Eingeklappt** (Steuerung aus) zeigt es unter den nächsten Events auch die **Bosse**: geplante Bosse, die laufen oder bald beginnen, und Weltbosse, die gerade da sind, im Zeitfenster stehen oder bald zurückkommen. Wie weit voraus: Einstellungen → „Folded: bosses due within“ (Aus, 30 min, 1 h, 2 h, 3 h; anfangs 1 h). Die nächste **Artefakt-Belagerung** bleibt eingeklappt immer sichtbar, egal wie weit sie weg ist. |
 
 Die Anpassungen liegen in `clicktrough/plugins/<id>/`. Ändert der Autor so ein
 Plugin, baut der Automat das Paket neu, und das Update kommt über den grünen

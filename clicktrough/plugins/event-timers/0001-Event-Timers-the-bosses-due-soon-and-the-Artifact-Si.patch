@@ -1,21 +1,23 @@
-From 6423d0fbab9ade6147c50b715902d0de2119e533 Mon Sep 17 00:00:00 2001
+From 181446a6f7dcbfd4357d97de016b8f3de0f9ff69 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Fri, 23 Oct 2026 13:03:59 +0000
-Subject: [PATCH] Event Timers: the bosses due soon in the folded view
+Subject: [PATCH] Event Timers: the bosses due soon and the Artifact Siege in
+ the folded view
 
 Folded, the window showed the next three events only, and no boss. Under
 them it now lists the scheduled bosses on now or starting within a time
 picked in Settings ("Folded: bosses due within": off, 30 min, 1 h, 2 h,
 3 h; 1 h at first), and the world bosses up, in their window or back
-within it, the ones up first.
+within it, the ones up first. The next Artifact Siege stays in the
+folded view too, however far off.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_01TUNxq4V2zBL7bJg3yPJ3oC
 ---
  plugins/event-timers/index.html |   3 +
- plugins/event-timers/plugin.js  | 102 +++++++++++++++++++++++++++++++-
- plugins/event-timers/style.css  |  13 ++++
- 3 files changed, 116 insertions(+), 2 deletions(-)
+ plugins/event-timers/plugin.js  | 109 +++++++++++++++++++++++++++++++-
+ plugins/event-timers/style.css  |  17 +++++
+ 3 files changed, 126 insertions(+), 3 deletions(-)
 
 diff --git a/plugins/event-timers/index.html b/plugins/event-timers/index.html
 index 0e63b3e..d0862fa 100644
@@ -39,7 +41,7 @@ index 0e63b3e..d0862fa 100644
      <div class="modal" role="dialog" aria-modal="true" hidden>
        <div class="modalBox">
 diff --git a/plugins/event-timers/plugin.js b/plugins/event-timers/plugin.js
-index 782b8e8..b3c826a 100644
+index 782b8e8..e65138e 100644
 --- a/plugins/event-timers/plugin.js
 +++ b/plugins/event-timers/plugin.js
 @@ -37,6 +37,10 @@ const els = {
@@ -53,7 +55,7 @@ index 782b8e8..b3c826a 100644
    hidden: $(".hidden"),
    scheduledHead: $(".scheduledHead"),
    scheduled: $(".scheduledList"),
-@@ -105,6 +109,10 @@ const ALERT_COLORS = {
+@@ -105,6 +109,13 @@ const ALERT_COLORS = {
  // Text size: the whole page scaled, spacing and controls with the text.
  // 100% is BASE_ZOOM, a little larger than the stylesheet's own sizes.
  const SCALES = [0.9, 1, 1.1, 1.25, 1.5];
@@ -61,10 +63,13 @@ index 782b8e8..b3c826a 100644
 +// next events; 0 shows none.
 +const FOLDED_BOSS_MINUTES = [0, 30, 60, 120, 180];
 +const DEFAULT_FOLDED_BOSS_MINUTES = 60;
++// Events the folded view keeps however far off they are: the next Artifact
++// Siege, three times a week, is past the next three events most of the time.
++const FOLDED_ALWAYS = new Set(["artifact"]);
  const BASE_ZOOM = 1.2;
  // The feed of world boss timers: read this often, or every FEED_BUSY_MS
  // while a world boss on the server is up, due within 15 minutes or overdue,
-@@ -333,6 +341,24 @@ const MORE_UI = {
+@@ -333,6 +344,24 @@ const MORE_UI = {
          bossSoon: (name, n) => `${name} ${n} 分钟后出现`, bossNow: (name) => `${name} 已出现` },
  };
  
@@ -89,7 +94,7 @@ index 782b8e8..b3c826a 100644
  // The Bosses tab's row buttons: each boss's alert on or off, and the way to
  // its settings in Alerts.
  const ROW_UI = {
-@@ -376,7 +402,7 @@ let gameRunning = null;
+@@ -376,7 +405,7 @@ let gameRunning = null;
  // folded: the Bosses tab's sections folded away ({ scheduled, field }).
  let prefs = { region: "auto", hidden: [], alerts: {}, leads: {}, closedLeads: {}, sound: "chime", repeat: 1, pop: false,
    tab: "events", display: "system", lastServer: 0, scale: 1, defaultLead: DEFAULT_LEAD, defaultClosedLead: DEFAULT_CLOSED_LEAD,
@@ -98,7 +103,7 @@ index 782b8e8..b3c826a 100644
  // The world boss timers: { server, bosses, at, error }, from the feed and the
  // player's own map, the newest report of each boss kept.
  let feed = null;
-@@ -594,6 +620,9 @@ function renderStatic() {
+@@ -594,6 +623,9 @@ function renderStatic() {
    els.defaultClosed.value = String(defaultClosed());
    els.scaleSelect.replaceChildren(...SCALES.map((x) => option(x, `${Math.round(x * 100)}%`)));
    els.scaleSelect.value = String(prefs.scale);
@@ -108,7 +113,23 @@ index 782b8e8..b3c826a 100644
    els.soundLabel.textContent = a.sound;
    els.testAlert.textContent = words.testAlert;
    els.alertOptionsBtn.textContent = words.alertOptions;
-@@ -979,10 +1008,71 @@ function renderField(now) {
+@@ -889,12 +921,14 @@ function renderSchedule(list, events, now, { hideable, actions = false }) {
+         render();
+       });
+     }
+-    return row({
++    const li = row({
+       id: ev.id, name: eventName(ev), where: ev.where.map(text).join(", "), running, hide, actions,
+       soon: next.start - now <= SOON_MS,
+       countdown: running ? `${ev.enter ? enterWord() : words.now} · ${words.left(span(next.end - now))}` : words.in(span(next.start - now)),
+       at: fmt.format(new Date(next.start)),
+     });
++    li.classList.toggle("keepFolded", FOLDED_ALWAYS.has(ev.id));
++    return li;
+   }));
+   return shown;
+ }
+@@ -979,10 +1013,71 @@ function renderField(now) {
    els.field.replaceChildren(...items);
  }
  
@@ -180,7 +201,7 @@ index 782b8e8..b3c826a 100644
    // Not while a row's button is pressed; a focused one keeps its focus.
    if (rowPress) return;
    const focused = document.activeElement?.closest?.(".rowBtn");
-@@ -1750,6 +1840,11 @@ els.scaleSelect.addEventListener("change", () => {
+@@ -1750,6 +1845,11 @@ els.scaleSelect.addEventListener("change", () => {
    savePrefs();
    applyScale();
  });
@@ -192,7 +213,7 @@ index 782b8e8..b3c826a 100644
  els.regionSelect.addEventListener("change", () => {
    prefs.region = els.regionSelect.value;
    savePrefs();
-@@ -1788,7 +1883,10 @@ a2.on("bossMap", (m) => {
+@@ -1788,7 +1888,10 @@ a2.on("bossMap", (m) => {
  a2.on("game", (g) => {
    gameRunning = typeof g?.running === "boolean" ? g.running : null;
  });
@@ -205,10 +226,10 @@ index 782b8e8..b3c826a 100644
  (async () => {
    prefs = { ...prefs, ...((await a2.storage.get("prefs").catch(() => null)) || {}) };
 diff --git a/plugins/event-timers/style.css b/plugins/event-timers/style.css
-index fbaf92f..2abafe0 100644
+index fbaf92f..1983d8b 100644
 --- a/plugins/event-timers/style.css
 +++ b/plugins/event-timers/style.css
-@@ -25,6 +25,19 @@ body.compact .eventList li:nth-child(n + 4) {
+@@ -25,6 +25,23 @@ body.compact .eventList li:nth-child(n + 4) {
  body.compact .view.events {
    display: block;
  }
@@ -224,6 +245,10 @@ index fbaf92f..2abafe0 100644
 +}
 +body.compact .foldedBossHead {
 +  margin-top: 8px;
++}
++/* Folded, the next Artifact Siege shows too, past the next three events. */
++body.compact .eventList li.keepFolded {
++  display: grid;
 +}
  
  .status {
