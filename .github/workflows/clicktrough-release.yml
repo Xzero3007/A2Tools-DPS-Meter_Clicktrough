@@ -162,7 +162,14 @@ jobs:
           echo "== Tests"
           set -euo pipefail
           su - builder -c "cd '$GITHUB_WORKSPACE/src' && node --test tests/*.test.mjs"
-          for f in src/src/data/ct-plugins/*/*.js; do [ -e "$f" ] && node --check "$f"; done
+          # Die Skripte der Plugins so prüfen, wie der Browser sie lädt: als
+          # klassische Skripte. (`node --check` liest sie hier als Module,
+          # weil das package.json des Meters "type": "module" setzt.)
+          if compgen -G "src/src/data/ct-plugins/*/*.js" >/dev/null; then
+            node -e 'const fs = require("fs"), vm = require("vm");
+              for (const f of process.argv.slice(1)) new vm.Script(fs.readFileSync(f, "utf8"), { filename: f });' \
+              src/src/data/ct-plugins/*/*.js
+          fi
           echo ok
       - name: Veröffentlichen
         run: |
