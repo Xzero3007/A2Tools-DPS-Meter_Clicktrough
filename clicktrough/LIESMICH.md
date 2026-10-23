@@ -9,6 +9,7 @@ automatisch mit diesen Anpassungen neu:
 | 0002 | **Das Meter-Fenster bleibt an seinem Platz**, wenn es wächst oder schrumpft (KDE). KWin hält sonst die Mitte eines Fensters fest, das seine Größe selbst ändert, und das Meter wandert. |
 | 0003 | **Updates kommen aus diesem Repo** statt vom Original. Das offizielle Paket würde die Anpassungen sonst wieder ersetzen. |
 | 0004 | **Angepasste Plugins kommen mit dem Paket** (`data/ct-plugins`). Sie ersetzen die installierte Kopie desselben Plugins, auch ohne Entwicklermodus; deine Einstellungen und Alarme bleiben, weil die ID gleich ist. |
+| 0005 | **Gesperrt am rechten Rand scrollen**: Gesperrte Fenster (Details, Kampfverlauf, Plugin-Fenster, Dock) nehmen die Maus noch in einem 14 px schmalen Streifen an ihrem rechten Rand an, wo die Bildlaufleiste ist. Dort scrollt das Mausrad, überall sonst gehen Klicks ins Spiel. Abschalten: Einstellungen → Meter-Einstellungen → „Gesperrt: am rechten Rand scrollen“. |
 
 ### Angepasste Plugins
 

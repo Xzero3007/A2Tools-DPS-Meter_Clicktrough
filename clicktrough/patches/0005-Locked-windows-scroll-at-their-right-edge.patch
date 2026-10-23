@@ -1,0 +1,516 @@
+From d98b796b709ac51b55994db346f76fd89ffa3bb3 Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Fri, 23 Oct 2026 14:00:52 +0000
+Subject: [PATCH 5/5] Locked windows scroll at their right edge
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Locked, every window let all of the mouse through, so a long Battle
+History, Details or a plugin's list could not be scrolled. Details,
+Battle History, plugins' windows and the dock now keep a strip 14 px wide
+at their right edge, where their scrollbar is, as their input region
+(following the window as it is resized), so the wheel there scrolls
+them; the rest still lets clicks through. A wheel at the edge of Details
+or Battle History that nothing under it would scroll scrolls the panel
+under the window's middle. Settings → Meter Settings → "Locked: scroll
+at the right edge", on unless turned off. Not while a screenshot tool is
+in front.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01TUNxq4V2zBL7bJg3yPJ3oC
+---
+ index.html                                   |  7 ++
+ public/src/js/core.js                        | 10 +++
+ public/src/js/tauriBridge.js                 | 26 +++++++
+ src-tauri/src/app.rs                         | 13 +++-
+ src-tauri/src/platform/linux/window.rs       | 76 ++++++++++++++++++--
+ src-tauri/src/platform/unsupported/window.rs |  3 +
+ src-tauri/src/platform/win32/window.rs       |  3 +
+ src/data/i18n/ui/de.json                     |  2 +
+ src/data/i18n/ui/en.json                     |  2 +
+ src/data/i18n/ui/es.json                     |  2 +
+ src/data/i18n/ui/fr.json                     |  2 +
+ src/data/i18n/ui/ja.json                     |  2 +
+ src/data/i18n/ui/ko.json                     |  2 +
+ src/data/i18n/ui/pt.json                     |  2 +
+ src/data/i18n/ui/ru.json                     |  2 +
+ src/data/i18n/ui/zh-Hans.json                |  2 +
+ src/data/i18n/ui/zh-Hant.json                |  2 +
+ 17 files changed, 153 insertions(+), 5 deletions(-)
+
+diff --git a/index.html b/index.html
+index af4cdb6..a3336e5 100644
+--- a/index.html
++++ b/index.html
+@@ -746,6 +746,13 @@
+                       <span class="settingsToggleTrack" aria-hidden="true"></span>
+                     </span>
+                   </label>
++                  <label class="settingsToggle lockSetting" style="display:none">
++                    <span class="settingsToggleLabel settingsLabel" data-i18n="settings.lockScrollEdge" title="While locked, Details, Battle History and plugin windows still take the mouse in a thin strip at their right edge, where the scrollbar is, so the wheel there scrolls them." data-i18n-title="settings.tips.lockScrollEdge">Locked: scroll at the right edge</span>
++                    <span class="settingsToggleControl">
++                      <input type="checkbox" class="lockScrollEdgeCheckbox" />
++                      <span class="settingsToggleTrack" aria-hidden="true"></span>
++                    </span>
++                  </label>
+                 </div>
+               </section>
+               <section class="settingsSection" id="settingsSection-appearance" role="tabpanel" aria-labelledby="settingsTab-appearance" data-section="appearance" hidden>
+diff --git a/public/src/js/core.js b/public/src/js/core.js
+index c091912..73755fc 100644
+--- a/public/src/js/core.js
++++ b/public/src/js/core.js
+@@ -55,6 +55,7 @@ const REMOTE_APPLIED_SETTING_CONTROLS = {
+   "dpsMeter.showSuspendBtn": ".showSuspendBtnCheckbox",
+   "dpsMeter.showLockBtn": ".showLockBtnCheckbox",
+   "dpsMeter.lockAllWindows": ".lockAllWindowsCheckbox",
++  "dpsMeter.lockScrollEdge": ".lockScrollEdgeCheckbox",
+   // Set from the main window by the account offer.
+   "dpsMeter.autoUpload": ".autoUploadCheckbox",
+ };
+@@ -146,6 +147,7 @@ class DpsApp {
+       showSuspendBtn: "dpsMeter.showSuspendBtn",
+       showLockBtn: "dpsMeter.showLockBtn",
+       lockAllWindows: "dpsMeter.lockAllWindows",
++      lockScrollEdge: "dpsMeter.lockScrollEdge",
+       overlayLocked: "dpsMeter.overlayLocked",
+     };
+ 
+@@ -6740,6 +6742,7 @@ class DpsApp {
+     this._overlayLocked = false;
+     this.showLockBtnCheckbox = document.querySelector(".showLockBtnCheckbox");
+     this.lockAllWindowsCheckbox = document.querySelector(".lockAllWindowsCheckbox");
++    this.lockScrollEdgeCheckbox = document.querySelector(".lockScrollEdgeCheckbox");
+     const isOverlay = window.A2_VIEW === "main";
+     Promise.resolve(window.javaBridge?.overlayLockSupported?.())
+       .then((supported) => {
+@@ -6763,6 +6766,13 @@ class DpsApp {
+             this.safeSetSetting(this.storageKeys.lockAllWindows, String(!!event.target?.checked));
+           });
+         }
++        if (this.lockScrollEdgeCheckbox) {
++          // On unless turned off.
++          this.lockScrollEdgeCheckbox.checked = this.safeGetSetting(this.storageKeys.lockScrollEdge) !== "false";
++          this.lockScrollEdgeCheckbox.addEventListener("change", (event) => {
++            this.safeSetSetting(this.storageKeys.lockScrollEdge, String(!!event.target?.checked));
++          });
++        }
+         if (!isOverlay) return;
+         this._applyLockBtnVisibility(show);
+         window.addEventListener("resize", () => this._sendLockBtnRect());
+diff --git a/public/src/js/tauriBridge.js b/public/src/js/tauriBridge.js
+index 9aad478..399191d 100644
+--- a/public/src/js/tauriBridge.js
++++ b/public/src/js/tauriBridge.js
+@@ -1552,5 +1552,31 @@
+     }
+   }).catch((e) => console.error("[A2Tools] debug_status failed:", e));
+ 
++  // Locked, Details and Battle History still take the mouse at their right
++  // edge only (dpsMeter.lockScrollEdge, platform/linux/window.rs), where the
++  // page's own scrollbar is. A wheel there that nothing under the pointer
++  // would scroll scrolls what is under the middle of the window at that
++  // height: a panel that scrolls inside the page, not the page.
++  if (window.A2_VIEW !== "main") {
++    const scrolls = (el, down) => {
++      for (; el && el !== document.body && el !== document.documentElement; el = el.parentElement) {
++        const style = getComputedStyle(el);
++        if (!/(auto|scroll)/.test(style.overflowY) || el.scrollHeight <= el.clientHeight) continue;
++        if (down ? el.scrollTop + el.clientHeight < el.scrollHeight - 1 : el.scrollTop > 0) return el;
++      }
++      return null;
++    };
++    document.addEventListener("wheel", (e) => {
++      if (e.defaultPrevented || !e.deltaY || e.clientX < window.innerWidth - 24) return;
++      const down = e.deltaY > 0;
++      if (scrolls(e.target, down)) return;
++      const target = scrolls(document.elementFromPoint(window.innerWidth / 2, e.clientY), down);
++      if (!target) return;
++      const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? target.clientHeight : 1;
++      target.scrollBy({ top: e.deltaY * unit });
++      e.preventDefault();
++    }, { passive: false });
++  }
++
+   console.log("[A2Tools] Tauri bridge adapter loaded (javaBridge + dpsData)");
+ })();
+diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
+index c4c752a..6c89df6 100644
+--- a/src-tauri/src/app.rs
++++ b/src-tauri/src/app.rs
+@@ -339,6 +339,11 @@ fn screenshot_tool(app: &tauri::AppHandle, in_front: bool) {
+ /// Settings never locks: it is where the lock is turned off.
+ pub const LOCK_ALL_WINDOWS_KEY: &str = "dpsMeter.lockAllWindows";
+ 
++/// While locked, Details, Battle History and plugins' windows still take the
++/// mouse in a strip at their right edge, so they can be scrolled there. On
++/// unless turned off.
++pub const LOCK_SCROLL_EDGE_KEY: &str = "dpsMeter.lockScrollEdge";
++
+ /// The overlay is locked and "Lock all meter windows" is on.
+ static ALL_WINDOWS_LOCKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+ 
+@@ -367,8 +372,14 @@ pub fn sync_other_windows(app: &tauri::AppHandle) {
+     });
+     ALL_WINDOWS_LOCKED.store(locked, Ordering::Relaxed);
+     let screenshot = screenshot_tool_in_front();
++    let edge = app
++        .try_state::<AppState>()
++        .is_none_or(|s| s.settings.get(LOCK_SCROLL_EDGE_KEY).as_deref() != Some("false"));
+     for (label, window) in app.webview_windows() {
+         let Some(ignore) = other_window_ignores(&label, screenshot, locked) else { continue };
++        // Locked, not while a screenshot tool is in front (its selection is
++        // dragged across them).
++        platform::window::set_scroll_edge(&window, edge && locked && !screenshot && label != "settings");
+         if !platform::window::click_through_except(&window, ignore, None) && !cfg!(target_os = "linux") {
+             let _ = window.set_ignore_cursor_events(ignore);
+         }
+@@ -1105,7 +1116,7 @@ fn update_settings(
+         if HOTKEY_KEYS.contains(&key.as_str()) {
+             restart_global_hotkeys(&app);
+         }
+-        if key == LOCK_ALL_WINDOWS_KEY {
++        if key == LOCK_ALL_WINDOWS_KEY || key == LOCK_SCROLL_EDGE_KEY {
+             sync_other_windows(&app);
+         }
+         let _ = app.emit("setting-changed", serde_json::json!({ "key": key, "value": value }));
+diff --git a/src-tauri/src/platform/linux/window.rs b/src-tauri/src/platform/linux/window.rs
+index 16b074c..f801dab 100644
+--- a/src-tauri/src/platform/linux/window.rs
++++ b/src-tauri/src/platform/linux/window.rs
+@@ -187,7 +187,11 @@ pub fn click_through_except(window: &tauri::WebviewWindow, ignore: bool, keep: O
+         // gets what it was told meanwhile (`reveal_in_place`).
+         let hidden = hidden_in_place().lock().unwrap_or_else(|p| p.into_inner()).contains(&label);
+         let (ignore, keep) = if hidden { (true, None) } else { (ignore, keep) };
+-        apply_input_region(&gtk_window, ignore, keep);
++        let edge = !hidden && scroll_edges().lock().unwrap_or_else(|p| p.into_inner()).contains(&label);
++        if edge {
++            follow_size(&gtk_window, &label);
++        }
++        apply_input_region(&gtk_window, ignore, keep, edge);
+         Some(())
+     })
+     .flatten()
+@@ -203,7 +207,59 @@ fn wanted_regions() -> &'static std::sync::Mutex<std::collections::HashMap<Strin
+     WANTED.get_or_init(Default::default)
+ }
+ 
+-fn apply_input_region(gtk_window: &gtk::ApplicationWindow, ignore: bool, keep: Keep) {
++/// How wide the strip at a locked window's right edge is that still takes
++/// the mouse (`set_scroll_edge`): where its scrollbar is, so the wheel there
++/// scrolls it.
++pub const SCROLL_EDGE_PX: i32 = 14;
++
++/// The windows that keep their scroll edge while they let clicks through.
++fn scroll_edges() -> &'static std::sync::Mutex<std::collections::HashSet<String>> {
++    static EDGES: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> = std::sync::OnceLock::new();
++    EDGES.get_or_init(Default::default)
++}
++
++/// Whether a window, while it lets clicks through, still takes the mouse in
++/// a strip at its right edge, so it can be scrolled there. Applies with the
++/// next `click_through_except`.
++pub fn set_scroll_edge(window: &tauri::WebviewWindow, on: bool) {
++    let mut edges = scroll_edges().lock().unwrap_or_else(|p| p.into_inner());
++    if on {
++        edges.insert(window.label().to_string());
++    } else {
++        edges.remove(window.label());
++    }
++}
++
++/// The scroll edge follows the window's right edge as it is resized: its
++/// region is set again at each new size. Once per GTK window (a window
++/// closed and opened again under its label is a new one).
++fn follow_size(gtk_window: &gtk::ApplicationWindow, label: &str) {
++    use gtk::prelude::*;
++    const KEY: &str = "a2t-scroll-edge";
++    // SAFETY: the key is only ever set to a bool, here.
++    if unsafe { gtk_window.data::<bool>(KEY) }.is_some() {
++        return;
++    }
++    unsafe { gtk_window.set_data(KEY, true) };
++    let label = label.to_string();
++    let last = std::cell::Cell::new((0, 0));
++    gtk_window.connect_size_allocate(move |w, a| {
++        if last.replace((a.width(), a.height())) == (a.width(), a.height()) {
++            return;
++        }
++        let Some((true, keep)) = wanted_regions().lock().unwrap_or_else(|p| p.into_inner()).get(&label).copied() else {
++            return;
++        };
++        if !scroll_edges().lock().unwrap_or_else(|p| p.into_inner()).contains(&label)
++            || hidden_in_place().lock().unwrap_or_else(|p| p.into_inner()).contains(&label)
++        {
++            return;
++        }
++        apply_input_region(w, true, keep, true);
++    });
++}
++
++fn apply_input_region(gtk_window: &gtk::ApplicationWindow, ignore: bool, keep: Keep, edge: bool) {
+     use gtk::{cairo, prelude::*};
+     if ignore {
+         // CSS pixels to GDK's: the page's scale over GDK's own.
+@@ -213,7 +269,19 @@ fn apply_input_region(gtk_window: &gtk::ApplicationWindow, ignore: bool, keep: K
+             let (right, bottom) = (((x + w) * k).ceil() as i32, ((y + h) * k).ceil() as i32);
+             (right > left && bottom > top).then(|| cairo::RectangleInt::new(left, top, right - left, bottom - top))
+         });
+-        let region = cairo::Region::create_rectangle(&rect.unwrap_or_else(|| cairo::RectangleInt::new(0, 0, 1, 1)));
++        // The strip at the right edge of the page (the window's child).
++        let strip = edge.then(|| gtk_window.child()).flatten().and_then(|child| {
++            let a = child.allocation();
++            let w = SCROLL_EDGE_PX.min(a.width());
++            (w > 0 && a.height() > 0).then(|| cairo::RectangleInt::new(a.x() + a.width() - w, a.y(), w, a.height()))
++        });
++        let region = cairo::Region::create();
++        for r in [rect, strip].into_iter().flatten() {
++            let _ = region.union_rectangle(&r);
++        }
++        if region.is_empty() {
++            let _ = region.union_rectangle(&cairo::RectangleInt::new(0, 0, 1, 1));
++        }
+         gtk_window.input_shape_combine_region(Some(&region));
+     } else {
+         gtk_window.input_shape_combine_region(None);
+@@ -302,7 +370,7 @@ pub fn hide_in_place(window: &tauri::WebviewWindow) {
+     let target = window.clone();
+     super::dialog::on_gtk_thread(move || {
+         if let Ok(gtk_window) = target.gtk_window() {
+-            apply_input_region(&gtk_window, true, None);
++            apply_input_region(&gtk_window, true, None, false);
+         }
+     });
+     let _ = window.set_skip_taskbar(true);
+diff --git a/src-tauri/src/platform/unsupported/window.rs b/src-tauri/src/platform/unsupported/window.rs
+index f079249..b4591c2 100644
+--- a/src-tauri/src/platform/unsupported/window.rs
++++ b/src-tauri/src/platform/unsupported/window.rs
+@@ -56,6 +56,9 @@ pub fn click_through_except(_window: &tauri::WebviewWindow, _ignore: bool, _keep
+     false
+ }
+ 
++/// Linux only (see the Linux version).
++pub fn set_scroll_edge(_window: &tauri::WebviewWindow, _on: bool) {}
++
+ /// Hide a plugin window so it comes back where it was. Here a hidden window
+ /// keeps its place, so it is simply hidden (Linux keeps it mapped instead).
+ pub fn hide_in_place(window: &tauri::WebviewWindow) {
+diff --git a/src-tauri/src/platform/win32/window.rs b/src-tauri/src/platform/win32/window.rs
+index 1a8c0e5..2417a62 100644
+--- a/src-tauri/src/platform/win32/window.rs
++++ b/src-tauri/src/platform/win32/window.rs
+@@ -168,6 +168,9 @@ pub fn click_through_except(_window: &tauri::WebviewWindow, _ignore: bool, _keep
+     false
+ }
+ 
++/// Linux only (see the Linux version).
++pub fn set_scroll_edge(_window: &tauri::WebviewWindow, _on: bool) {}
++
+ /// Hide a plugin window so it comes back where it was. Here a hidden window
+ /// keeps its place, so it is simply hidden (Linux keeps it mapped instead).
+ pub fn hide_in_place(window: &tauri::WebviewWindow) {
+diff --git a/src/data/i18n/ui/de.json b/src/data/i18n/ui/de.json
+index d16c50b..03f83b7 100644
+--- a/src/data/i18n/ui/de.json
++++ b/src/data/i18n/ui/de.json
+@@ -291,6 +291,7 @@
+     "showSuspendBtn": "Taste „Erfassung pausieren“ anzeigen",
+     "showLockBtn": "Taste für Durchklick-Sperre anzeigen",
+     "lockAllWindows": "Alle Meter-Fenster sperren",
++    "lockScrollEdge": "Gesperrt: am rechten Rand scrollen",
+     "playerLimit": {
+       "label": "Max. angezeigte Spieler"
+     },
+@@ -539,6 +540,7 @@
+       "showSuspendBtn": "Eine Taste am Meter, die das Lesen des Spielverkehrs anhält, bis du sie erneut drückst.",
+       "showLockBtn": "Eine Taste, mit der das Meter die Maus ignoriert, sodass Klicks im Spiel ankommen.",
+       "lockAllWindows": "Solange das Meter gesperrt ist, lassen auch Details, Kampfverlauf und Plugin-Fenster Klicks durch. Entsperren mit der Sperr-Taste oder ihrem Tastenkürzel.",
++      "lockScrollEdge": "Solange gesperrt ist, nehmen Details, Kampfverlauf und Plugin-Fenster die Maus noch in einem schmalen Streifen an ihrem rechten Rand an, wo die Bildlaufleiste ist: Dort scrollt das Mausrad sie.",
+       "windowOpacity": "Wie durchsichtig der Hintergrund des Meters ist. Balken und Text bleiben, wie sie sind.",
+       "titleOpacity": "Wie durchsichtig die Titelleiste des Meters ist, getrennt vom Hintergrund darunter. Bis du ihn bewegst, folgt er dem Hintergrund.",
+       "meterOpacity": "Wie deckend die farbigen Schadensbalken sind.",
+diff --git a/src/data/i18n/ui/en.json b/src/data/i18n/ui/en.json
+index 830a134..ac3f247 100644
+--- a/src/data/i18n/ui/en.json
++++ b/src/data/i18n/ui/en.json
+@@ -301,6 +301,7 @@
+     "showSuspendBtn": "Show pause capture button",
+     "showLockBtn": "Show click-through lock button",
+     "lockAllWindows": "Lock all meter windows",
++    "lockScrollEdge": "Locked: scroll at the right edge",
+     "playerLimit": {
+       "label": "Max players shown"
+     },
+@@ -551,6 +552,7 @@
+       "showSuspendBtn": "A button on the meter that stops reading game traffic until you press it again.",
+       "showLockBtn": "A button that makes the meter ignore the mouse, so clicks go through to the game.",
+       "lockAllWindows": "While the meter is locked, Details, Battle History and plugin windows let clicks through too. Unlock with the lock button or its keybind.",
++      "lockScrollEdge": "While locked, Details, Battle History and plugin windows still take the mouse in a thin strip at their right edge, where the scrollbar is, so the wheel there scrolls them.",
+       "windowOpacity": "How see-through the meter's background is. Bars and text stay as they are.",
+       "titleOpacity": "How see-through the meter's title bar is, apart from the background under it. Until you move it, it follows the background.",
+       "meterOpacity": "How solid the coloured damage bars are.",
+diff --git a/src/data/i18n/ui/es.json b/src/data/i18n/ui/es.json
+index a825465..15fc9b1 100644
+--- a/src/data/i18n/ui/es.json
++++ b/src/data/i18n/ui/es.json
+@@ -291,6 +291,7 @@
+     "showSuspendBtn": "Mostrar botón de pausar captura",
+     "showLockBtn": "Mostrar botón de bloqueo (clic a través)",
+     "lockAllWindows": "Bloquear todas las ventanas del medidor",
++    "lockScrollEdge": "Bloqueado: desplazar en el borde derecho",
+     "playerLimit": {
+       "label": "Máx. jugadores mostrados"
+     },
+@@ -539,6 +540,7 @@
+       "showSuspendBtn": "Un botón en el medidor que deja de leer el tráfico del juego hasta que lo pulses de nuevo.",
+       "showLockBtn": "Un botón que hace que el medidor ignore el ratón, para que los clics lleguen al juego.",
+       "lockAllWindows": "Mientras el medidor está bloqueado, Detalles, el historial de combates y las ventanas de plugins también dejan pasar los clics. Desbloquea con el botón de bloqueo o su atajo.",
++      "lockScrollEdge": "Mientras está bloqueado, Detalles, el historial de combates y las ventanas de plugins siguen recibiendo el ratón en una franja estrecha de su borde derecho, donde está la barra de desplazamiento: ahí la rueda las desplaza.",
+       "windowOpacity": "Cuán transparente es el fondo del medidor. Las barras y el texto no cambian.",
+       "titleOpacity": "Qué tan transparente es la barra de título del medidor, aparte del fondo de debajo. Hasta que lo muevas, sigue al fondo.",
+       "meterOpacity": "Cuán sólidas son las barras de daño de color.",
+diff --git a/src/data/i18n/ui/fr.json b/src/data/i18n/ui/fr.json
+index aa07c57..b5418d2 100644
+--- a/src/data/i18n/ui/fr.json
++++ b/src/data/i18n/ui/fr.json
+@@ -291,6 +291,7 @@
+     "showSuspendBtn": "Afficher le bouton de pause de capture",
+     "showLockBtn": "Afficher le bouton de verrouillage (clic au travers)",
+     "lockAllWindows": "Verrouiller toutes les fenêtres du compteur",
++    "lockScrollEdge": "Verrouillé : défiler sur le bord droit",
+     "playerLimit": {
+       "label": "Joueurs affichés max."
+     },
+@@ -539,6 +540,7 @@
+       "showSuspendBtn": "Un bouton sur le compteur qui arrête la lecture du trafic du jeu jusqu'à ce que tu appuies à nouveau.",
+       "showLockBtn": "Un bouton qui fait ignorer la souris au compteur, pour que les clics passent au jeu.",
+       "lockAllWindows": "Tant que le compteur est verrouillé, Détails, l'historique des combats et les fenêtres des plugins laissent aussi passer les clics. Déverrouillez avec le bouton de verrouillage ou son raccourci.",
++      "lockScrollEdge": "Tant que c'est verrouillé, Détails, l'historique des combats et les fenêtres des plugins prennent encore la souris dans une fine bande sur leur bord droit, là où est la barre de défilement : la molette les y fait défiler.",
+       "windowOpacity": "La transparence du fond du compteur. Les barres et le texte ne changent pas.",
+       "titleOpacity": "La transparence de la barre de titre du meter, à part du fond en dessous. Tant que vous ne le bougez pas, il suit le fond.",
+       "meterOpacity": "L'opacité des barres de dégâts colorées.",
+diff --git a/src/data/i18n/ui/ja.json b/src/data/i18n/ui/ja.json
+index cf53c9d..ce238fb 100644
+--- a/src/data/i18n/ui/ja.json
++++ b/src/data/i18n/ui/ja.json
+@@ -291,6 +291,7 @@
+     "showSuspendBtn": "キャプチャ一時停止ボタンを表示",
+     "showLockBtn": "クリック透過ロックボタンを表示",
+     "lockAllWindows": "メーターの全ウィンドウをロック",
++    "lockScrollEdge": "ロック中：右端でスクロール",
+     "playerLimit": {
+       "label": "表示する最大プレイヤー数"
+     },
+@@ -539,6 +540,7 @@
+       "showSuspendBtn": "押すとゲーム通信の読み取りを止め、もう一度押すと再開するボタンをメーターに表示します。",
+       "showLockBtn": "メーターがマウスを無視し、クリックがゲームに届くようにするボタンです。",
+       "lockAllWindows": "メーターのロック中は、詳細・戦闘履歴・プラグインのウィンドウもクリックを透過します。ロックボタンかそのショートカットで解除します。",
++      "lockScrollEdge": "ロック中も、詳細・戦闘履歴・プラグインのウィンドウは右端の細い帯（スクロールバーの位置）だけマウスを受け付け、そこでホイールを回すとスクロールできます。",
+       "windowOpacity": "メーター背景の透け具合です。バーと文字はそのままです。",
+       "titleOpacity": "メーターのタイトルバーの透け具合を、下の背景とは別に設定します。動かすまでは背景の不透明度に合わせます。",
+       "meterOpacity": "色付きのダメージバーの不透明度です。",
+diff --git a/src/data/i18n/ui/ko.json b/src/data/i18n/ui/ko.json
+index a6941ef..2c106ad 100644
+--- a/src/data/i18n/ui/ko.json
++++ b/src/data/i18n/ui/ko.json
+@@ -296,6 +296,7 @@
+     "showSuspendBtn": "수집 일시정지 버튼 표시",
+     "showLockBtn": "클릭 통과 잠금 버튼 표시",
+     "lockAllWindows": "미터의 모든 창 잠금",
++    "lockScrollEdge": "잠금 중: 오른쪽 가장자리에서 스크롤",
+     "playerLimit": {
+       "label": "최대 표시 인원"
+     },
+@@ -546,6 +547,7 @@
+       "showSuspendBtn": "다시 누를 때까지 게임 트래픽 읽기를 멈추는 버튼을 미터에 표시합니다.",
+       "showLockBtn": "미터가 마우스를 무시하게 하여 클릭이 게임으로 전달되도록 하는 버튼입니다.",
+       "lockAllWindows": "미터가 잠겨 있는 동안 상세 정보, 전투 기록, 플러그인 창도 클릭을 통과시킵니다. 잠금 버튼이나 단축키로 해제하세요.",
++      "lockScrollEdge": "잠겨 있는 동안에도 상세 정보, 전투 기록, 플러그인 창은 스크롤바가 있는 오른쪽 가장자리의 좁은 띠에서 마우스를 받으므로, 그곳에서 휠로 스크롤할 수 있습니다.",
+       "windowOpacity": "미터 배경의 투명도입니다. 막대와 글자는 그대로입니다.",
+       "titleOpacity": "미터 제목 표시줄의 투명도를 아래 배경과 따로 정합니다. 움직이기 전까지는 배경 불투명도를 따릅니다.",
+       "meterOpacity": "색이 있는 피해량 막대의 불투명도입니다.",
+diff --git a/src/data/i18n/ui/pt.json b/src/data/i18n/ui/pt.json
+index b798c27..325629d 100644
+--- a/src/data/i18n/ui/pt.json
++++ b/src/data/i18n/ui/pt.json
+@@ -291,6 +291,7 @@
+     "showSuspendBtn": "Mostrar botão de pausar captura",
+     "showLockBtn": "Mostrar botão de bloqueio (clique através)",
+     "lockAllWindows": "Bloquear todas as janelas do medidor",
++    "lockScrollEdge": "Bloqueado: rolar na borda direita",
+     "playerLimit": {
+       "label": "Máx. de jogadores exibidos"
+     },
+@@ -539,6 +540,7 @@
+       "showSuspendBtn": "Um botão no medidor que para de ler o tráfego do jogo até você apertar de novo.",
+       "showLockBtn": "Um botão que faz o medidor ignorar o mouse, para os cliques irem ao jogo.",
+       "lockAllWindows": "Enquanto o medidor está bloqueado, Detalhes, o histórico de batalhas e as janelas de plugins também deixam os cliques passar. Desbloqueie com o botão de bloqueio ou o seu atalho.",
++      "lockScrollEdge": "Enquanto bloqueado, Detalhes, o histórico de combates e as janelas de plugins ainda recebem o mouse numa faixa estreita da borda direita, onde fica a barra de rolagem: ali a roda as rola.",
+       "windowOpacity": "Quão transparente é o fundo do medidor. Barras e texto não mudam.",
+       "titleOpacity": "O quanto a barra de título do medidor é transparente, separada do fundo abaixo. Até você mexer, ela segue o fundo.",
+       "meterOpacity": "Quão sólidas são as barras coloridas de dano.",
+diff --git a/src/data/i18n/ui/ru.json b/src/data/i18n/ui/ru.json
+index 84b8c38..333e0ce 100644
+--- a/src/data/i18n/ui/ru.json
++++ b/src/data/i18n/ui/ru.json
+@@ -296,6 +296,7 @@
+     "showSuspendBtn": "Показывать кнопку паузы захвата",
+     "showLockBtn": "Показывать кнопку блокировки (сквозной клик)",
+     "lockAllWindows": "Блокировать все окна метра",
++    "lockScrollEdge": "Заблокировано: прокрутка у правого края",
+     "playerLimit": {
+       "label": "Макс. игроков на экране"
+     },
+@@ -544,6 +545,7 @@
+       "showSuspendBtn": "Кнопка на счётчике, которая останавливает чтение трафика игры до повторного нажатия.",
+       "showLockBtn": "Кнопка, после которой счётчик игнорирует мышь и клики проходят в игру.",
+       "lockAllWindows": "Пока метр заблокирован, окна «Подробности», истории боёв и плагинов тоже пропускают клики. Разблокировать — кнопкой блокировки или её сочетанием клавиш.",
++      "lockScrollEdge": "Пока окна заблокированы, «Подробности», история боёв и окна плагинов всё ещё принимают мышь в узкой полосе у правого края, где полоса прокрутки: там их можно прокручивать колесом.",
+       "windowOpacity": "Насколько прозрачен фон счётчика. Полосы и текст не меняются.",
+       "titleOpacity": "Насколько прозрачна строка заголовка метра, отдельно от фона под ней. Пока вы его не сдвинете, он следует за фоном.",
+       "meterOpacity": "Насколько плотные цветные полосы урона.",
+diff --git a/src/data/i18n/ui/zh-Hans.json b/src/data/i18n/ui/zh-Hans.json
+index 8285337..305e6d9 100644
+--- a/src/data/i18n/ui/zh-Hans.json
++++ b/src/data/i18n/ui/zh-Hans.json
+@@ -296,6 +296,7 @@
+     "showSuspendBtn": "显示暂停捕获按钮",
+     "showLockBtn": "显示点击穿透锁定按钮",
+     "lockAllWindows": "锁定所有统计窗口",
++    "lockScrollEdge": "锁定时：在右边缘滚动",
+     "playerLimit": {
+       "label": "最大显示人数"
+     },
+@@ -546,6 +547,7 @@
+       "showSuspendBtn": "在计量器上显示一个按钮，按下后停止读取游戏流量，再按一次恢复。",
+       "showLockBtn": "让计量器忽略鼠标、点击直接作用于游戏的按钮。",
+       "lockAllWindows": "统计锁定期间，详情、战斗记录和插件窗口也会让点击穿透。用锁定按钮或其快捷键解锁。",
++      "lockScrollEdge": "锁定时，详情、战斗记录和插件窗口仍在右边缘（滚动条所在处）的一条细带内响应鼠标，在那里滚动滚轮即可滚动它们。",
+       "windowOpacity": "计量器背景的透明程度。条形和文字不受影响。",
+       "titleOpacity": "统计窗口标题栏的透明程度，与下方背景分开设置。移动它之前，它跟随背景不透明度。",
+       "meterOpacity": "彩色伤害条的不透明程度。",
+diff --git a/src/data/i18n/ui/zh-Hant.json b/src/data/i18n/ui/zh-Hant.json
+index 7d692a7..28a8499 100644
+--- a/src/data/i18n/ui/zh-Hant.json
++++ b/src/data/i18n/ui/zh-Hant.json
+@@ -296,6 +296,7 @@
+     "showSuspendBtn": "顯示暫停擷取按鈕",
+     "showLockBtn": "顯示點擊穿透鎖定按鈕",
+     "lockAllWindows": "鎖定所有統計視窗",
++    "lockScrollEdge": "鎖定時：在右邊緣捲動",
+     "playerLimit": {
+       "label": "最大顯示人數"
+     },
+@@ -546,6 +547,7 @@
+       "showSuspendBtn": "在計量器上顯示一個按鈕，按下後停止讀取遊戲流量，再按一次恢復。",
+       "showLockBtn": "讓計量器忽略滑鼠、點擊直接作用於遊戲的按鈕。",
+       "lockAllWindows": "統計鎖定期間，詳情、戰鬥紀錄與外掛視窗也會讓點擊穿透。以鎖定按鈕或其快捷鍵解鎖。",
++      "lockScrollEdge": "鎖定時，詳細資料、戰鬥紀錄和外掛視窗仍在右邊緣（捲軸所在處）的一條細帶內回應滑鼠，在那裡轉動滾輪即可捲動它們。",
+       "windowOpacity": "計量器背景的透明程度。條形和文字不受影響。",
+       "titleOpacity": "統計視窗標題列的透明程度，與下方背景分開設定。移動它之前，它跟隨背景不透明度。",
+       "meterOpacity": "彩色傷害條的不透明程度。",
+-- 
+2.43.0
+
