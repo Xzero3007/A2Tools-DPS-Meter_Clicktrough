@@ -41,6 +41,9 @@ button[aria-pressed="false"] { color: rgba(255, 255, 255, 0.55); }
 
 .layers, .kinds { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .chip { border-radius: 999px; padding: 1px 10px; font-size: 12px; }
+select.chip { background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.14); color: rgba(255, 255, 255, 0.75); padding: 1px 6px; cursor: pointer; }
+select.chip:hover, select.chip:focus { border-color: rgba(255, 255, 255, 0.35); outline: none; }
+select.chip option { background: #1c1f24; color: #fff; }
 .chip.kind { display: inline-flex; align-items: center; gap: 5px; }
 .chip.kind i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; }
 .chip.kind[aria-pressed="false"] i { opacity: 0.35; }

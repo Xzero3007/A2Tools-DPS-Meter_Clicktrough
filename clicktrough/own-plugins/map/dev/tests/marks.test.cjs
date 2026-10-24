@@ -72,6 +72,31 @@ test("with a pet tracked: only its spawn points, the next one and the counts", (
   assert.ok(b.marks.some((m) => m.kind === "me" && m.exact));
 });
 
+test("the next pet: a pinned one before a farmed one before one only needed, live first within them", () => {
+  // Another pet monster of Verteron, of another pet.
+  const npc2 = Object.keys(D.spawns.verteron).find((n) => D.npcPets[n] != null && String(D.npcPets[n]) !== pet);
+  const pet2 = String(D.npcPets[npc2]);
+  const [ox, oy] = D.spawns.verteron[npc2];
+  const me = { x: ox + 500, y: oy, exact: true }; // 5 m from pet2's spawn point
+  const world = { zone: 1010, me, npcs: [[7, Number(npc2), ox + 800, oy]] }; // pet2 there, 3 m off
+  const at = (marks) => M.mergeTracked({ pf: { pets: [{ id: Number(pet), mark: marks[0], name: "First" }, { id: Number(pet2), mark: marks[1], name: "Second" }] } });
+  const nextOf = (tracked, nextFor) => M.build({ key: "verteron", world, tracked, heading: 0, layers, gatherKinds: {}, petsMode: "tracked", nextFor }).next;
+  // Both only needed: the one there now.
+  assert.equal(nextOf(at(["needed", "needed"])).name, "Second");
+  // The pinned one, however far, before a needed one there now.
+  const pinned = nextOf(at(["pinned", "needed"]));
+  assert.equal(pinned.name, "First");
+  assert.equal(pinned.mark, "pinned");
+  assert.equal(nextOf(at(["farming", "needed"])).name, "First");
+  assert.equal(nextOf(at(["pinned", "farming"])).name, "First");
+  assert.equal(nextOf(at(["needed", "farming"])).name, "Second");
+  // "chosen": the needed ones are no next; "off": none.
+  assert.equal(nextOf(at(["needed", "needed"]), "chosen"), null);
+  assert.equal(nextOf(at(["needed", "farming"]), "chosen").name, "Second");
+  assert.equal(nextOf(at(["pinned", "farming"]), "off"), null);
+  assert.match(M.markText("needed"), /rank 3/);
+});
+
 test("with nothing tracked: every pet's spawn points, small and white, and no next", () => {
   const b = M.build({ key: "verteron", world: { zone: 1010, me: { x: sx, y: sy, exact: false }, npcs: [], objects: [] }, tracked: new Map(), heading: 0, layers: { ...layers, gather: false }, gatherKinds: {}, petsMode: "tracked" });
   const spawns = b.marks.filter((m) => m.kind === "petSpawn");

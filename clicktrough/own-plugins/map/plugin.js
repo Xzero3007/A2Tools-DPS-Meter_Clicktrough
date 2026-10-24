@@ -13,6 +13,7 @@
     layers: { pets: true, monsters: false, gather: false, cubes: true, monoliths: false, kibelisks: false, places: false },
     gatherKinds: {},
     petsMode: "tracked",
+    nextFor: "all", // the next pet: "all" (pinned, then farmed, then needed), "chosen" (pinned and farmed), "off"
     follow: true,
     zoom: null, // screen px per map px while following
     overlay: false,
@@ -102,7 +103,7 @@
   }
 
   function state(key) {
-    return { key, world, tracked, heading, layers: settings.layers, gatherKinds: settings.gatherKinds, petsMode: settings.petsMode, focus: settings.focus };
+    return { key, world, tracked, heading, layers: settings.layers, gatherKinds: settings.gatherKinds, petsMode: settings.petsMode, focus: settings.focus, nextFor: settings.nextFor };
   }
 
   function draw() {
@@ -162,6 +163,8 @@
         textContent: `${M.arrow(n.bearing)} ${Math.round(n.metres)} m${n.live ? " (there now)" : n.focus ? "" : " (spawn point)"}`,
       });
       $(".next").append(label, name, dist);
+      // Why this one: what was searched, or how the pet is followed.
+      $(".next").title = n.focus ? `What the search shows: ${n.name}` : `${n.name}: ${M.markText(n.mark)}`;
     }
     const parts = [];
     if (settings.focus) parts.push(`${built.hits.length / 2} on this map`);
@@ -299,6 +302,7 @@
         layers: settings.layers,
         gatherKinds: settings.gatherKinds,
         petsMode: settings.petsMode,
+        nextFor: settings.nextFor,
         focus: settings.focus,
         zoom: settings.overlayZoom,
         opacity: settings.overlayOpacity,
@@ -365,6 +369,8 @@
       saveLater();
       renderTools();
       applyOverlay();
+    } else if (data.type === "focus-clear") {
+      setFocus(null);
     } else if (data.type === "ready") {
       lastSent = 0;
       render();
@@ -381,6 +387,8 @@
     }
     $(".petsMode").setAttribute("aria-pressed", String(settings.petsMode === "all"));
     $(".petsMode").hidden = !settings.layers.pets;
+    $(".nextFor").value = ["all", "chosen", "off"].includes(settings.nextFor) ? settings.nextFor : "all";
+    $(".nextFor").hidden = !settings.layers.pets;
     const kinds = $(".kinds");
     kinds.hidden = !settings.layers.gather || compact;
     kinds.replaceChildren(...M.KIND_ORDER.map((k) => {
@@ -431,6 +439,11 @@
     settings.petsMode = settings.petsMode === "all" ? "tracked" : "all";
     saveLater();
     renderTools();
+    render();
+  });
+  $(".nextFor").addEventListener("change", () => {
+    settings.nextFor = $(".nextFor").value;
+    saveLater();
     render();
   });
   $(".follow").addEventListener("click", () => {

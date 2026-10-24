@@ -193,10 +193,10 @@
   }
 
   /**
-   * state: { key, world, tracked (Map), heading, layers, gatherKinds, petsMode, focus }
+   * state: { key, world, tracked (Map), heading, layers, gatherKinds, petsMode, focus, nextFor }
    * -> { marks, next, petsHere, around, hits: [x, y, ...] }
    */
-  function build({ key, world, tracked, heading, layers, gatherKinds, petsMode, focus }) {
+  function build({ key, world, tracked, heading, layers, gatherKinds, petsMode, focus, nextFor = "all" }) {
     const marks = [];
     const map = D.maps[key];
     if (!map) return { marks, next: null, petsHere: 0, around: 0, hits: [] };
@@ -214,13 +214,20 @@
       return { color: K.PET_RED, ring: null };
     };
 
+    // The next pet to go for: a pinned one before one being farmed, that
+    // before one only still needed (Pet Finder shares every pet not at rank 3
+    // yet, so many); among them one that is there right now, then the
+    // nearest. nextFor "chosen": only pinned and farmed ones; "off": none.
     let next = null;
     const consider = (pet, x, y, live) => {
-      if (!me || !tracked.size || !tracked.has(String(pet))) return;
+      if (!me || !tracked.size || nextFor === "off") return;
+      const t = tracked.get(String(pet));
+      if (!t) return;
+      const rank = RANK[t.mark] || 1;
+      if (nextFor === "chosen" && rank < RANK.farming) return;
       const d = K.metres(me.x, me.y, x, y);
-      // A monster that is there beats a spawn point; then the nearest.
-      if (!next || (live && !next.live) || (live === next.live && d < next.metres)) {
-        next = { pet, name: petName(pet, tracked), metres: d, bearing: K.bearing(me.x, me.y, x, y), live };
+      if (!next || rank > next.rank || (rank === next.rank && ((live && !next.live) || (live === next.live && d < next.metres)))) {
+        next = { pet, name: petName(pet, tracked), metres: d, bearing: K.bearing(me.x, me.y, x, y), live, mark: t.mark, rank };
       }
     };
 
@@ -372,11 +379,15 @@
     return null;
   }
 
+  /** Why a pet is followed, as the next one says it. */
+  const MARK_TEXT = { pinned: "pinned", farming: "being farmed (Pet Soul Tracker)", needed: "not at rank 3 yet (Pet Finder)" };
+  const markText = (mark) => MARK_TEXT[mark] || MARK_TEXT.needed;
+
   /** The compass arrow for a bearing (0 = up). */
   const ARROWS = ["↑", "↗", "→", "↘", "↓", "↙", "←", "↖"];
   const arrow = (deg) => ARROWS[Math.round((((deg % 360) + 360) % 360) / 45) % 8];
 
   globalThis.MapMarks = Object.freeze({
-    build, mergeTracked, mapOf, regionAt, arrow, petName, search, focusMaps, focusPoints, KIND_ORDER, kindLabel, kindTitle, placeLabel,
+    build, mergeTracked, mapOf, regionAt, arrow, markText, petName, search, focusMaps, focusPoints, KIND_ORDER, kindLabel, kindTitle, placeLabel,
   });
 })();
