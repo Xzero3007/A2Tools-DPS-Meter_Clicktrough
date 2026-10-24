@@ -51,7 +51,6 @@ package.
   optionally in columns.
 - **No stuck tooltip**: the box that opens when you hover a row closes
   reliably on Linux (the original's fix, here before its next version).
-- **No supporter features and no links to the author** in the app.
 - **Updates come from this repo**, so an official update doesn't replace the
   changes again.
 
