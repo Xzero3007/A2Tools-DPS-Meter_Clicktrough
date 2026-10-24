@@ -1,0 +1,31 @@
+From da376dcbb165ea481df791f702cbd805c0c9efc5 Mon Sep 17 00:00:00 2001
+From: taengu <7606218+taengu@users.noreply.github.com>
+Date: Sat, 24 Oct 2026 09:52:40 +0800
+Subject: [PATCH] Meter: the stuck-tooltip check goes by the tooltip being up
+
+On Wayland the page can keep a row :hover after the pointer has gone, and
+leaving the row then cleared the hovered row but kept the tooltip, which
+the 4 s check, going by the hovered row, never closed (Hirai).
+---
+ public/src/js/core.js | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/public/src/js/core.js b/public/src/js/core.js
+index 1e614bf..15dfee1 100644
+--- a/public/src/js/core.js
++++ b/public/src/js/core.js
+@@ -1178,7 +1178,10 @@ class DpsApp {
+       }
+     });
+     this.hoverIdleWatch = setInterval(() => {
+-      if (!this.hoverIdleOnly || !this.hoveredDetailsRowId) return;
++      // By the tooltip being up, not by a hovered row: on Wayland the page can
++      // keep a row :hover after the pointer has gone, and leaving it then
++      // cleared the row but kept the tooltip (Hirai, KDE Wayland).
++      if (!this.hoverIdleOnly || !this.hoverTooltipEl?.classList.contains("isVisible")) return;
+       if (Date.now() - this.lastPointerMoveAt < 4000) return;
+       this.hoveredDetailsRowId = null;
+       this.hideHoverTooltip();
+-- 
+2.43.0
+

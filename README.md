@@ -32,6 +32,13 @@ veröffentlicht sie als Arch-Paket.
   beginnen, und immer die nächste Artefakt-Belagerung, wahlweise als Spalten
   nebeneinander (breiter Balken). Die **Daily Checklist** genauso: Daily,
   Weekly und One-time als Spalten.
+- **Pet Finder ist eingebaut**: Pet-Mobs in der Nähe, Pet-Suche und eine
+  Einkaufsliste für den Black Cloud Merchant (Daten aus
+  [PetTracker](https://github.com/0Fox2Give/PetTracker)); der Händler-Tab
+  wahlweise in Spalten nebeneinander.
+- **Kein hängender Tooltip**: Das Info-Fenster beim Drüberfahren über eine
+  Zeile schließt unter Linux zuverlässig (Korrektur des Originals, hier schon
+  vor dessen nächster Version).
 - **Keine Supporter-Funktionen und keine Links zum Autor** in der App.
 - **Updates kommen aus diesem Repo**, damit ein offizielles Update die
   Anpassungen nicht wieder ersetzt.
@@ -62,8 +69,13 @@ OBS-Overlay …), steht beim Original:
   GPL-3.0 ([LICENSE](LICENSE)). Das gilt für dieses Repo und jedes Paket daraus
   genauso.
 - Geändert ist nur, was in [`clicktrough/`](clicktrough/) liegt: die Patches
-  (jeder mit Datum im Kopf) und der Bauablauf. Der Quellcode jedes Pakets ist
-  das Original zum jeweiligen Versions-Tag plus diese Patches.
+  (jeder mit Datum im Kopf), vorgezogene Korrekturen des Originals, die
+  Plugins und der Bauablauf. Der Quellcode jedes Pakets ist das Original zum
+  jeweiligen Versions-Tag plus diese Patches.
+- Pet Finder (`clicktrough/own-plugins/pet-finder`) übernimmt Daten und
+  Paket-Layouts aus [PetTracker](https://github.com/0Fox2Give/PetTracker) und
+  steht unter GPL-3.0-or-later. Namen und Bilder aus Aion 2 gehören ihren
+  Rechteinhabern.
 - Wie im Original: Teile des Parsers stammen aus
   [Daevalog](https://github.com/Seralth/Daevalog) von Seralth (GPL-3.0). Die
   mitgelieferten Schriften stehen unter der SIL Open Font License 1.1; ihre
