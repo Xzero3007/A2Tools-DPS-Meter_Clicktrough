@@ -1,25 +1,24 @@
 name: Clicktrough release
 
-# Baut jede neue Version des Original-Meters (taengu/A2Tools-DPS-Meter) mit den
-# Anpassungen aus clicktrough/patches neu und veröffentlicht das Arch-Paket
-# als Release dieses Repos. Plugins mit Anpassungen (clicktrough/plugins/<id>)
-# kommen aus taengu/A2Tools-Plugins, werden angepasst und im Paket mitgeliefert
-# (data/ct-plugins, siehe Patch 0004); ändert sich so ein Plugin im Original,
-# wird ebenfalls neu gebaut. Eigene Plugins dieses Repos
-# (clicktrough/own-plugins/<id>) kommen ebenfalls ins Paket. Das Meter aus
-# diesem Repo holt seine Updates von hier (releases/latest/download/latest-v2.json,
-# siehe Patch 0003).
+# Rebuilds every new version of the original meter (taengu/A2Tools-DPS-Meter)
+# with the changes in clicktrough/patches and publishes the Arch package as a
+# release of this repo. Changed plugins (clicktrough/plugins/<id>) come from
+# taengu/A2Tools-Plugins, are patched and shipped in the package
+# (data/ct-plugins, see patch 0004); when such a plugin changes in the
+# original, a new build follows too. This repo's own plugins
+# (clicktrough/own-plugins/<id>) go into the package as well. The meter from
+# this repo takes its updates from here (releases/latest/download/latest-v2.json,
+# see patch 0003).
 #
-# clicktrough/backports: Korrekturen, die das Original schon gemacht, aber noch
-# nicht als Version veröffentlicht hat. Sie kommen vor die Patches; enthält die
-# gebaute Version den Commit schon (erste Zeile des Patches), wird er
-# übersprungen.
+# clicktrough/backports: fixes the original has made but not released in a
+# version yet. They go before the patches; once the version being built
+# contains the commit (first line of the patch), it is skipped.
 #
-# Passt ein Patch nicht mehr auf eine neue Version, wird nichts veröffentlicht:
-# Das installierte Meter bleibt, wie es ist, und es öffnet sich ein Issue.
+# When a patch no longer fits a new version, nothing is published: the
+# installed meter stays as it is, and an issue opens.
 on:
   schedule:
-    # Alle zwei Stunden nachsehen, ob das Original eine neue Version hat.
+    # Every two hours, check whether the original has a new version.
     - cron: "23 */2 * * *"
   push:
     branches: [main]
@@ -32,7 +31,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Version des Originals, z. B. v2.0.76 (leer = neueste)"
+        description: "Version of the original, e.g. v2.0.76 (empty = newest)"
         required: false
         default: ""
 
@@ -49,7 +48,7 @@ env:
   PLUGINS: https://github.com/taengu/A2Tools-Plugins.git
 
 jobs:
-  # Leicht und schnell: gibt es etwas zu bauen?
+  # Light and quick: is there anything to build?
   plan:
     runs-on: ubuntu-24.04
     outputs:
@@ -67,11 +66,11 @@ jobs:
           set -euo pipefail
           tag="${WANTED:-}"
           if [ -z "$tag" ]; then
-            # Nur echte Versionen (v2.0.76), keine Test-Tags.
+            # Real versions only (v2.0.76), no test tags.
             tag=$(git ls-remote --tags --refs "$UPSTREAM" 'v*' | sed 's#.*refs/tags/##' \
               | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n1)
           fi
-          # Die angepassten Plugins: ihr Stand im Original (Baum-Hash je Ordner).
+          # The changed plugins: their state in the original (tree hash per folder).
           plugins_commit=""
           plugins_state=""
           if compgen -G "clicktrough/plugins/*/*.patch" >/dev/null; then
@@ -83,8 +82,8 @@ jobs:
             done
           fi
           echo "plugins_commit=$plugins_commit" >> "$GITHUB_OUTPUT"
-          # Ein Release je Version des Originals, Stand der Patches, Stand
-          # der angepassten Plugins und Stand der eigenen Plugins.
+          # One release per version of the original, state of the patches,
+          # of the changed plugins and of the own plugins.
           hash=$( { cat clicktrough/patches/*.patch; cat clicktrough/plugins/*/*.patch 2>/dev/null || true; echo "$plugins_state";
                     cat clicktrough/backports/*.patch 2>/dev/null || true; git ls-files -s clicktrough/own-plugins; } \
             | sha256sum | cut -c1-8)
@@ -92,10 +91,10 @@ jobs:
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "release=$release" >> "$GITHUB_OUTPUT"
           if gh release view "$release" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "Schon gebaut: $release"
+            echo "Already built: $release"
             echo "build=false" >> "$GITHUB_OUTPUT"
           else
-            echo "Zu bauen: $release"
+            echo "To build: $release"
             echo "build=true" >> "$GITHUB_OUTPUT"
           fi
 
@@ -115,31 +114,31 @@ jobs:
       PLUGINS_COMMIT: ${{ needs.plan.outputs.plugins_commit }}
       GH_TOKEN: ${{ github.token }}
     steps:
-      - name: Werkzeuge
+      - name: Tools
         run: |
           exec > >(tee -a "$GITHUB_WORKSPACE/ct-build.log") 2>&1
-          echo "== Werkzeuge"
+          echo "== Tools"
           pacman -Syu --noconfirm --needed git github-cli rust nodejs npm pkgconf python \
             webkit2gtk-4.1 gtk3 libpcap libcap hicolor-icon-theme gst-plugins-base gst-plugins-good
           git config --global --add safe.directory '*'
       - uses: actions/checkout@v7
         with:
           path: fork
-      - name: Original holen und Patches anwenden
+      - name: Fetch the original and apply the patches
         run: |
           exec > >(tee -a "$GITHUB_WORKSPACE/ct-build.log") 2>&1
-          echo "== Original holen und Patches anwenden"
+          echo "== Fetch the original and apply the patches"
           set -euo pipefail
-          # Volle Historie: das PKGBUILD zählt die Commits für die Paketversion.
+          # Full history: the PKGBUILD counts the commits for the package version.
           git clone --filter=blob:none "$UPSTREAM" src
           cd src
           git checkout -q --detach "$TAG"
-          # Vorgezogene Korrekturen des Originals, die diese Version noch nicht hat.
+          # The original's fixes taken early that this version doesn't have yet.
           for p in ../fork/clicktrough/backports/*.patch; do
             [ -e "$p" ] || continue
             sha=$(sed -n '1s/^From \([0-9a-f]\{40\}\) .*/\1/p' "$p")
             if [ -n "$sha" ] && git merge-base --is-ancestor "$sha" HEAD 2>/dev/null; then
-              echo "Schon in ${TAG}: $(basename "$p")"
+              echo "Already in ${TAG}: $(basename "$p")"
               continue
             fi
             git -c user.name="Clicktrough" -c user.email="clicktrough@users.noreply.github.com" am "$p"
@@ -147,21 +146,20 @@ jobs:
           git rev-parse HEAD > "$GITHUB_WORKSPACE/ct-backported"
           git -c user.name="Clicktrough" -c user.email="clicktrough@users.noreply.github.com" \
             am ../fork/clicktrough/patches/*.patch
-          # Welcher Build dieses Repos das ist: das Meter erkennt daran ein
-          # neueres Paket derselben Version.
+          # Which build of this repo this is: the meter tells a newer package
+          # of the same version by it.
           sed -i "s/const CT_REVISION = 0;/const CT_REVISION = ${REVISION};/" public/src/js/checkRelease.js
           grep -q "const CT_REVISION = ${REVISION};" public/src/js/checkRelease.js
-          # Die Paketversion trägt den Build (2.0.76.r727.ct5.g…), damit pacman
-          # einen neueren Build derselben Version als neuer sieht. (pkgrel
-          # setzt makepkg selbst auf 1 zurück, wenn pkgver() eine neue
-          # Version liefert.)
+          # The package version carries the build (2.0.76.r727.ct5.g…), so
+          # pacman sees a newer build of the same version as newer. (makepkg
+          # resets pkgrel to 1 itself when pkgver() gives a new version.)
           sed -i "s/printf '%s.r%s.g%s'/printf '%s.r%s.ct${REVISION}.g%s'/" packaging/arch/PKGBUILD
           grep -q "ct${REVISION}.g%s" packaging/arch/PKGBUILD
-      - name: Plugins anpassen und mitliefern
+      - name: Patch and ship the changed plugins
         if: needs.plan.outputs.plugins_commit != ''
         run: |
           exec > >(tee -a "$GITHUB_WORKSPACE/ct-build.log") 2>&1
-          echo "== Plugins anpassen und mitliefern"
+          echo "== Patch and ship the changed plugins"
           set -euo pipefail
           git clone -q --filter=blob:none "$PLUGINS" plugins-up
           git -C plugins-up checkout -q --detach "$PLUGINS_COMMIT"
@@ -173,29 +171,29 @@ jobs:
             cp -r "plugins-up/plugins/$id" "src/src/data/ct-plugins/$id"
             echo "$id $(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "plugins-up/plugins/$id/manifest.json" | head -n1)"
           done
-      - name: Eigene Plugins mitliefern
+      - name: Ship the own plugins
         run: |
           exec > >(tee -a "$GITHUB_WORKSPACE/ct-build.log") 2>&1
-          echo "== Eigene Plugins mitliefern"
+          echo "== Ship the own plugins"
           set -euo pipefail
           for d in fork/clicktrough/own-plugins/*/; do
             [ -f "$d/manifest.json" ] || continue
             id=$(basename "$d")
             dest="src/src/data/ct-plugins/$id"
             if [ -e "$dest" ]; then
-              echo "$id gibt es schon unter den angepassten Plugins." >&2
+              echo "$id is already one of the changed plugins." >&2
               exit 1
             fi
             mkdir -p "$dest"
             cp -r "$d/." "$dest/"
-            # Entwicklerwerkzeuge und Tests gehören nicht ins Paket.
+            # Developer tools and tests don't go into the package.
             rm -rf "$dest/dev"
             echo "$id $(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$dest/manifest.json" | head -n1)"
           done
-      - name: Arch-Paket bauen
+      - name: Build the Arch package
         run: |
           exec > >(tee -a "$GITHUB_WORKSPACE/ct-build.log") 2>&1
-          echo "== Arch-Paket bauen"
+          echo "== Build the Arch package"
           set -euo pipefail
           useradd -m builder
           chown -R builder src
@@ -207,25 +205,25 @@ jobs:
           echo "== Tests"
           set -euo pipefail
           su - builder -c "cd '$GITHUB_WORKSPACE/src' && node --test tests/*.test.mjs"
-          # Die Skripte der Plugins so prüfen, wie der Browser sie lädt: als
-          # klassische Skripte. (`node --check` liest sie hier als Module,
-          # weil das package.json des Meters "type": "module" setzt.)
+          # Check the plugins' scripts the way the browser loads them: as
+          # classic scripts. (`node --check` reads them as modules here, as
+          # the meter's package.json sets "type": "module".)
           if compgen -G "src/src/data/ct-plugins/*/*.js" >/dev/null; then
             node -e 'const fs = require("fs"), vm = require("vm");
               for (const f of process.argv.slice(1)) new vm.Script(fs.readFileSync(f, "utf8"), { filename: f });' \
               src/src/data/ct-plugins/*/*.js
           fi
-          # Eigene Plugins mit eigenen Tests: gegen den Code dieser Version.
+          # Own plugins with tests of their own: against this version's code.
           for t in fork/clicktrough/own-plugins/*/dev/ci.sh; do
             [ -e "$t" ] || continue
             echo "-- $t"
             su - builder -c "cd '$GITHUB_WORKSPACE' && bash '$t' src"
           done
           echo ok
-      - name: Veröffentlichen
+      - name: Publish
         run: |
           exec > >(tee -a "$GITHUB_WORKSPACE/ct-build.log") 2>&1
-          echo "== Veröffentlichen"
+          echo "== Publish"
           set -euo pipefail
           pkg=$(ls src/packaging/arch/*.pkg.tar.zst | head -n1)
           name=$(basename "$pkg")
@@ -237,10 +235,10 @@ jobs:
           cat latest-v2.json
           previous=$(git -C src tag -l 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | grep -B1 -x "$TAG" | head -n1)
           {
-            echo "A2Tools DPS Meter **${version}** vom Original-Autor, neu gebaut mit den Anpassungen dieses Repos (Build ${REVISION})."
+            echo "A2Tools DPS Meter **${version}** by the original author, rebuilt with this repo's changes (build ${REVISION})."
             echo
             backported=$(cat ct-backported)
-            echo "**Anpassungen:**"
+            echo "**Changes:**"
             git -C src log --reverse --format='- %s' "${backported}..HEAD"
             if [ -n "$PLUGINS_COMMIT" ]; then
               git -C plugins-up log --reverse --format='- %s' "${PLUGINS_COMMIT}..HEAD"
@@ -252,46 +250,46 @@ jobs:
             done)
             if [ -n "$own" ]; then
               echo
-              echo "**Mitgelieferte Plugins dieses Repos:**"
+              echo "**This repo's own plugins in the package:**"
               echo "$own"
             fi
             if [ "$backported" != "$(git -C src rev-parse "${TAG}^{commit}")" ]; then
               echo
-              echo "**Aus dem Original vorgezogen** (kommt mit dessen nächster Version von selbst):"
+              echo "**Taken early from the original** (comes with its next version by itself):"
               git -C src log --reverse --format='- %s' "${TAG}..${backported}"
             fi
             echo
-            echo "**Erstinstallation:** \`${name}\` herunterladen, dann \`sudo pacman -U ${name}\`."
-            echo "Danach kommen Updates über den grünen Knopf im Titel des Meters."
+            echo "**First install:** download \`${name}\`, then \`sudo pacman -U ${name}\`."
+            echo "After that, updates come through the green button in the meter's title."
             if [ -n "$previous" ] && [ "$previous" != "$TAG" ]; then
               echo
-              echo "**Änderungen des Originals seit ${previous}:**"
+              echo "**Changes in the original since ${previous}:**"
               git -C src log --no-merges --format='- %s' "${previous}..${TAG}" | grep -v -i -E 'manifest|^- [0-9]+\.[0-9]+\.[0-9]+$' || true
             fi
           } > notes.md
           gh release create "$RELEASE" "$pkg" latest-v2.json -R "$GITHUB_REPOSITORY" \
             --title "A2Tools ${version} · Clicktrough ${REVISION}" --notes-file notes.md --latest --target "$GITHUB_SHA"
-      - name: Offene Fehler-Issues schließen
+      - name: Close open build issues
         if: success()
         run: |
           for n in $(gh issue list -R "$GITHUB_REPOSITORY" --state open --label clicktrough-build --json number --jq '.[].number' 2>/dev/null); do
-            gh issue close "$n" -R "$GITHUB_REPOSITORY" --comment "Gebaut und veröffentlicht: ${RELEASE}" || true
+            gh issue close "$n" -R "$GITHUB_REPOSITORY" --comment "Built and published: ${RELEASE}" || true
           done
-      - name: Fehler melden
+      - name: Report the failure
         if: failure()
         run: |
-          title="Build für ${TAG} fehlgeschlagen"
+          title="Build for ${TAG} failed"
           tail_log=$(tail -n 80 "$GITHUB_WORKSPACE/ct-build.log" 2>/dev/null | sed 's/\x1b\[[0-9;]*[A-Za-z]//g' | cut -c1-300 || true)
-          body="Der Build ${RELEASE} ist fehlgeschlagen, es wurde nichts veröffentlicht. Das installierte Meter bleibt, wie es ist.
+          body="The build ${RELEASE} failed; nothing was published. The installed meter stays as it is.
 
-          Meist passt ein Patch nicht mehr auf die neue Version des Originals.
-          Lauf: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+          Usually a patch no longer fits the original's new version.
+          Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
 
-          Ende des Protokolls:
+          End of the log:
           \`\`\`
           ${tail_log}
           \`\`\`"
-          gh label create clicktrough-build -R "$GITHUB_REPOSITORY" --color B60205 --description "Automatischer Build" 2>/dev/null || true
+          gh label create clicktrough-build -R "$GITHUB_REPOSITORY" --color B60205 --description "Automatic build" 2>/dev/null || true
           existing=$(gh issue list -R "$GITHUB_REPOSITORY" --state open --label clicktrough-build --search "in:title ${TAG}" --json number --jq '.[0].number' 2>/dev/null || true)
           if [ -n "$existing" ]; then
             gh issue comment "$existing" -R "$GITHUB_REPOSITORY" --body "$body" || true
