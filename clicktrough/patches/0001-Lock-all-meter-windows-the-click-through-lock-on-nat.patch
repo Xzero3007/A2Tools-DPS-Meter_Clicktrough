@@ -1,4 +1,4 @@
-From edec2290d8b56e4099b60931dd6d3d48911e1db6 Mon Sep 17 00:00:00 2001
+From 42b8af44a23ef52e9b2f4e1d7eec1103635b6123 Mon Sep 17 00:00:00 2001
 From: A2Tools patch <patch@localhost>
 Date: Tue, 20 Oct 2026 10:26:21 +0000
 Subject: [PATCH 1/5] Lock all meter windows; the click-through lock on native
@@ -7,9 +7,9 @@ Subject: [PATCH 1/5] Lock all meter windows; the click-through lock on native
 ---
  docs/linux.md                          |   2 +-
  index.html                             |   7 ++
- public/src/js/core.js                  |  13 +++-
- src-tauri/src/app.rs                   | 102 ++++++++++++++++++++++---
- src-tauri/src/platform/linux/window.rs |  77 +++++++++++++++----
+ public/src/js/core.js                  |  13 ++-
+ src-tauri/src/app.rs                   | 110 ++++++++++++++++++++-----
+ src-tauri/src/platform/linux/window.rs |  82 ++++++++++++------
  src-tauri/src/plugins/mod.rs           |   2 +
  src-tauri/src/plugins/widgets.rs       |   5 +-
  src/data/i18n/ui/de.json               |   2 +
@@ -22,7 +22,7 @@ Subject: [PATCH 1/5] Lock all meter windows; the click-through lock on native
  src/data/i18n/ui/ru.json               |   2 +
  src/data/i18n/ui/zh-Hans.json          |   2 +
  src/data/i18n/ui/zh-Hant.json          |   2 +
- 17 files changed, 198 insertions(+), 30 deletions(-)
+ 17 files changed, 193 insertions(+), 48 deletions(-)
 
 diff --git a/docs/linux.md b/docs/linux.md
 index 2dac013..9345e75 100644
@@ -38,10 +38,10 @@ index 2dac013..9345e75 100644
  | Screenshots | Works from 2.0.41, to the clipboard and a folder (`~/Pictures/A2Tools DPS Meter` by default). On Linux the meter pictures itself on a plain background, since Wayland lets no app copy the screen |
  | Auto-hide when the game loses focus | Not yet (the meter stays visible) |
 diff --git a/index.html b/index.html
-index 1b58364..af4cdb6 100644
+index 41787a4..7e777d8 100644
 --- a/index.html
 +++ b/index.html
-@@ -739,6 +739,13 @@
+@@ -751,6 +751,13 @@
                        <span class="settingsToggleTrack" aria-hidden="true"></span>
                      </span>
                    </label>
@@ -56,10 +56,10 @@ index 1b58364..af4cdb6 100644
                </section>
                <section class="settingsSection" id="settingsSection-appearance" role="tabpanel" aria-labelledby="settingsTab-appearance" data-section="appearance" hidden>
 diff --git a/public/src/js/core.js b/public/src/js/core.js
-index c3d1dc4..c091912 100644
+index 53d1093..f0908f5 100644
 --- a/public/src/js/core.js
 +++ b/public/src/js/core.js
-@@ -54,6 +54,7 @@ const REMOTE_APPLIED_SETTING_CONTROLS = {
+@@ -55,6 +55,7 @@ const REMOTE_APPLIED_SETTING_CONTROLS = {
    "dpsMeter.barTextureOffset": ".textureOffsetCheckbox",
    "dpsMeter.showSuspendBtn": ".showSuspendBtnCheckbox",
    "dpsMeter.showLockBtn": ".showLockBtnCheckbox",
@@ -67,7 +67,7 @@ index c3d1dc4..c091912 100644
    // Set from the main window by the account offer.
    "dpsMeter.autoUpload": ".autoUploadCheckbox",
  };
-@@ -144,6 +145,7 @@ class DpsApp {
+@@ -146,6 +147,7 @@ class DpsApp {
        detailsMonitor: "dpsMeter.detailsMonitor",
        showSuspendBtn: "dpsMeter.showSuspendBtn",
        showLockBtn: "dpsMeter.showLockBtn",
@@ -75,7 +75,7 @@ index c3d1dc4..c091912 100644
        overlayLocked: "dpsMeter.overlayLocked",
      };
  
-@@ -6730,11 +6732,14 @@ class DpsApp {
+@@ -6792,11 +6794,14 @@ class DpsApp {
    // Locked, the overlay lets clicks through to the game and cannot be
    // dragged; only its lock button stays clickable (the backend watches the
    // pointer, see OverlayLock in app.rs), and a hotkey toggles it too. Offered
@@ -91,7 +91,7 @@ index c3d1dc4..c091912 100644
      const isOverlay = window.A2_VIEW === "main";
      Promise.resolve(window.javaBridge?.overlayLockSupported?.())
        .then((supported) => {
-@@ -6752,6 +6757,12 @@ class DpsApp {
+@@ -6814,6 +6819,12 @@ class DpsApp {
              if (!isChecked) this._setOverlayLocked(false);
            });
          }
@@ -105,7 +105,7 @@ index c3d1dc4..c091912 100644
          this._applyLockBtnVisibility(show);
          window.addEventListener("resize", () => this._sendLockBtnRect());
 diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
-index a11a7a1..c4c752a 100644
+index c62509b..8e3f8bc 100644
 --- a/src-tauri/src/app.rs
 +++ b/src-tauri/src/app.rs
 @@ -329,15 +329,59 @@ fn screenshot_tool(app: &tauri::AppHandle, in_front: bool) {
@@ -170,7 +170,7 @@ index a11a7a1..c4c752a 100644
 +/// position and so works on native Wayland too; elsewhere the pointer watch
 +/// needs the pointer's position outside the window (see `OverlayLock`).
 +fn lock_supported() -> bool {
-+    cfg!(target_os = "linux") || platform::window::cursor_position().is_some()
++    cfg!(target_os = "linux") || platform::window::click_through_by_region() || platform::window::cursor_position().is_some()
  }
  
  fn sync_click_through(app: &tauri::AppHandle, lock: &OverlayLock, over_button: bool) {
@@ -188,16 +188,16 @@ index a11a7a1..c4c752a 100644
      // No pointer watch where the window keeps the button by its input region.
      if cfg!(target_os = "linux") {
          return;
-@@ -984,7 +1033,7 @@ pub(crate) fn toggle_overlay_lock(app: &tauri::AppHandle) {
+@@ -986,7 +1035,7 @@ pub(crate) fn toggle_overlay_lock(app: &tauri::AppHandle) {
      let locked = app
          .try_state::<AppState>()
          .is_some_and(|s| s.overlay_lock.locked.load(std::sync::atomic::Ordering::SeqCst));
--    if platform::window::cursor_position().is_none() && !locked {
+-    if !lock_offered() && !locked {
 +    if !lock_supported() && !locked {
          return; // the lock is not offered here
      }
      apply_overlay_lock(app, !locked);
-@@ -1056,6 +1105,9 @@ fn update_settings(
+@@ -1058,6 +1107,9 @@ fn update_settings(
          if HOTKEY_KEYS.contains(&key.as_str()) {
              restart_global_hotkeys(&app);
          }
@@ -207,7 +207,7 @@ index a11a7a1..c4c752a 100644
          let _ = app.emit("setting-changed", serde_json::json!({ "key": key, "value": value }));
          #[cfg(feature = "online")]
          if key.starts_with(crate::stream_overlay::ENABLED_KEY) {
-@@ -1312,11 +1364,10 @@ fn suspend_capture(state: tauri::State<'_, AppState>, suspended: bool) {
+@@ -1314,19 +1366,10 @@ fn suspend_capture(state: tauri::State<'_, AppState>, suspended: bool) {
      tracing::info!("Capture {}", if suspended { "suspended" } else { "resumed" });
  }
  
@@ -216,12 +216,20 @@ index a11a7a1..c4c752a 100644
 +/// Whether the click-through lock can work here (see `lock_supported`).
  #[tauri::command]
  fn overlay_lock_supported() -> bool {
--    platform::window::cursor_position().is_some()
+-    lock_offered()
+-}
+-
+-/// Whether the click-through lock is offered: where the lock button keeps
+-/// the mouse by an input region (Linux, native Wayland too: it was offered
+-/// only where the pointer could be read, X11, and so not on KDE), or by a
+-/// pointer watch.
+-fn lock_offered() -> bool {
+-    platform::window::click_through_by_region() || platform::window::cursor_position().is_some()
 +    lock_supported()
  }
  
  /// Where the mouse pointer is from the calling window's top-left, in screen
-@@ -2424,6 +2475,8 @@ fn tool_window_ready(app: tauri::AppHandle, label: String) -> bool {
+@@ -2434,6 +2477,8 @@ fn tool_window_ready(app: tauri::AppHandle, label: String) -> bool {
      let Some(window) = app.get_webview_window(&label) else { return false };
      let _ = window.show();
      let _ = window.set_focus();
@@ -230,7 +238,7 @@ index a11a7a1..c4c752a 100644
      true
  }
  
-@@ -2471,6 +2524,8 @@ fn announce_details_placement(app: &tauri::AppHandle, monitor_index: usize) {
+@@ -2481,6 +2526,8 @@ fn announce_details_placement(app: &tauri::AppHandle, monitor_index: usize) {
  fn details_window_ready(app: tauri::AppHandle, window: tauri::Window) {
      let _ = window.show();
      tracing::info!("{} window revealed (frontend ready)", window.label());
@@ -239,7 +247,7 @@ index a11a7a1..c4c752a 100644
      // Only the monitor-pinned singleton has a placement to confirm; a fight
      // window is placed by cascade and the History window by its own geometry.
      if window.label() == "details" {
-@@ -3990,6 +4045,31 @@ mod tests {
+@@ -4000,6 +4047,31 @@ mod tests {
          assert!(!click_through(false, false, false));
      }
  
@@ -272,10 +280,10 @@ index a11a7a1..c4c752a 100644
      #[test]
      fn a_panicking_upload_still_frees_its_fight() {
 diff --git a/src-tauri/src/platform/linux/window.rs b/src-tauri/src/platform/linux/window.rs
-index f3ccddd..16b074c 100644
+index 54ecbc5..7868bc1 100644
 --- a/src-tauri/src/platform/linux/window.rs
 +++ b/src-tauri/src/platform/linux/window.rs
-@@ -160,22 +160,52 @@ fn query_pointer() -> Option<(i32, i32, u32)> {
+@@ -166,11 +166,22 @@ fn query_pointer() -> Option<(i32, i32, u32)> {
  /// Under XWayland the pointer can be read only while it is over an X11
  /// window, so the pointer watch the lock uses elsewhere lost it over the
  /// desktop or a native Wayland window and the button could not be clicked.
@@ -297,8 +305,17 @@ index f3ccddd..16b074c 100644
  /// tool left the front (`screenshot_tool` gives every window the mouse back).
 +/// What it is told meanwhile is kept for `reveal_in_place`.
  pub fn click_through_except(window: &tauri::WebviewWindow, ignore: bool, keep: Option<(f64, f64, f64, f64, f64)>) -> bool {
+     input_region(window, ignore, keep.map(|(x, y, w, h, scale)| (vec![(x, y, w, h)], scale)))
+ }
+@@ -188,17 +199,35 @@ type Keep = (Vec<(f64, f64, f64, f64)>, f64);
+ /// The window's input region: everywhere (`ignore` false), the union of
+ /// `keep`'s rectangles, or a single pixel (nothing to keep).
+ fn input_region(window: &tauri::WebviewWindow, ignore: bool, keep: Option<Keep>) -> bool {
 -    use gtk::{cairo, prelude::*};
+-    click_through_asked().lock().unwrap_or_else(|p| p.into_inner()).insert(window.label().to_string(), (ignore, keep.clone()));
 -    let (ignore, keep) = if is_hidden_in_place(window) { (true, None) } else { (ignore, keep) };
++    let label = window.label().to_string();
++    wanted_regions().lock().unwrap_or_else(|p| p.into_inner()).insert(label.clone(), (ignore, keep.clone()));
      let window = window.clone();
      super::dialog::on_gtk_thread(move || {
          let gtk_window = window.gtk_window().ok()?;
@@ -307,8 +324,6 @@ index f3ccddd..16b074c 100644
 -            return Some(());
 -        }
 -        let surface = gtk_window.window()?;
-+        let label = window.label().to_string();
-+        wanted_regions().lock().unwrap_or_else(|p| p.into_inner()).insert(label.clone(), (ignore, keep));
 +        // Hidden in place it ignores the mouse whatever it is told (an
 +        // invisible window must not take the game's clicks); revealed, it
 +        // gets what it was told meanwhile (`reveal_in_place`).
@@ -321,25 +336,25 @@ index f3ccddd..16b074c 100644
 +    .is_some()
 +}
 +
-+type Keep = Option<(f64, f64, f64, f64, f64)>;
-+
-+/// What each window was last told by `click_through_except`, by label.
-+fn wanted_regions() -> &'static std::sync::Mutex<std::collections::HashMap<String, (bool, Keep)>> {
-+    static WANTED: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, (bool, Keep)>>> =
++/// What each window was last told by `click_through_except` or
++/// `widget_click_through`, by label: what `reveal_in_place` and
++/// `reapply_click_through` set again.
++fn wanted_regions() -> &'static std::sync::Mutex<std::collections::HashMap<String, (bool, Option<Keep>)>> {
++    static WANTED: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, (bool, Option<Keep>)>>> =
 +        std::sync::OnceLock::new();
 +    WANTED.get_or_init(Default::default)
 +}
 +
-+fn apply_input_region(gtk_window: &gtk::ApplicationWindow, ignore: bool, keep: Keep) {
++fn apply_input_region(gtk_window: &gtk::ApplicationWindow, ignore: bool, keep: Option<Keep>) {
 +    use gtk::{cairo, prelude::*};
 +    if ignore {
-         // CSS pixels to GDK's: the page's scale over GDK's own.
-         let rect = keep.and_then(|(x, y, w, h, page_scale)| {
-             let k = page_scale / f64::from(gtk_window.scale_factor().max(1));
-@@ -184,11 +214,11 @@ pub fn click_through_except(window: &tauri::WebviewWindow, ignore: bool, keep: O
-             (right > left && bottom > top).then(|| cairo::RectangleInt::new(left, top, right - left, bottom - top))
-         });
-         let region = cairo::Region::create_rectangle(&rect.unwrap_or_else(|| cairo::RectangleInt::new(0, 0, 1, 1)));
+         let region = cairo::Region::create();
+         if let Some((rects, page_scale)) = keep {
+             // CSS pixels to GDK's: the page's scale over GDK's own.
+@@ -214,11 +243,11 @@ fn input_region(window: &tauri::WebviewWindow, ignore: bool, keep: Option<Keep>)
+         if region.is_empty() {
+             let _ = region.union_rectangle(&cairo::RectangleInt::new(0, 0, 1, 1));
+         }
 -        surface.input_shape_combine_region(&region, 0, 0);
 -        Some(())
 -    })
@@ -353,7 +368,28 @@ index f3ccddd..16b074c 100644
  }
  
  pub fn start_drag(window: &tauri::WebviewWindow) {
-@@ -267,7 +297,14 @@ pub fn hide_in_place(window: &tauri::WebviewWindow) {
+@@ -254,19 +283,11 @@ pub fn show_on_top_without_focus(window: &tauri::WebviewWindow) {
+     reapply_click_through(window);
+ }
+ 
+-/// The click-through each window last asked for (`click_through_except`):
+-/// what `reapply_click_through` sets again.
+-fn click_through_asked() -> &'static std::sync::Mutex<std::collections::HashMap<String, (bool, Option<Keep>)>> {
+-    static ASKED: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, (bool, Option<Keep>)>>> =
+-        std::sync::OnceLock::new();
+-    ASKED.get_or_init(Default::default)
+-}
+-
+ /// Set a window's last click-through again once it is mapped: shortly after
+ /// it is shown, and once more a little later in case the compositor took
+ /// its time.
+ fn reapply_click_through(window: &tauri::WebviewWindow) {
+-    let Some((ignore, keep)) = click_through_asked().lock().unwrap_or_else(|p| p.into_inner()).get(window.label()).cloned() else {
++    let Some((ignore, keep)) = wanted_regions().lock().unwrap_or_else(|p| p.into_inner()).get(window.label()).cloned() else {
+         return;
+     };
+     let window = window.clone();
+@@ -336,7 +357,14 @@ pub fn hide_in_place(window: &tauri::WebviewWindow) {
          return;
      }
      hidden_in_place().lock().unwrap_or_else(|p| p.into_inner()).insert(window.label().to_string());
@@ -369,30 +405,24 @@ index f3ccddd..16b074c 100644
      let _ = window.set_skip_taskbar(true);
  }
  
-@@ -278,7 +315,17 @@ pub fn reveal_in_place(window: &tauri::WebviewWindow) -> bool {
+@@ -347,7 +375,11 @@ pub fn reveal_in_place(window: &tauri::WebviewWindow) -> bool {
      if !was {
          return false;
      }
 -    click_through_except(window, false, None);
 +    // The click-through it was last told (a locked Details or History stays
 +    // locked when the game comes back to the front), else the mouse.
-+    let wanted = wanted_regions().lock().unwrap_or_else(|p| p.into_inner()).get(window.label()).copied();
-+    match wanted {
-+        Some((ignore, keep)) => {
-+            let _ = click_through_except(window, ignore, keep);
-+        }
-+        None => {
-+            let _ = click_through_except(window, false, None);
-+        }
-+    }
++    let wanted = wanted_regions().lock().unwrap_or_else(|p| p.into_inner()).get(window.label()).cloned();
++    let (ignore, keep) = wanted.unwrap_or((false, None));
++    let _ = input_region(window, ignore, keep);
      let _ = window.set_skip_taskbar(false);
      let target = window.clone();
      super::dialog::on_gtk_thread(move || {
 diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
-index f6f5fe8..e4f8a0a 100644
+index 431e46e..ca8cb74 100644
 --- a/src-tauri/src/plugins/mod.rs
 +++ b/src-tauri/src/plugins/mod.rs
-@@ -1702,6 +1702,8 @@ pub fn plugin_hello(app: tauri::AppHandle, window: tauri::WebviewWindow, plugin:
+@@ -1730,6 +1730,8 @@ pub fn plugin_hello(app: tauri::AppHandle, window: tauri::WebviewWindow, plugin:
          if manifest.permissions.iter().any(|p| p == "events:character") { character(&app) } else { None };
      let reviewed = host.with(&id, |l| l.reviewed).unwrap_or(false);
      let language = app.try_state::<AppState>().and_then(|s| s.settings.get("dpsMeter.language")).unwrap_or_else(|| "en".into());
@@ -402,10 +432,10 @@ index f6f5fe8..e4f8a0a 100644
          "manifest": manifest,
          "replay": replay,
 diff --git a/src-tauri/src/plugins/widgets.rs b/src-tauri/src/plugins/widgets.rs
-index 28cdb54..825ff81 100644
+index fdfc5a9..df9b1f1 100644
 --- a/src-tauri/src/plugins/widgets.rs
 +++ b/src-tauri/src/plugins/widgets.rs
-@@ -103,8 +103,9 @@ fn areas() -> &'static Mutex<HashMap<String, Area>> {
+@@ -134,8 +134,9 @@ fn areas() -> &'static Mutex<HashMap<String, Area>> {
  /// `platform::window::hide_in_place`), so a widget is locked again once its
  /// page has loaded (`plugin_widget_hello`) and each time it is shown again.
  fn apply_lock(window: &tauri::WebviewWindow, locked: bool) {
@@ -414,14 +444,14 @@ index 28cdb54..825ff81 100644
 +    // A screenshot tool in front, or every meter window locked with the
 +    // overlay: clicks go through, whatever the widget's own lock.
 +    let locked = locked || crate::app::screenshot_tool_in_front() || crate::app::all_windows_locked();
-     let area = areas().lock().unwrap_or_else(|p| p.into_inner()).get(window.label()).copied();
-     let applied = match (locked, area) {
-         (true, _) => crate::platform::window::click_through_except(window, true, None),
+     let area = areas().lock().unwrap_or_else(|p| p.into_inner()).get(window.label()).cloned();
+     let applied = match (locked, &area) {
+         (true, _) => crate::platform::window::widget_click_through(window, true, None),
 diff --git a/src/data/i18n/ui/de.json b/src/data/i18n/ui/de.json
-index 5ce41e3..d16c50b 100644
+index 78be718..5e8f509 100644
 --- a/src/data/i18n/ui/de.json
 +++ b/src/data/i18n/ui/de.json
-@@ -290,6 +290,7 @@
+@@ -312,6 +312,7 @@
      "hideWhenSolo": "Nur in einer Gruppe anzeigen",
      "showSuspendBtn": "Taste „Erfassung pausieren“ anzeigen",
      "showLockBtn": "Taste für Durchklick-Sperre anzeigen",
@@ -429,7 +459,7 @@ index 5ce41e3..d16c50b 100644
      "playerLimit": {
        "label": "Max. angezeigte Spieler"
      },
-@@ -537,6 +538,7 @@
+@@ -560,6 +561,7 @@
        "roundDps": "13.412 wird als 13k angezeigt.",
        "showSuspendBtn": "Eine Taste am Meter, die das Lesen des Spielverkehrs anhält, bis du sie erneut drückst.",
        "showLockBtn": "Eine Taste, mit der das Meter die Maus ignoriert, sodass Klicks im Spiel ankommen.",
@@ -438,10 +468,10 @@ index 5ce41e3..d16c50b 100644
        "titleOpacity": "Wie durchsichtig die Titelleiste des Meters ist, getrennt vom Hintergrund darunter. Bis du ihn bewegst, folgt er dem Hintergrund.",
        "meterOpacity": "Wie deckend die farbigen Schadensbalken sind.",
 diff --git a/src/data/i18n/ui/en.json b/src/data/i18n/ui/en.json
-index 0ee53e9..830a134 100644
+index 9b0f153..3ca264c 100644
 --- a/src/data/i18n/ui/en.json
 +++ b/src/data/i18n/ui/en.json
-@@ -300,6 +300,7 @@
+@@ -322,6 +322,7 @@
      "hideWhenSolo": "Show only in a party",
      "showSuspendBtn": "Show pause capture button",
      "showLockBtn": "Show click-through lock button",
@@ -449,7 +479,7 @@ index 0ee53e9..830a134 100644
      "playerLimit": {
        "label": "Max players shown"
      },
-@@ -549,6 +550,7 @@
+@@ -572,6 +573,7 @@
        "roundDps": "13,412 shows as 13k.",
        "showSuspendBtn": "A button on the meter that stops reading game traffic until you press it again.",
        "showLockBtn": "A button that makes the meter ignore the mouse, so clicks go through to the game.",
@@ -458,10 +488,10 @@ index 0ee53e9..830a134 100644
        "titleOpacity": "How see-through the meter's title bar is, apart from the background under it. Until you move it, it follows the background.",
        "meterOpacity": "How solid the coloured damage bars are.",
 diff --git a/src/data/i18n/ui/es.json b/src/data/i18n/ui/es.json
-index 1f24401..a825465 100644
+index f9604bc..3cb92ce 100644
 --- a/src/data/i18n/ui/es.json
 +++ b/src/data/i18n/ui/es.json
-@@ -290,6 +290,7 @@
+@@ -312,6 +312,7 @@
      "hideWhenSolo": "Mostrar solo en grupo",
      "showSuspendBtn": "Mostrar botón de pausar captura",
      "showLockBtn": "Mostrar botón de bloqueo (clic a través)",
@@ -469,7 +499,7 @@ index 1f24401..a825465 100644
      "playerLimit": {
        "label": "Máx. jugadores mostrados"
      },
-@@ -537,6 +538,7 @@
+@@ -560,6 +561,7 @@
        "roundDps": "13.412 se muestra como 13k.",
        "showSuspendBtn": "Un botón en el medidor que deja de leer el tráfico del juego hasta que lo pulses de nuevo.",
        "showLockBtn": "Un botón que hace que el medidor ignore el ratón, para que los clics lleguen al juego.",
@@ -478,10 +508,10 @@ index 1f24401..a825465 100644
        "titleOpacity": "Qué tan transparente es la barra de título del medidor, aparte del fondo de debajo. Hasta que lo muevas, sigue al fondo.",
        "meterOpacity": "Cuán sólidas son las barras de daño de color.",
 diff --git a/src/data/i18n/ui/fr.json b/src/data/i18n/ui/fr.json
-index 07e1308..aa07c57 100644
+index a634069..659f005 100644
 --- a/src/data/i18n/ui/fr.json
 +++ b/src/data/i18n/ui/fr.json
-@@ -290,6 +290,7 @@
+@@ -312,6 +312,7 @@
      "hideWhenSolo": "Afficher seulement en groupe",
      "showSuspendBtn": "Afficher le bouton de pause de capture",
      "showLockBtn": "Afficher le bouton de verrouillage (clic au travers)",
@@ -489,7 +519,7 @@ index 07e1308..aa07c57 100644
      "playerLimit": {
        "label": "Joueurs affichés max."
      },
-@@ -537,6 +538,7 @@
+@@ -560,6 +561,7 @@
        "roundDps": "13 412 s'affiche 13k.",
        "showSuspendBtn": "Un bouton sur le compteur qui arrête la lecture du trafic du jeu jusqu'à ce que tu appuies à nouveau.",
        "showLockBtn": "Un bouton qui fait ignorer la souris au compteur, pour que les clics passent au jeu.",
@@ -498,10 +528,10 @@ index 07e1308..aa07c57 100644
        "titleOpacity": "La transparence de la barre de titre du meter, à part du fond en dessous. Tant que vous ne le bougez pas, il suit le fond.",
        "meterOpacity": "L'opacité des barres de dégâts colorées.",
 diff --git a/src/data/i18n/ui/ja.json b/src/data/i18n/ui/ja.json
-index 6af7779..cf53c9d 100644
+index a1200ff..f3e9c72 100644
 --- a/src/data/i18n/ui/ja.json
 +++ b/src/data/i18n/ui/ja.json
-@@ -290,6 +290,7 @@
+@@ -312,6 +312,7 @@
      "hideWhenSolo": "パーティー中のみ表示",
      "showSuspendBtn": "キャプチャ一時停止ボタンを表示",
      "showLockBtn": "クリック透過ロックボタンを表示",
@@ -509,7 +539,7 @@ index 6af7779..cf53c9d 100644
      "playerLimit": {
        "label": "表示する最大プレイヤー数"
      },
-@@ -537,6 +538,7 @@
+@@ -560,6 +561,7 @@
        "roundDps": "13,412 は 13k と表示されます。",
        "showSuspendBtn": "押すとゲーム通信の読み取りを止め、もう一度押すと再開するボタンをメーターに表示します。",
        "showLockBtn": "メーターがマウスを無視し、クリックがゲームに届くようにするボタンです。",
@@ -518,10 +548,10 @@ index 6af7779..cf53c9d 100644
        "titleOpacity": "メーターのタイトルバーの透け具合を、下の背景とは別に設定します。動かすまでは背景の不透明度に合わせます。",
        "meterOpacity": "色付きのダメージバーの不透明度です。",
 diff --git a/src/data/i18n/ui/ko.json b/src/data/i18n/ui/ko.json
-index 43d5524..a6941ef 100644
+index 2dba9de..4287b0f 100644
 --- a/src/data/i18n/ui/ko.json
 +++ b/src/data/i18n/ui/ko.json
-@@ -295,6 +295,7 @@
+@@ -317,6 +317,7 @@
      "hideWhenSolo": "파티 중에만 표시",
      "showSuspendBtn": "수집 일시정지 버튼 표시",
      "showLockBtn": "클릭 통과 잠금 버튼 표시",
@@ -529,7 +559,7 @@ index 43d5524..a6941ef 100644
      "playerLimit": {
        "label": "최대 표시 인원"
      },
-@@ -544,6 +545,7 @@
+@@ -567,6 +568,7 @@
        "roundDps": "13,412는 13k로 표시됩니다.",
        "showSuspendBtn": "다시 누를 때까지 게임 트래픽 읽기를 멈추는 버튼을 미터에 표시합니다.",
        "showLockBtn": "미터가 마우스를 무시하게 하여 클릭이 게임으로 전달되도록 하는 버튼입니다.",
@@ -538,10 +568,10 @@ index 43d5524..a6941ef 100644
        "titleOpacity": "미터 제목 표시줄의 투명도를 아래 배경과 따로 정합니다. 움직이기 전까지는 배경 불투명도를 따릅니다.",
        "meterOpacity": "색이 있는 피해량 막대의 불투명도입니다.",
 diff --git a/src/data/i18n/ui/pt.json b/src/data/i18n/ui/pt.json
-index 4eddc60..b798c27 100644
+index bbadaa0..754711a 100644
 --- a/src/data/i18n/ui/pt.json
 +++ b/src/data/i18n/ui/pt.json
-@@ -290,6 +290,7 @@
+@@ -312,6 +312,7 @@
      "hideWhenSolo": "Mostrar só em grupo",
      "showSuspendBtn": "Mostrar botão de pausar captura",
      "showLockBtn": "Mostrar botão de bloqueio (clique através)",
@@ -549,7 +579,7 @@ index 4eddc60..b798c27 100644
      "playerLimit": {
        "label": "Máx. de jogadores exibidos"
      },
-@@ -537,6 +538,7 @@
+@@ -560,6 +561,7 @@
        "roundDps": "13.412 aparece como 13k.",
        "showSuspendBtn": "Um botão no medidor que para de ler o tráfego do jogo até você apertar de novo.",
        "showLockBtn": "Um botão que faz o medidor ignorar o mouse, para os cliques irem ao jogo.",
@@ -558,10 +588,10 @@ index 4eddc60..b798c27 100644
        "titleOpacity": "O quanto a barra de título do medidor é transparente, separada do fundo abaixo. Até você mexer, ela segue o fundo.",
        "meterOpacity": "Quão sólidas são as barras coloridas de dano.",
 diff --git a/src/data/i18n/ui/ru.json b/src/data/i18n/ui/ru.json
-index 9266177..84b8c38 100644
+index 5d7a02f..9be5be3 100644
 --- a/src/data/i18n/ui/ru.json
 +++ b/src/data/i18n/ui/ru.json
-@@ -295,6 +295,7 @@
+@@ -317,6 +317,7 @@
      "hideWhenSolo": "Показывать только в группе",
      "showSuspendBtn": "Показывать кнопку паузы захвата",
      "showLockBtn": "Показывать кнопку блокировки (сквозной клик)",
@@ -569,7 +599,7 @@ index 9266177..84b8c38 100644
      "playerLimit": {
        "label": "Макс. игроков на экране"
      },
-@@ -542,6 +543,7 @@
+@@ -565,6 +566,7 @@
        "roundDps": "13 412 показывается как 13k.",
        "showSuspendBtn": "Кнопка на счётчике, которая останавливает чтение трафика игры до повторного нажатия.",
        "showLockBtn": "Кнопка, после которой счётчик игнорирует мышь и клики проходят в игру.",
@@ -578,10 +608,10 @@ index 9266177..84b8c38 100644
        "titleOpacity": "Насколько прозрачна строка заголовка метра, отдельно от фона под ней. Пока вы его не сдвинете, он следует за фоном.",
        "meterOpacity": "Насколько плотные цветные полосы урона.",
 diff --git a/src/data/i18n/ui/zh-Hans.json b/src/data/i18n/ui/zh-Hans.json
-index 52f8579..8285337 100644
+index 8baebff..3a29357 100644
 --- a/src/data/i18n/ui/zh-Hans.json
 +++ b/src/data/i18n/ui/zh-Hans.json
-@@ -295,6 +295,7 @@
+@@ -317,6 +317,7 @@
      "hideWhenSolo": "仅在队伍中显示",
      "showSuspendBtn": "显示暂停捕获按钮",
      "showLockBtn": "显示点击穿透锁定按钮",
@@ -589,7 +619,7 @@ index 52f8579..8285337 100644
      "playerLimit": {
        "label": "最大显示人数"
      },
-@@ -544,6 +545,7 @@
+@@ -567,6 +568,7 @@
        "roundDps": "13,412 显示为 13k。",
        "showSuspendBtn": "在计量器上显示一个按钮，按下后停止读取游戏流量，再按一次恢复。",
        "showLockBtn": "让计量器忽略鼠标、点击直接作用于游戏的按钮。",
@@ -598,10 +628,10 @@ index 52f8579..8285337 100644
        "titleOpacity": "统计窗口标题栏的透明程度，与下方背景分开设置。移动它之前，它跟随背景不透明度。",
        "meterOpacity": "彩色伤害条的不透明程度。",
 diff --git a/src/data/i18n/ui/zh-Hant.json b/src/data/i18n/ui/zh-Hant.json
-index 3f436b9..7d692a7 100644
+index f51996c..abfd36e 100644
 --- a/src/data/i18n/ui/zh-Hant.json
 +++ b/src/data/i18n/ui/zh-Hant.json
-@@ -295,6 +295,7 @@
+@@ -317,6 +317,7 @@
      "hideWhenSolo": "僅在隊伍中顯示",
      "showSuspendBtn": "顯示暫停擷取按鈕",
      "showLockBtn": "顯示點擊穿透鎖定按鈕",
@@ -609,7 +639,7 @@ index 3f436b9..7d692a7 100644
      "playerLimit": {
        "label": "最大顯示人數"
      },
-@@ -544,6 +545,7 @@
+@@ -567,6 +568,7 @@
        "roundDps": "13,412 顯示為 13k。",
        "showSuspendBtn": "在計量器上顯示一個按鈕，按下後停止讀取遊戲流量，再按一次恢復。",
        "showLockBtn": "讓計量器忽略滑鼠、點擊直接作用於遊戲的按鈕。",

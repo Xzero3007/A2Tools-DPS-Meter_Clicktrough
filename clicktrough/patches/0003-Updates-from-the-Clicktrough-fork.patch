@@ -1,4 +1,4 @@
-From 8ac4d5052f3062d1c781abcd90a0c75f23f0b816 Mon Sep 17 00:00:00 2001
+From 719aaa4bbb37e93b3d64bd29e9e69797479c8570 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Fri, 23 Oct 2026 11:35:59 +0000
 Subject: [PATCH 3/5] Updates from the Clicktrough fork
@@ -16,7 +16,7 @@ Claude-Session: https://claude.ai/code/session_01TUNxq4V2zBL7bJg3yPJ3oC
  1 file changed, 16 insertions(+), 6 deletions(-)
 
 diff --git a/public/src/js/checkRelease.js b/public/src/js/checkRelease.js
-index 7872b44..96d402d 100644
+index 6bef2d9..4c069ea 100644
 --- a/public/src/js/checkRelease.js
 +++ b/public/src/js/checkRelease.js
 @@ -1,5 +1,11 @@

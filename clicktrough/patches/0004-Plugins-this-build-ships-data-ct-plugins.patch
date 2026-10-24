@@ -1,4 +1,4 @@
-From 9fe0f9be44d609c9b85c4e963417c590a6a5e911 Mon Sep 17 00:00:00 2001
+From 01fa92016f9e301bc004f30dd38bfe8232eb511a Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Fri, 23 Oct 2026 13:03:59 +0000
 Subject: [PATCH 4/5] Plugins this build ships: data/ct-plugins
@@ -16,7 +16,7 @@ Claude-Session: https://claude.ai/code/session_01TUNxq4V2zBL7bJg3yPJ3oC
  1 file changed, 24 insertions(+)
 
 diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
-index e4f8a0a..21ad04f 100644
+index ca8cb74..3a50c63 100644
 --- a/src-tauri/src/plugins/mod.rs
 +++ b/src-tauri/src/plugins/mod.rs
 @@ -521,6 +521,30 @@ impl PluginHost {
