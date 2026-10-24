@@ -33,8 +33,16 @@ body.locked .head { cursor: default; }
   background: rgba(10, 12, 16, 0.88); border: 1px solid rgba(255, 255, 255, 0.18); }
 .nextChip .label { color: rgba(255, 255, 255, 0.55); }
 .nextChip .dist { color: rgba(255, 255, 255, 0.7); }
-.foot { margin: 6px 8px 8px; align-self: flex-start; padding: 3px 10px; border-radius: 999px; font-size: 12px;
-  background: rgba(10, 12, 16, 0.8); border: 1px solid rgba(255, 255, 255, 0.12); }
+/* Short of the corner on the right, so its × stays clickable. */
+.foot { margin: 6px 8px 8px; align-self: flex-start; max-width: calc(100% - 44px); box-sizing: border-box; display: flex; align-items: center; gap: 6px;
+  padding: 3px 10px; border-radius: 999px; font-size: 12px; background: rgba(10, 12, 16, 0.8); border: 1px solid rgba(255, 255, 255, 0.12); }
+.footText { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Showing what the search asked for: gold, as its rings, with a × to stop. */
+.foot.focus { border-color: rgba(255, 214, 102, 0.55); padding-right: 4px; }
+.focusClear { flex: none; background: rgba(255, 255, 255, 0.08); border: 0; border-radius: 999px; color: rgba(255, 255, 255, 0.8);
+  font-size: 14px; line-height: 16px; width: 18px; height: 18px; padding: 0; cursor: pointer; }
+.focusClear:hover { background: rgba(255, 255, 255, 0.2); color: #fff; }
+body.locked .focusClear { display: none; }
 /* The corners to resize it from: big enough to hit, a bracket that shows
    while the pointer is on the overlay. */
 .corner { position: absolute; width: 26px; height: 26px; z-index: 6; box-sizing: border-box; border: 0 solid rgba(255, 255, 255, 0);

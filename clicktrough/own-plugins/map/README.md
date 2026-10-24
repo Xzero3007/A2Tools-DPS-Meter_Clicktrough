@@ -19,8 +19,13 @@ follows you over the game.
   ring, farmed with a white one). The pet monsters around you right now are
   the large dots. With no pet followed, or with **All pets**, every pet's
   spawn points show, small and white. At the bottom: the next pet to go for,
-  which way and how far, and how many pets this map has and how many are
-  around you.
+  which way and how far (hover it for why it is followed), and how many pets
+  this map has and how many are around you.
+- **Next**: a pinned pet first (however far), then one you are farming, then
+  one Pet Finder still needs (every pet not at rank 3, so most of them);
+  among those, one that is there right now before a spawn point, then the
+  nearest. **Next: pinned & farmed only** leaves the needed ones out, **Next:
+  off** shows none (a search still has its Next).
 - **Monsters**: the monsters around you right now, by name.
 - **Gathering**: the gathering spots by kind, each kind on or off (hover a kind
   for what it holds); those there right now framed white:
@@ -45,11 +50,13 @@ follows you over the game.
 ...), pets, the monsters that drop them, Kibelisk camps, **Hidden Cube**
 (the known spots, or every place the game may put one: about 1,400 per map),
 **Monolith**, sealed dungeons, battlefields, outposts and villages (each kind,
-or one by its name) and regions, each with the maps it is on and how often. Picking one shows all its places with a gold ring,
-the map framed around them (the bar above the map switches between its maps,
-**×** stops it), and the nearest one as **Next**, which way and how far, in
-the overlay too. A map link in Pet Finder or Pet Soul Tracker does the same
-for that pet or monster and brings the Map forward.
+or one by its name) and regions, each with the maps it is on and how often.
+Picking one shows all its places with a gold ring, the map framed around them
+(the bar above the map switches between its maps), and the nearest one as
+**Next**, which way and how far, in the overlay too. A map link in Pet Finder
+or Pet Soul Tracker does the same for that pet or monster and brings the Map
+forward. It stays, after a restart too, until its **×** stops it: in the bar
+above the map, or at the bottom of the overlay ("Showing ...", in gold).
 
 Drag to move the map, the wheel zooms, a double-click goes back to following
 you. **Overlay** opens the small map, always on the map you are on: drag it by

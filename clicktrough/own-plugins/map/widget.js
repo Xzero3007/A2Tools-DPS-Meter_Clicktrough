@@ -1,9 +1,9 @@
 // The Map plugin's overlay: a small map that follows you, north up, with the
 // pets you follow (or what the search shows), the next one to go for and how
-// many are around. It hears the plugin's window (plugin.js) a few times a
-// second. The wheel zooms; the buttons S, M, L, XL set its size, or a corner
-// dragged (the window manager resizes it); the slider sets how much of the
-// game shows through.
+// many are around; what the search shows, with a × to stop it. It hears the
+// plugin's window (plugin.js) a few times a second. The wheel zooms; the
+// buttons S, M, L, XL set its size, or a corner dragged (the window manager
+// resizes it); the slider sets how much of the game shows through.
 (() => {
   const D = globalThis.MAP_DATA;
   const M = globalThis.MapMarks;
@@ -20,7 +20,7 @@
     view.setMap(state.key);
     const built = M.build({
       key: state.key, world: state.world, tracked, heading: state.heading, layers: state.layers,
-      gatherKinds: state.gatherKinds || {}, petsMode: state.petsMode, focus: state.focus,
+      gatherKinds: state.gatherKinds || {}, petsMode: state.petsMode, focus: state.focus, nextFor: state.nextFor,
     });
     view.setMarks(built.marks);
     const map = D.maps[state.key];
@@ -44,12 +44,20 @@
       const name = Object.assign(document.createElement("span"), { textContent: ` ${n.name} ` });
       const dist = Object.assign(document.createElement("span"), { className: "dist", textContent: `${M.arrow(n.bearing)} ${Math.round(n.metres)} m` });
       chip.replaceChildren(label, name, dist);
+      chip.title = n.focus ? `What the search shows: ${n.name}` : `${n.name}: ${M.markText(n.mark)}`;
     }
+    // What the search (or a map link in another plugin) shows stays until it
+    // is cleared: here with the ×, or in the Map window.
     const foot = $(".foot");
-    foot.hidden = !state.layers?.pets && !state.focus;
-    if (!me) foot.textContent = "Waiting for your position";
-    else if (state.focus) foot.textContent = `${state.focus.label}: ${built.hits.length / 2} here`;
-    else foot.textContent = `${built.petsHere} pet${built.petsHere === 1 ? "" : "s"} here · ${built.around} around you`;
+    const focusOn = !!state.focus;
+    foot.hidden = !state.layers?.pets && !focusOn;
+    foot.classList.toggle("focus", focusOn);
+    $(".focusClear").hidden = !focusOn;
+    const text = $(".footText");
+    if (focusOn) text.textContent = `Showing ${state.focus.label} (${built.hits.length / 2})`;
+    else if (!me) text.textContent = "Waiting for your position";
+    else text.textContent = `${built.petsHere} pet${built.petsHere === 1 ? "" : "s"} here · ${built.around} around you`;
+    text.title = focusOn ? `${text.textContent} here: what the search or a map link asked for, until × stops it` : "";
   }
 
   function applyOpacity(value) {
@@ -72,6 +80,11 @@
     a2.widget.drag().catch(() => {});
   });
   $(".close").addEventListener("click", () => a2.widget.post({ type: "close" }).catch(() => {}));
+  $(".focusClear").addEventListener("click", () => {
+    if (state) state.focus = null;
+    draw();
+    a2.widget.post({ type: "focus-clear" }).catch(() => {});
+  });
   $(".opacity").addEventListener("input", () => {
     opacityTouched = Date.now();
     const v = Number($(".opacity").value) / 100;
