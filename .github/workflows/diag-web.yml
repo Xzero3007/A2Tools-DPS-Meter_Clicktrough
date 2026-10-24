@@ -8,7 +8,7 @@ jobs:
     steps:
       - name: curl (IPv4, IPv6) and TLS chain
         run: |
-          set -x
+          exec > >(tee -a $RUNNER_TEMP/out.txt) 2>&1
           getent ahosts aion2.exchange || true
           curl -4 -sS -m 20 -o /tmp/a.json -w "v4: %{http_code} %{http_version} %{remote_ip}\n" -H "Accept: application/json" -A "A2Tools-DPS-Meter/2.0.77 Clicktrough" https://aion2.exchange/api/servers || true
           head -c 400 /tmp/a.json || true; echo
@@ -47,4 +47,9 @@ jobs:
               }
           }
           R
-          cargo run -q
+          cargo run -q 2>&1 | tee -a $RUNNER_TEMP/out.txt
+      - name: report
+        if: always()
+        run: |
+          body=$(sed -e 's/%/%25/g' $RUNNER_TEMP/out.txt | sed -e ':a;N;$!ba;s/\n/%0A/g')
+          echo "::notice title=probe::$body"
