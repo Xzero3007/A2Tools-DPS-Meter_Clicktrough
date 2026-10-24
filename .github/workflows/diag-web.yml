@@ -1,0 +1,50 @@
+name: diag-web
+on:
+  push:
+    branches: [diag-web]
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: curl (IPv4, IPv6) and TLS chain
+        run: |
+          set -x
+          getent ahosts aion2.exchange || true
+          curl -4 -sS -m 20 -o /tmp/a.json -w "v4: %{http_code} %{http_version} %{remote_ip}\n" -H "Accept: application/json" -A "A2Tools-DPS-Meter/2.0.77 Clicktrough" https://aion2.exchange/api/servers || true
+          head -c 400 /tmp/a.json || true; echo
+          curl -6 -sS -m 20 -o /dev/null -w "v6: %{http_code} %{remote_ip}\n" https://aion2.exchange/api/servers || true
+          echo | openssl s_client -connect aion2.exchange:443 -servername aion2.exchange -showcerts 2>/dev/null | grep -E "^ *[0-9] s:|i:|Protocol|Cipher|Verify return" || true
+      - uses: dtolnay/rust-toolchain@stable
+      - name: reqwest as the meter has it
+        run: |
+          cargo new -q probe && cd probe
+          cat >> Cargo.toml <<'T'
+          reqwest = { version = "=0.12.28", default-features = false, features = ["rustls-tls", "stream"] }
+          tokio = { version = "1", features = ["full"] }
+          T
+          cat > src/main.rs <<'R'
+          use std::time::Duration;
+          fn chain(e: &dyn std::error::Error) -> String {
+              let mut s = e.to_string();
+              let mut cur = e.source();
+              while let Some(c) = cur { s.push_str(" <- "); s.push_str(&c.to_string()); cur = c.source(); }
+              s
+          }
+          #[tokio::main]
+          async fn main() {
+              let client = reqwest::Client::builder()
+                  .user_agent("A2Tools-DPS-Meter/2.0.77")
+                  .connect_timeout(Duration::from_secs(10))
+                  .timeout(Duration::from_secs(30))
+                  .build().unwrap();
+              for url in ["https://aion2.exchange/api/servers", "https://aion2.exchange/api/health", "https://github.com/"] {
+                  match client.get(url).header("Accept", "application/json")
+                      .header("User-Agent", "A2Tools-DPS-Meter/2.0.77 Clicktrough (+https://github.com/Xzero3007/A2Tools-DPS-Meter_Clicktrough)")
+                      .send().await {
+                      Ok(r) => { let st = r.status(); let h = format!("{:?}", r.headers().get("server")); let b = r.text().await.unwrap_or_default(); println!("{url}: {st} server={h} body={}", &b.chars().take(300).collect::<String>()); }
+                      Err(e) => println!("{url}: ERROR {}", chain(&e)),
+                  }
+              }
+          }
+          R
+          cargo run -q
