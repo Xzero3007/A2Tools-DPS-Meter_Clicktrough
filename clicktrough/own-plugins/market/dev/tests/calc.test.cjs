@@ -96,3 +96,23 @@ test("the morph table: biggest saving first", () => {
   assert.ok(t.find((r) => r.item === id("Orichalcum Ore")).saving < 0);
   assert.equal(t.length, 42);
 });
+
+test("aion2.exchange servers as its API gives them, and the player's among them", () => {
+  // As /api/servers answered on 2026-10-24.
+  const res = { default: 11304, servers: [
+    { server_id: 11101, name: "Siel", game_server_key: 1101, region: "NAE", region_name: "North America East", faction: "Elyos", has_data: true },
+    { server_id: 12101, name: "Israphel", game_server_key: 2101, region: "NAE", region_name: "North America East", faction: "Asmodian", has_data: true },
+    { server_id: 12305, name: "Marchutan", game_server_key: 2305, region: "EU", region_name: "Europe", faction: "Asmodian", has_data: false },
+    { name: "no id" },
+  ] };
+  const list = C.readServers(res);
+  assert.equal(list.length, 3);
+  assert.deepEqual(list[1], { id: 12101, game: 2101, name: "Israphel", region: "North America East", faction: "Asmodian", hasData: true });
+  assert.equal(list[2].hasData, false);
+  // Read again from the plugin's own cache: the same.
+  assert.deepEqual(C.readServers({ servers: list }), list);
+  assert.equal(C.serverOf(list, 2305).name, "Marchutan");
+  assert.equal(C.serverOf(list, "1101").name, "Siel");
+  assert.equal(C.serverOf(list, null), null);
+  assert.equal(C.serverOf(list, 9999), null);
+});

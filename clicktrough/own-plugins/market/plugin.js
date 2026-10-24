@@ -22,7 +22,7 @@
     kind: "all",
     search: {},
   };
-  let servers = []; // [{ id, name, region, faction, has_data }]
+  let servers = []; // [{ id, game, name, region, faction, hasData }] (calc.js readServers)
   let prices = new Map();
   let fetchedAt = 0;
   let snapshot = null;
@@ -54,11 +54,13 @@
 
   async function loadServers() {
     try {
-      const res = await a2.web.get(`${API}/servers`);
-      const list = Array.isArray(res?.servers) ? res.servers : Array.isArray(res) ? res : [];
+      const list = C.readServers(await a2.web.get(`${API}/servers`));
       if (list.length) {
-        servers = list.filter((s) => s && s.id != null).map((s) => ({ ...s, id: Number(s.id) }));
+        servers = list;
+        error = "";
         a2.storage.set("servers", { at: Date.now(), servers }).catch(() => {});
+      } else if (!servers.length) {
+        error = "aion2.exchange: no servers in its answer";
       }
     } catch (e) {
       if (!servers.length) error = `aion2.exchange: ${e?.message || e}`;
@@ -71,8 +73,7 @@
    *  the game does (12305 = Marchutan, the game's 2305). */
   function pickServer() {
     if (settings.server != null && servers.some((s) => s.id === settings.server)) return;
-    const sid = Number(character?.serverId);
-    const mine = Number.isFinite(sid) && servers.find((s) => s.id - 10000 === sid || s.id % 10000 === sid);
+    const mine = C.serverOf(servers, character?.serverId);
     if (mine) {
       settings.server = mine.id;
       saveLater();
@@ -87,20 +88,34 @@
     error = "";
     renderBar();
     try {
+      // In parts; a part the service fails keeps the prices it had (the
+      // site is often briefly down), the others are new.
       const keys = C.neededItems(s.faction);
       const rows = [];
+      let failed = 0;
+      let parts = 0;
+      let lastError = null;
       for (let i = 0; i < keys.length; i += BATCH) {
         const part = keys.slice(i, i + BATCH);
-        const res = await a2.web.get(`${API}/items?server=${s.id}&limit=${BATCH + 50}&keys=${part.join(",")}`);
-        rows.push(...(Array.isArray(res?.items) ? res.items : []));
+        parts++;
+        try {
+          const res = await a2.web.get(`${API}/items?server=${s.id}&limit=${BATCH + 50}&keys=${part.join(",")}`);
+          rows.push(...(Array.isArray(res?.items) ? res.items : []));
+        } catch (e) {
+          failed++;
+          lastError = e;
+        }
       }
-      prices = C.readPrices(rows);
+      if (failed === parts) throw lastError;
+      const fresh = C.readPrices(rows);
+      prices = failed ? new Map([...prices, ...fresh]) : fresh;
       fetchedAt = Date.now();
-      snapshot = rows.map((r) => r.captured_at).filter(Boolean).sort().pop() || null;
+      snapshot = rows.map((r) => r.captured_at).filter(Boolean).sort().pop() || snapshot;
+      if (failed) error = `aion2.exchange: ${failed} of ${parts} parts kept their older prices: ${lastError?.message || lastError}`;
       const keep = [...prices].map(([id, p]) => [id, p.price, p.listings, p.sold, p.soldAvg, p.change]);
       a2.storage.set("prices", { server: s.id, at: fetchedAt, snapshot, rows: keep }).catch(() => {});
     } catch (e) {
-      error = `aion2.exchange: ${e?.message || e}`;
+      error = `aion2.exchange: ${e?.message || e}${prices.size ? " · showing the prices from before" : ""}`;
     } finally {
       busy = false;
     }
@@ -121,7 +136,7 @@
     const pick = $(".server");
     const regions = new Map();
     for (const s of servers) {
-      if (s.has_data === false) continue;
+      if (!s.hasData) continue;
       const r = s.region || "Other";
       if (!regions.has(r)) regions.set(r, []);
       regions.get(r).push(s);
@@ -460,7 +475,7 @@
     } catch {}
     try {
       const c = await a2.storage.get("servers");
-      if (Array.isArray(c?.servers)) servers = c.servers;
+      if (Array.isArray(c?.servers)) servers = C.readServers(c);
     } catch {}
     try {
       const p = await a2.storage.get("prices");
