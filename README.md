@@ -30,16 +30,21 @@ package.
   next Artifact Siege, below each other or side by side in columns (Events,
   bosses now, soon and later), each part shown or hidden with a button. The
   **Daily Checklist** the same way: Daily, Weekly and One-time as columns.
-- **A map with your position**: the Map plugin shows the map you are on, where
-  you are and in which region, the pets Pet Finder and Pet Soul Tracker
+- **A map with your position**: the Map plugin shows the map you are on (the
+  game's own world maps, whole: Verteron, Altgard, the Abyss, Poeta,
+  Ishalgen), where you are and in which region, the pets Pet Finder and Pet Soul Tracker
   follow, monsters around, gathering spots by kind, Hidden Cubes, Monolith
   pieces, Kibelisk camps, sealed dungeons and other places, each layer on or
   off, and a search (e.g. "Orichalcum" or "Hidden Cube": all its spots and the
   nearest); and an overlay with a small map that follows you, the next pet to
   go for and how far, in four sizes or resized from its corners, with its own
-  opacity (maps and data from SkeeveAN's
+  opacity (data from SkeeveAN's
   [Aion-DPS-Meter](https://github.com/SkeeveAN/Aion-DPS-Meter) and the
   [AION2 Interactive Map](https://github.com/aion2-interactive-map/aion2-interactive-map)).
+- **The plugins button** in the meter's header turns the plugin window and
+  every plugin's widgets (the Map overlay) off and on.
+- **Usable with the game closed**: "Hide when AION2 isn't focused" hides the
+  meter only while AION2 runs.
 - **Pet Finder built in**: pet mobs near you with how far and which way, a
   search over every pet and a Black Cloud Merchant shopping list (data from
   [PetTracker](https://github.com/0Fox2Give/PetTracker)); the Merchant tab
@@ -92,7 +97,9 @@ OBS overlay …) is covered by the original:
   [AION2 Interactive Map](https://github.com/aion2-interactive-map/aion2-interactive-map)
   by Yihao Liu (tc-imba), under CC BY-NC 4.0: that data may be used for
   non-commercial purposes only (see `NOTICE-AION2-Interactive-Map.txt`
-  there). AION 2 names, maps and images belong to their rights holders.
+  there). The world map pictures are the game's own (© NCSOFT), as the AION2
+  Interactive Map publishes them. AION 2 names, maps and images belong to
+  their rights holders.
 - As in the original: parts of the parser come from
   [Daevalog](https://github.com/Seralth/Daevalog) by Seralth (GPL-3.0). The
   bundled fonts are under the SIL Open Font License 1.1; their licenses are

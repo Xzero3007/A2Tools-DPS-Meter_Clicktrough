@@ -1,6 +1,6 @@
 // The map view the Map plugin's window and its overlay share: the map's
-// tiles as images (WebP, the sea transparent), and the
-// marks drawn on a canvas above them. World units are centimetres; a map's
+// tiles as images (WebP: the game's own world maps whole, the instances with
+// the sea transparent), and the marks drawn on a canvas above them. World units are centimetres; a map's
 // pixel is offset + scale * world (no flip, no rotation).
 (() => {
   const D = globalThis.MAP_DATA;
@@ -26,7 +26,7 @@
       url = typeof globalThis.a2?.file === "function" ? globalThis.a2.file(path).catch(() => path) : Promise.resolve(path);
     }
     tileUrls.set(path, url);
-    while (tileUrls.size > 48) tileUrls.delete(tileUrls.keys().next().value);
+    while (tileUrls.size > 80) tileUrls.delete(tileUrls.keys().next().value);
     return url;
   }
 

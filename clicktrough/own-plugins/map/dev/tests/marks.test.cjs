@@ -17,13 +17,18 @@ const npc = Object.keys(D.spawns.verteron).find((n) => D.npcPets[n] != null && D
 const pet = String(D.npcPets[npc]);
 const [sx, sy] = D.spawns.verteron[npc];
 
-test("the data has the three world maps, their zones and calibration", () => {
-  for (const key of ["verteron", "altgard", "abyss"]) {
+test("the data has the five world maps, their zones and calibration", () => {
+  for (const key of ["verteron", "altgard", "abyss", "poeta", "ishalgen"]) {
     const m = D.maps[key];
     assert.ok(m && m.tiles.length && m.scale > 0 && m.tile > 0, key);
+    // The game's whole pictures: every tile of the grid.
+    assert.equal(m.picture, "game", key);
+    assert.equal(m.tiles.length, m.grid * m.grid, key);
   }
   assert.equal(D.zones["1010"], "verteron");
   assert.equal(D.zones["1110"], "altgard");
+  assert.equal(D.zones["100001"], "poeta");
+  assert.equal(D.zones["1100"], "ishalgen");
   assert.ok(Object.keys(D.npcNames).length > 10000);
   assert.ok(D.cubes.includes(1200036));
 });
@@ -127,16 +132,20 @@ test("the gathering kinds have plain names and say what they hold", () => {
   assert.ok(M.kindTitle("Ore").includes("Orichalcum"));
 });
 
-test("the calibration of Verteron and Altgard is the Kibelisks' fit", () => {
-  for (const key of ["verteron", "altgard"]) {
-    const c = D.calibration[key];
-    assert.ok(c && c.pairs >= 50 && c.rmsMetres < 10, key);
-    assert.equal(D.maps[key].scale, c.scale);
+test("the calibration is the game's map bounds, and the Kibelisks agree", () => {
+  for (const key of ["verteron", "altgard", "abyss", "poeta", "ishalgen"]) {
+    const m = D.maps[key];
+    const [x0, y0, x1, y1] = D.calibration[key].bounds;
+    // One map pixel of the game's picture is 99.6 cm everywhere.
+    assert.ok(Math.abs((m.tile * m.grid) / m.scale / (x1 - x0) - 1) < 1e-9, key);
+    assert.ok(Math.abs(((m.tile * m.grid) / (m.tile === 2048 ? 2 : 1)) / (x1 - x0) * 100 - 1.00392) < 1e-4, key);
+    assert.ok(Math.abs(m.ox + m.scale * x0) < 1e-6 && Math.abs(m.oy + m.scale * y0) < 1e-6, key);
   }
-  // The game's map pictures: the world's middle in the middle, Altgard half
-  // the pixels of Verteron.
-  assert.ok(Math.abs(D.maps.verteron.ox - 8192) < 20 && Math.abs(D.maps.altgard.ox - 4096) < 20);
-  assert.ok(Math.abs(D.maps.verteron.scale / D.maps.altgard.scale - 2) < 0.01);
+  for (const key of ["verteron", "altgard"]) {
+    const k = D.calibration[key].kibelisks;
+    assert.ok(k && k.pairs >= 50 && k.rmsMetres < 10 && k.cornersApartMetres < 15, key);
+  }
+  assert.ok(Math.abs(D.maps.verteron.ox - 8192) < 1e-6 && Math.abs(D.maps.altgard.ox - 4096) < 1e-6);
 });
 
 test("the search finds Hidden Cubes, Monoliths, places and regions", () => {

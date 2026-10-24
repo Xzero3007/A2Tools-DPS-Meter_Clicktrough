@@ -1,0 +1,200 @@
+From 2462ad709a5b16afdac88d35e429bd4682caeb27 Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Sat, 24 Oct 2026 20:13:41 +0000
+Subject: [PATCH 15/15] Meter: the plugins button turns the plugins' widgets
+ off too
+
+The puzzle button in the meter's header hid only the plugin window; a
+plugin's widgets, such as the Map overlay, stayed over the game. Turned
+off, the plugins now hide all their widgets as well, and they stay hidden
+across a restart (widgets opened meanwhile start hidden) until the button
+turns them on again, or the plugin window is shown some other way. Nothing
+else brings them back meanwhile: not the game opening, not the meter
+coming back to the front.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01RBQati3x8VviBbpY9juEWf
+---
+ src-tauri/src/app.rs             |  5 ++-
+ src-tauri/src/plugins/dock.rs    | 14 ++++++-
+ src-tauri/src/plugins/mod.rs     |  5 ++-
+ src-tauri/src/plugins/widgets.rs | 71 ++++++++++++++++++++++++++++++++
+ 4 files changed, 89 insertions(+), 6 deletions(-)
+
+diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
+index 8e01728..ba19a38 100644
+--- a/src-tauri/src/app.rs
++++ b/src-tauri/src/app.rs
+@@ -223,8 +223,9 @@ fn hide_with_meter(app: &tauri::AppHandle, hidden: &mut std::collections::HashSe
+ fn show_with_meter(app: &tauri::AppHandle, hidden: &mut std::collections::HashSet<String>) {
+     for label in hidden.drain() {
+         let Some(window) = app.get_webview_window(&label) else { continue };
+-        // A widget its plugin closed meanwhile stays hidden.
+-        if crate::plugins::widgets::is_closed(&label) {
++        // A widget its plugin closed meanwhile stays hidden, and so do the
++        // widgets the plugins button hid (Clicktrough).
++        if crate::plugins::widgets::is_closed(&label) || crate::plugins::widgets::held_by_button(&label) {
+             continue;
+         }
+         if !platform::window::reveal_in_place(&window) {
+diff --git a/src-tauri/src/plugins/dock.rs b/src-tauri/src/plugins/dock.rs
+index efd1162..f19bd72 100644
+--- a/src-tauri/src/plugins/dock.rs
++++ b/src-tauri/src/plugins/dock.rs
+@@ -103,6 +103,12 @@ pub fn layout(app: &tauri::AppHandle) -> Value {
+ /// hears how it stands (`dock-status`).
+ pub fn sync(app: &tauri::AppHandle, focus: Option<&str>) {
+     sync_dock(app, focus);
++    // The dock shown again some other way (Settings, a plugin bringing
++    // itself forward) while the plugins button had them off: the widgets
++    // come back with it.
++    if super::widgets::plugins_hidden(app) && !shown_members(app).is_empty() {
++        super::widgets::set_plugins_hidden(app, false);
++    }
+     let _ = app.emit_to("main", "dock-status", status(app));
+ }
+ 
+@@ -117,8 +123,10 @@ pub fn dock_status(app: tauri::AppHandle) -> Value {
+     status(&app)
+ }
+ 
+-/// The meter's plugins button: the dock hidden as by its ×, or shown again
+-/// with the tabs it was hidden with (all of them if it never was).
++/// The meter's plugins button: the dock hidden as by its ×, and every
++/// plugin's widgets with it (Clicktrough: the Map overlay stayed over the
++/// game), or the dock shown again with the tabs it was hidden with (all of
++/// them if it never was), and the widgets.
+ #[tauri::command]
+ pub fn dock_toggle(app: tauri::AppHandle) -> Value {
+     let members = members(&app);
+@@ -126,6 +134,7 @@ pub fn dock_toggle(app: tauri::AppHandle) -> Value {
+         return status(&app);
+     }
+     if !shown_members(&app).is_empty() {
++        super::widgets::set_plugins_hidden(&app, true);
+         dock_close(app.clone());
+         return status(&app);
+     }
+@@ -136,6 +145,7 @@ pub fn dock_toggle(app: tauri::AppHandle) -> Value {
+     for id in if closed_with.is_empty() { &members } else { &closed_with } {
+         super::remember_window(&app, id, Some("shown"));
+     }
++    super::widgets::set_plugins_hidden(&app, false);
+     sync(&app, None);
+     status(&app)
+ }
+diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
+index 88c9044..b67e933 100644
+--- a/src-tauri/src/plugins/mod.rs
++++ b/src-tauri/src/plugins/mod.rs
+@@ -165,8 +165,9 @@ pub fn sync_game_hiding(app: &tauri::AppHandle) {
+                 crate::platform::window::hide_in_place(&window);
+             }
+         } else if hidden.remove(&label) {
+-            // Closed by its plugin meanwhile: it stays hidden.
+-            if widgets::is_closed(&label) {
++            // Closed by its plugin meanwhile, or the plugins turned off
++            // (Clicktrough, the plugins button): it stays hidden.
++            if widgets::is_closed(&label) || widgets::held_by_button(&label) {
+                 continue;
+             }
+             if !crate::platform::window::reveal_in_place(&window) {
+diff --git a/src-tauri/src/plugins/widgets.rs b/src-tauri/src/plugins/widgets.rs
+index a129b51..51367ca 100644
+--- a/src-tauri/src/plugins/widgets.rs
++++ b/src-tauri/src/plugins/widgets.rs
+@@ -87,6 +87,70 @@ pub fn is_closed(label: &str) -> bool {
+     closed().lock().unwrap_or_else(|p| p.into_inner()).contains(label)
+ }
+ 
++/// Clicktrough: the plugins turned off with the meter's plugins button
++/// (`dock::dock_toggle`): the dock hidden, and every plugin's widgets with
++/// it (a Map overlay stayed over the game). Kept across restarts, so widgets
++/// opened while it is set start hidden; the button or the dock shown again
++/// any other way brings them back.
++pub const PLUGINS_HIDDEN_KEY: &str = "ct.pluginsHidden";
++
++/// The widgets the plugins button hid, by label.
++fn held_by_button_set() -> &'static Mutex<std::collections::HashSet<String>> {
++    static HELD: std::sync::OnceLock<Mutex<std::collections::HashSet<String>>> = std::sync::OnceLock::new();
++    HELD.get_or_init(Mutex::default)
++}
++
++/// Whether the plugins button has the plugins off.
++pub fn plugins_hidden(app: &tauri::AppHandle) -> bool {
++    app.try_state::<AppState>().is_some_and(|s| s.settings.get(PLUGINS_HIDDEN_KEY).as_deref() == Some("true"))
++}
++
++/// Whether the plugins button hid widget `label` (nothing else may show it).
++pub fn held_by_button(label: &str) -> bool {
++    held_by_button_set().lock().unwrap_or_else(|p| p.into_inner()).contains(label)
++}
++
++/// Hide one widget for the plugins button.
++fn hold_by_button(window: &tauri::WebviewWindow) {
++    if window.is_visible().unwrap_or(false) && !crate::platform::window::is_hidden_in_place(window) {
++        crate::platform::window::hide_in_place(window);
++    }
++    held_by_button_set().lock().unwrap_or_else(|p| p.into_inner()).insert(window.label().to_string());
++}
++
++/// The plugins button: every plugin's widgets hidden (`off`), or the ones it
++/// hid shown again, but those their plugins closed meanwhile or the game
++/// keeps hidden.
++pub fn set_plugins_hidden(app: &tauri::AppHandle, off: bool) {
++    if let Some(state) = app.try_state::<AppState>() {
++        state.settings.set(PLUGINS_HIDDEN_KEY, if off { "true" } else { "false" });
++    }
++    if off {
++        for (label, window) in app.webview_windows() {
++            if parse_label(&label).is_some() && !is_closed(&label) {
++                hold_by_button(&window);
++            }
++        }
++        return;
++    }
++    let held: Vec<String> = held_by_button_set().lock().unwrap_or_else(|p| p.into_inner()).drain().collect();
++    for label in held {
++        let Some(window) = app.get_webview_window(&label) else { continue };
++        let Some((id, _)) = parse_label(&label) else { continue };
++        if is_closed(&label) {
++            continue;
++        }
++        if super::game_hides(app, &id) {
++            super::hold_for_game(&window);
++            continue;
++        }
++        if !crate::platform::window::reveal_in_place(&window) {
++            crate::platform::window::show_on_top_without_focus(&window);
++        }
++        relock(app, &window);
++    }
++}
++
+ /// The parts of each widget that take the mouse, as its page reported them
+ /// (`a2.widget.area`, `a2.widget.areas`): rectangles in CSS px, and the
+ /// page's scale. Unlocked, clicks elsewhere in its window go through (by an
+@@ -201,6 +265,9 @@ pub async fn plugin_widget_open(
+         crate::platform::window::set_size(&widget, tauri::LogicalSize::new(width, height).into());
+         if super::game_hides(&app, &id) {
+             super::hold_for_game(&widget);
++        } else if plugins_hidden(&app) || held_by_button(widget.label()) {
++            // Clicktrough: the plugins are off (the meter's plugins button).
++            hold_by_button(&widget);
+         } else if !crate::platform::window::reveal_in_place(&widget) {
+             crate::platform::window::show_on_top_without_focus(&widget);
+         }
+@@ -275,6 +342,10 @@ pub async fn plugin_widget_open(
+     if super::game_hides(&app, &id) {
+         super::hold_for_game(&widget);
+     }
++    // Clicktrough: the plugins are off (the meter's plugins button).
++    if plugins_hidden(&app) {
++        hold_by_button(&widget);
++    }
+     Ok(())
+ }
+ 
+-- 
+2.43.0
+

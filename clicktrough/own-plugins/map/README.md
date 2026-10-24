@@ -60,12 +60,9 @@ zooms it; the slider in its title (or **Opacity** here) sets how much of the
 game shows through (the marks stay solid); **Lock it** lets clicks through to
 the game.
 
-Maps: Verteron, Altgard, the Abyss and 25 instances. Other places have no map
-here yet. The pictures are pieced together from the game's map as a player
-had explored it: parts of Altgard (around Black Claw Village, Fafnite
-Deposit, Western Gribade Highland, Immortal Isle and Spirit Isle) stayed dark
-in it, so they are missing here, though the marks there are right. The complete pictures are on the community map sites, which don't
-allow taking them.
+Maps: Verteron, Altgard, the Abyss, Poeta and Ishalgen, whole, as the game
+draws its world map (on its parchment, the sea painted), and 25 instances.
+Eltnen, Morheim and the Abyss's other layers have no map here yet.
 
 ## How it knows
 
@@ -83,20 +80,25 @@ lets a plugin load no file of its own once its page has started. No network.
 [AION2 Interactive Map](https://github.com/aion2-interactive-map/aion2-interactive-map)
 by Yihao Liu (tc-imba) (CC BY-NC 4.0: non-commercial use only, see
 `NOTICE-AION2-Interactive-Map.txt`) with
-`python3 -I dev/make_data.py <Aion-DPS-Meter checkout> . --aim <aion2-interactive-map checkout>`
+`python3 -I dev/make_data.py <Aion-DPS-Meter checkout> . --aim <aion2-interactive-map checkout> --game-maps <its gh-pages checkout>`
 (`--no-tiles` keeps `tiles/`); `dev/provenance.json` names the revisions,
 the calibration and every file read.
 
-The calibration of Verteron and Altgard (where a game coordinate lies on the
-picture) is fitted to the Kibelisks: SkeeveAN's in game coordinates, the
-AION2 Interactive Map's on the game's map picture, 60 and 61 pairs, 6 and 8 m
-apart on average. It makes the maps about 2 % larger than SkeeveAN's own fit,
-which was off by up to 90 m towards the edges of Altgard; with it 99 % of
-Verteron's spawn points and gathering spots lie on land (96 % before), and the
-Hidden Cube spots lie on places the game may put a cube (7 m apart on average).
+The world maps are the game's own map pictures as the AION2 Interactive Map
+publishes them (its `gh-pages` branch, `UI/Map/WorldMap`), the way the map
+sites all show them: SkeeveAN's are the same pictures taken as a player had
+explored them, so Altgard had dark holes (Black Claw Village, Immortal Isle
+and more). Verteron keeps SkeeveAN's sharper picture (twice the pixels) where
+it has one. Each picture covers a fixed rectangle of the world (the client's
+map bounds, as the map sites use them), one pixel 99.6 cm on every map: that
+is the calibration. The Kibelisks of both sources agree with it (60 and 61
+pairs, 6 and 8 m apart on average); 99 % of the spawn points of Verteron and
+the Abyss lie on land with it, and the Hidden Cube spots on places the game
+may put a cube (7 m apart on average). SkeeveAN's own fit was 2 % too small,
+up to 90 m off towards Altgard's edges.
 
-The map pictures are the game's artwork; AION 2 names, maps and game material
-belong to their respective owners.
+The map pictures are the game's artwork (© NCSOFT); AION 2 names, maps and
+game material belong to their respective owners.
 
 Unofficial, not affiliated with NCSOFT or A2Tools. Third-party tools can put a
 game account at risk.

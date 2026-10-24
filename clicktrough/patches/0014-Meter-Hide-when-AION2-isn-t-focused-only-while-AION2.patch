@@ -1,0 +1,131 @@
+From d692a288044d35e2a18836a6277e34de7e519f48 Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Sat, 24 Oct 2026 20:12:56 +0000
+Subject: [PATCH 14/15] Meter: "Hide when AION2 isn't focused" only while AION2
+ runs
+
+With the game closed, nothing that counts as the game or the meter could
+be in front (the overlay never takes the focus): the meter hid 1.5 s
+after every start, Settings and the plugin windows with it, and could
+hardly be used; a player's meter then crashed. The auto-hide now applies
+only while AION2 runs (looked at every 2 s, as for "Hide while AION2 is
+closed", which stays the setting for hiding it then), and a meter it hid
+comes back when the game closes or the setting is turned off.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01RBQati3x8VviBbpY9juEWf
+---
+ src-tauri/src/app.rs | 45 +++++++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 44 insertions(+), 1 deletion(-)
+
+diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
+index 95ee7a3..8e01728 100644
+--- a/src-tauri/src/app.rs
++++ b/src-tauri/src/app.rs
+@@ -297,18 +297,35 @@ fn auto_hide_now(app: &tauri::AppHandle) {
+     if state.settings.get("dpsMeter.autoHideMeter").unwrap_or_default() != "true" || !meter_wanted(app) {
+         return;
+     }
++    // Clicktrough: only while AION2 runs (see GAME_RUNNING).
++    if !GAME_RUNNING.load(std::sync::atomic::Ordering::Relaxed) {
++        return;
++    }
+     let Some(window) = app.get_webview_window("main") else { return };
+     let front = platform::window_detector::is_aion2_foreground() || window.is_focused().unwrap_or(false);
+     let hidden = !window.is_visible().unwrap_or(true)
+         || window.is_minimized().unwrap_or(false)
+         || platform::window::is_hidden_in_place(&window);
+     if front && hidden {
++        AUTO_HIDDEN.store(false, std::sync::atomic::Ordering::Relaxed);
+         show_meter_again(app, &window);
+     } else if !front && !hidden {
+         platform::window::minimize_off_top(&window);
++        AUTO_HIDDEN.store(true, std::sync::atomic::Ordering::Relaxed);
+     }
+ }
+ 
++/// Clicktrough: whether AION2 runs, as the housekeeping loop last looked
++/// (every 2 s). "Hide when AION2 isn't focused" hides the meter only while
++/// it does: with the game closed nothing could be "in front" but the meter,
++/// whose overlay never takes the focus, so the meter hid 1.5 s after each
++/// start and couldn't be used, Settings included ("Hide while AION2 is
++/// closed" is the setting for that).
++static GAME_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
++/// Clicktrough: the meter hidden by "Hide when AION2 isn't focused", to come
++/// back when that no longer applies (the game closed, the setting off).
++static AUTO_HIDDEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
++
+ /// Tell the main window whether to ignore the mouse: when locked, unless the
+ /// pointer is over the lock button or a card is open.
+ /// A screenshot tool (KDE's Spectacle) is the active window: every meter
+@@ -3710,6 +3727,10 @@ pub fn run() {
+                 let mut hidden_with_meter: std::collections::HashSet<String> = Default::default();
+                 let mut others_delay: u32 = 0;
+                 let mut last_odyle: Option<((u32, u32), Option<String>)> = None;
++                // Clicktrough: whether AION2 runs (looked at every 2 s while
++                // a setting needs it).
++                let mut game_running = platform::window_detector::find_aion2_window();
++                GAME_RUNNING.store(game_running, std::sync::atomic::Ordering::Relaxed);
+                 loop {
+                     interval.tick().await;
+                     tick_count += 1;
+@@ -3748,7 +3769,11 @@ pub fn run() {
+                         // as the game last told (Hirai, 2026-10-22).
+                         if tick_count % 4 == 0 {
+                             let on = |key: &str| state.settings.get(key).as_deref() == Some("true");
+-                            let closed = on("dpsMeter.hideWhenGameClosed") && !platform::window_detector::find_aion2_window();
++                            if on("dpsMeter.hideWhenGameClosed") || on("dpsMeter.autoHideMeter") {
++                                game_running = platform::window_detector::find_aion2_window();
++                                GAME_RUNNING.store(game_running, std::sync::atomic::Ordering::Relaxed);
++                            }
++                            let closed = on("dpsMeter.hideWhenGameClosed") && !game_running;
+                             let solo = on("dpsMeter.hideWhenSolo") && state.data_storage.get_party_members().len() < 2;
+                             let want = meter_wanted(&handle) && (closed || solo);
+                             if want != hidden_closed {
+@@ -3764,11 +3789,27 @@ pub fn run() {
+                         }
+ 
+                         // --- Auto-hide when AION2 loses focus (every tick) ---
++                        // Clicktrough: only while AION2 runs (GAME_RUNNING).
+                         let auto_hide = tick_count > 20
+                             && !hidden_closed
++                            && game_running
+                             && state.settings.get("dpsMeter.autoHideMeter")
+                                 .unwrap_or_default() == "true"
+                             && meter_wanted(&handle);
++                        // Hidden by it, and now it doesn't apply (the game
++                        // closed, the setting off): the meter comes back.
++                        if !auto_hide && !hidden_closed && tick_count > 20
++                            && AUTO_HIDDEN.swap(false, std::sync::atomic::Ordering::Relaxed)
++                        {
++                            if let Some(window) = handle.get_webview_window("main") {
++                                let hidden = !window.is_visible().unwrap_or(true)
++                                    || window.is_minimized().unwrap_or(false)
++                                    || platform::window::is_hidden_in_place(&window);
++                                if hidden && meter_wanted(&handle) {
++                                    show_meter_again(&handle, &window);
++                                }
++                            }
++                        }
+                         if auto_hide {
+                             if let Some(window) = handle.get_webview_window("main") {
+                                 let aion_fg = platform::window_detector::is_aion2_foreground();
+@@ -3784,6 +3825,7 @@ pub fn run() {
+                                     || platform::window::is_hidden_in_place(&window);
+                                 if aion_fg || is_self_fg {
+                                     hide_delay = 0;
++                                    AUTO_HIDDEN.store(false, std::sync::atomic::Ordering::Relaxed);
+                                     if hidden {
+                                         show_meter_again(&handle, &window);
+                                     }
+@@ -3793,6 +3835,7 @@ pub fn run() {
+                                     hide_delay += 1;
+                                     if hide_delay >= 3 {
+                                         platform::window::minimize_off_top(&window);
++                                        AUTO_HIDDEN.store(true, std::sync::atomic::Ordering::Relaxed);
+                                     }
+                                 }
+                             }
+-- 
+2.43.0
+
