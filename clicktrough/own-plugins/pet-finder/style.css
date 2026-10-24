@@ -55,7 +55,7 @@ input[type=checkbox] { accent-color: #c8ccd2; margin: 0; }
 .label { color: rgba(255,255,255,.45); }
 .window { color: rgba(255,255,255,.4); font-size: 11px; margin-top: 1px; }
 .maps { display: flex; gap: 4px; flex-wrap: wrap; }
-.mapLink { color: rgba(255,255,255,.8); text-decoration: none; border: 1px solid rgba(255,255,255,.22); border-radius: 4px; padding: 0 6px; }
+.mapLink { color: rgba(255,255,255,.8); text-decoration: none; background: none; border: 1px solid rgba(255,255,255,.22); border-radius: 4px; padding: 0 6px; font-size: 12px; cursor: pointer; }
 .mapLink:hover { background: rgba(255,255,255,.08); color: #fff; }
 .progress { display: grid; grid-template-columns: auto 1fr; gap: 0 8px; align-items: center; margin-top: 3px; font-size: 12px; }
 .progress:empty { display: none; }

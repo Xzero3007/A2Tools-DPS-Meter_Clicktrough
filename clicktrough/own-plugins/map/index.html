@@ -12,29 +12,39 @@
       </div>
       <div class="tools">
         <select class="mapPick" title="Which map"></select>
-        <button type="button" class="follow" aria-pressed="true" title="Keep you in the middle">Follow</button>
+        <button type="button" class="follow" aria-pressed="true" title="Keep you in the middle (double-click the map)">Follow</button>
         <button type="button" class="overlayBtn" aria-pressed="false" title="A small map that follows you, over the game">Overlay</button>
       </div>
     </header>
+    <div class="searchRow">
+      <input type="search" class="search" placeholder="Search: Orichalcum, Aria, a pet, a monster, a Kibelisk camp …" autocomplete="off" spellcheck="false" />
+      <div class="results" role="listbox" hidden></div>
+    </div>
+    <div class="focusBar" hidden>
+      <span class="focusText"></span>
+      <span class="focusMaps"></span>
+      <button type="button" class="focusClear" title="Stop showing it" aria-label="Stop showing it">×</button>
+    </div>
     <nav class="layers" aria-label="What the map shows">
       <button type="button" class="chip" data-layer="pets" aria-pressed="true">Pets</button>
-      <button type="button" class="chip" data-layer="monsters" aria-pressed="false">Monsters</button>
+      <button type="button" class="chip" data-layer="monsters" aria-pressed="false" title="The monsters around you right now">Monsters</button>
       <button type="button" class="chip" data-layer="gather" aria-pressed="false">Gathering</button>
-      <button type="button" class="chip" data-layer="cubes" aria-pressed="true">Hidden Cubes</button>
+      <button type="button" class="chip" data-layer="cubes" aria-pressed="true" title="Shown as soon as one is in range">Hidden Cubes</button>
       <button type="button" class="chip" data-layer="kibelisks" aria-pressed="false">Kibelisks</button>
       <span class="sep"></span>
       <button type="button" class="chip petsMode" aria-pressed="false" title="All pets, or only those Pet Finder and Pet Soul Tracker follow">All pets</button>
     </nav>
     <nav class="kinds" aria-label="Gathering" hidden></nav>
+    <section class="overlaySettings" hidden>
+      <label>Overlay opacity <input type="range" class="overlayOpacity" min="20" max="100" step="5" /></label>
+      <label class="check"><input type="checkbox" class="overlayLock" /> Lock it (clicks go to the game)</label>
+      <span class="muted">Drag its corner to resize it.</span>
+    </section>
     <div class="mapBox"></div>
     <footer class="status">
       <span class="next"></span>
       <span class="counts muted"></span>
     </footer>
-    <section class="overlaySettings" hidden>
-      <label>Overlay size <select class="overlaySize"></select></label>
-      <label class="check"><input type="checkbox" class="overlayLock" /> Lock the overlay (clicks go to the game)</label>
-    </section>
     <script src="/_sdk/a2.js"></script>
     <script src="data.js"></script>
     <script src="render.js"></script>

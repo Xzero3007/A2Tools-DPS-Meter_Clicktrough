@@ -90,3 +90,39 @@ test("the compass arrow", () => {
   assert.equal(M.arrow(-90), "←");
   assert.equal(M.arrow(181), "↓");
 });
+
+test("the search finds gathering spots, pets, monsters and camps, with their maps", () => {
+  const ore = M.search("orichalcum");
+  assert.equal(ore[0].label, "Orichalcum");
+  assert.equal(ore[0].focus.type, "gather");
+  assert.ok(ore[0].maps.verteron > 0);
+  assert.ok(M.search("orich ore").length >= 1, "every word, in name or kind");
+  const pet = M.search(D.pets[pet1()].name).find((r) => r.focus.type === "pet");
+  assert.ok(pet && pet.total > 0);
+  assert.ok(M.search("guide rest").some((r) => r.focus.type === "kibelisk"));
+  assert.deepEqual(M.search("x"), [], "one letter is no search");
+  assert.deepEqual(M.search("zzzqqq"), []);
+});
+function pet1() { return pet; }
+
+test("a focus rings its places, and the nearest is next (one there now first)", () => {
+  const focus = M.search("orichalcum")[0].focus;
+  const pts = M.focusPoints(focus, "verteron");
+  const [fx, fy] = pts[0];
+  const world = { zone: 1010, me: { x: fx + 500, y: fy, exact: true }, npcs: [], objects: [] };
+  const b = M.build({ key: "verteron", world, tracked: new Map(), heading: 0, layers: { pets: false }, gatherKinds: {}, petsMode: "tracked", focus });
+  assert.equal(b.hits.length / 2, pts.length);
+  assert.ok(b.marks.filter((m) => m.hit).length >= pts.length);
+  assert.equal(b.next.name, "Orichalcum");
+  assert.equal(Math.round(b.next.metres), 5);
+  // One that is there right now wins, though further away.
+  const live = M.build({ key: "verteron", world: { ...world, objects: [[1, Number(focus.ids[0]), fx + 3000, fy]] }, tracked: new Map(), heading: 0, layers: { pets: false }, gatherKinds: {}, petsMode: "tracked", focus });
+  assert.equal(live.next.live, true);
+  assert.equal(Math.round(live.next.metres), 25);
+});
+
+test("the gathering kinds have plain names and say what they hold", () => {
+  assert.equal(M.kindLabel("Cotton"), "Fibers");
+  assert.equal(M.kindLabel("Fragment"), "Empyrean Traces");
+  assert.ok(M.kindTitle("Ore").includes("Orichalcum"));
+});

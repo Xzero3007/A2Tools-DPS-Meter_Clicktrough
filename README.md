@@ -33,8 +33,9 @@ package.
 - **A map with your position**: the Map plugin shows the map you are on, where
   you are, the pets Pet Finder and Pet Soul Tracker follow, monsters around,
   gathering spots by kind, Hidden Cubes and Kibelisk camps, each layer on or
-  off; and an overlay with a small map that follows you, the next pet to go
-  for and how far (maps and data from SkeeveAN's
+  off, and a search (e.g. "Orichalcum": all its spots and the nearest); and
+  an overlay with a small map that follows you, the next pet to go for and how
+  far, resizable and with its own opacity (maps and data from SkeeveAN's
   [Aion-DPS-Meter](https://github.com/SkeeveAN/Aion-DPS-Meter)).
 - **Pet Finder built in**: pet mobs near you with how far and which way, a
   search over every pet and a Black Cloud Merchant shopping list (data from

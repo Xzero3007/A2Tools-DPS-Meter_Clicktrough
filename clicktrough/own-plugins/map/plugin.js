@@ -1,16 +1,12 @@
 // The Map plugin's window: the map you are on with where you are, the pets
 // Pet Finder and Pet Soul Tracker follow, monsters around, gathering spots,
-// Hidden Cubes and Kibelisk camps; and an overlay (a widget) with a small map
-// that follows you.
+// Hidden Cubes and Kibelisk camps; a search; and an overlay (a widget) with a
+// small map that follows you.
 (() => {
   const D = globalThis.MAP_DATA;
   const K = globalThis.MapKit;
   const M = globalThis.MapMarks;
   const $ = (s) => document.querySelector(s);
-
-  const KINDS = ["Herb", "Ore", "Wood", "Cotton", "Food", "Gemstone", "Od", "Fragment"];
-  const SIZES = { s: [220, 250], m: [300, 330], l: [400, 430] };
-  const SIZE_NAMES = { s: "Small", m: "Medium", l: "Large" };
 
   let settings = {
     layers: { pets: true, monsters: false, gather: false, cubes: true, kibelisks: false },
@@ -19,11 +15,13 @@
     follow: true,
     zoom: null, // screen px per map px while following
     overlay: false,
-    overlaySize: "m",
+    overlaySize: [300, 330],
+    overlayOpacity: 0.86,
     overlayZoom: 2.5, // the overlay's screen px per metre
     overlayLock: false,
     pick: "auto",
     lastKey: null,
+    focus: null, // what the search or another plugin asked to show
   };
   let world = null;
   let shared = {};
@@ -31,6 +29,7 @@
   let heading = 0;
   let headingFrom = null;
   let compact = false;
+  const focusSeen = {}; // plugin -> the last focus request handled (its time)
 
   const saveLater = (() => {
     let t = 0;
@@ -59,6 +58,12 @@
     if (settings.pick !== "auto" && D.maps[settings.pick]) return settings.pick;
     return M.mapOf(world) || settings.lastKey || "verteron";
   }
+  const titleOf = (key) => D.maps[key]?.title || key;
+  /** A map by a region's name (Pet Finder's "Verteron", "Altgard" ...). */
+  const mapNamed = (name) => {
+    const n = String(name || "").toLowerCase();
+    return Object.keys(D.maps).find((k) => k === n || D.maps[k].title.toLowerCase() === n) || null;
+  };
 
   // ---------- the player's heading: the way he walks (the game sends no facing) ----------
   function followHeading(me) {
@@ -85,6 +90,10 @@
     });
   }
 
+  function state(key) {
+    return { key, world, tracked, heading, layers: settings.layers, gatherKinds: settings.gatherKinds, petsMode: settings.petsMode, focus: settings.focus };
+  }
+
   function draw() {
     const key = currentKey();
     const inZone = M.mapOf(world);
@@ -93,7 +102,7 @@
       saveLater();
     }
     view.setMap(key);
-    const built = M.build({ key, world, tracked, heading, layers: settings.layers, gatherKinds: settings.gatherKinds, petsMode: settings.petsMode });
+    const built = M.build(state(key));
     view.setMarks(built.marks);
     const me = world?.me;
     const onThisMap = me && inZone === key;
@@ -106,16 +115,19 @@
     }
     renderHeader(key, onThisMap);
     renderStatus(built, onThisMap);
-    sendOverlay(key, built, onThisMap);
+    renderFocus(key);
+    // The overlay follows you on your own map, whichever one this window shows.
+    const own = inZone || key;
+    sendOverlay(own, !!me && inZone === own);
   }
 
   function renderHeader(key, onThisMap) {
-    $(".mapName").textContent = D.maps[key]?.title || "Map";
+    $(".mapName").textContent = titleOf(key) || "Map";
     const zoneName = world?.zone != null ? D.zoneNames[String(world.zone)] : null;
     let note = "";
     if (!world?.me) note = "Waiting for your position: log in with the meter running";
     else if (!M.mapOf(world)) note = zoneName ? `No map for ${zoneName}` : "This place has no map";
-    else if (!onThisMap) note = `You are in ${D.maps[M.mapOf(world)]?.title || zoneName || "another map"}`;
+    else if (!onThisMap) note = `You are in ${titleOf(M.mapOf(world)) || zoneName || "another map"}`;
     else note = world.me.exact ? "Your position" : "Your position (about, from what's around you)";
     $(".whereNote").textContent = note;
   }
@@ -124,27 +136,137 @@
     const n = built.next;
     $(".next").replaceChildren();
     if (n && onThisMap) {
-      const label = document.createElement("span");
-      label.className = "nextLabel";
-      label.textContent = "Next";
-      const name = document.createElement("strong");
-      name.textContent = ` ${n.name} `;
-      const dist = document.createElement("span");
-      dist.className = "muted";
-      dist.textContent = `${M.arrow(n.bearing)} ${Math.round(n.metres)} m${n.live ? "" : " (spawn point)"}`;
+      const label = Object.assign(document.createElement("span"), { className: "nextLabel", textContent: "Next" });
+      const name = Object.assign(document.createElement("strong"), { textContent: ` ${n.name} ` });
+      const dist = Object.assign(document.createElement("span"), {
+        className: "muted",
+        textContent: `${M.arrow(n.bearing)} ${Math.round(n.metres)} m${n.live ? " (there now)" : n.focus ? "" : " (spawn point)"}`,
+      });
       $(".next").append(label, name, dist);
     }
     const parts = [];
-    if (settings.layers.pets) parts.push(`${built.petsHere} pet${built.petsHere === 1 ? "" : "s"} on this map`, `${built.around} around you`);
+    if (settings.focus) parts.push(`${built.hits.length / 2} on this map`);
+    else if (settings.layers.pets) parts.push(`${built.petsHere} pet${built.petsHere === 1 ? "" : "s"} on this map`, `${built.around} around you`);
     $(".counts").textContent = parts.join(" · ");
   }
+
+  // ---------- the focus (the search, or a map link in another plugin) ----------
+  function setFocus(focus, { map = null } = {}) {
+    settings.focus = focus || null;
+    // The search box keeps no word that no longer matches what is shown.
+    if (!focus || focus.label !== searchBox.value.trim()) searchBox.value = "";
+    if (focus) {
+      const maps = M.focusMaps(focus);
+      const here = M.mapOf(world);
+      const key = (map && maps[map] && map) || (here && maps[here] && here) || Object.keys(maps)[0] || null;
+      if (key) showFocusOn(key);
+    }
+    saveLater();
+    renderTools();
+    render();
+  }
+
+  /** The focus on a map: that map, framed around its places. */
+  function showFocusOn(key) {
+    settings.pick = key === M.mapOf(world) ? "auto" : key;
+    settings.follow = false;
+    view.setMap(key);
+    view.fitPoints(M.focusPoints(settings.focus, key).flat());
+    saveLater();
+    renderTools();
+    render();
+  }
+
+  function renderFocus(key) {
+    const f = settings.focus;
+    $(".focusBar").hidden = !f;
+    if (!f) return;
+    $(".focusText").textContent = `Showing ${f.label}`;
+    const maps = M.focusMaps(f);
+    $(".focusMaps").replaceChildren(...Object.entries(maps).slice(0, 6).map(([k, count]) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "chip";
+      b.setAttribute("aria-pressed", String(k === key));
+      b.textContent = `${titleOf(k)} ${count}`;
+      b.addEventListener("click", () => showFocusOn(k));
+      return b;
+    }));
+    if (!Object.keys(maps).length) $(".focusMaps").textContent = "no known places on these maps";
+  }
+  $(".focusClear").addEventListener("click", () => setFocus(null));
+
+  // ---------- the search ----------
+  const searchBox = $(".search");
+  const results = $(".results");
+  let found = [];
+  let active = -1;
+  function renderResults() {
+    const q = searchBox.value.trim();
+    found = q.length >= 2 ? M.search(q) : [];
+    active = found.length ? 0 : -1;
+    results.hidden = !q || q.length < 2;
+    if (results.hidden) return;
+    if (!found.length) {
+      results.replaceChildren(Object.assign(document.createElement("div"), { className: "noResult", textContent: "Nothing with that name on these maps" }));
+      return;
+    }
+    results.replaceChildren(...found.map((r, i) => {
+      const row = document.createElement("div");
+      row.className = "result";
+      row.setAttribute("role", "option");
+      row.setAttribute("aria-selected", String(i === active));
+      const name = Object.assign(document.createElement("strong"), { textContent: r.label });
+      if (r.gather) {
+        const dot = document.createElement("i");
+        dot.style.background = K.GATHER_COLORS[r.gather];
+        name.prepend(dot);
+      }
+      const sub = Object.assign(document.createElement("span"), { className: "muted", textContent: ` ${r.sub}` });
+      const where = Object.assign(document.createElement("span"), {
+        className: "where",
+        textContent: Object.entries(r.maps).slice(0, 3).map(([k, n]) => `${titleOf(k)} ${n}`).join(" · "),
+      });
+      row.append(name, sub, where);
+      row.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        pick(i);
+      });
+      return row;
+    }));
+  }
+  function pick(i) {
+    const r = found[i];
+    if (!r) return;
+    results.hidden = true;
+    searchBox.value = r.label;
+    searchBox.blur();
+    setFocus(r.focus);
+  }
+  searchBox.addEventListener("input", renderResults);
+  searchBox.addEventListener("focus", renderResults);
+  searchBox.addEventListener("blur", () => { results.hidden = true; });
+  searchBox.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      if (!found.length) return;
+      active = (active + (e.key === "ArrowDown" ? 1 : found.length - 1)) % found.length;
+      [...results.children].forEach((c, i) => c.setAttribute("aria-selected", String(i === active)));
+      results.children[active]?.scrollIntoView({ block: "nearest" });
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      pick(Math.max(0, active));
+    } else if (e.key === "Escape") {
+      searchBox.value = "";
+      results.hidden = true;
+    }
+  });
 
   // ---------- the overlay (a widget) ----------
   let lastSent = 0;
   let sendTimer = 0;
-  function sendOverlay(key, built, onThisMap) {
+  function sendOverlay(key, onThisMap) {
     if (!settings.overlay) return;
-    const now = Date.now();
     const go = () => {
       lastSent = Date.now();
       a2.widgets.send("overlay", {
@@ -155,21 +277,27 @@
         layers: settings.layers,
         gatherKinds: settings.gatherKinds,
         petsMode: settings.petsMode,
+        focus: settings.focus,
         zoom: settings.overlayZoom,
+        opacity: settings.overlayOpacity,
         onThisMap: !!onThisMap,
         locked: settings.overlayLock,
       }).catch(() => {});
     };
     clearTimeout(sendTimer);
-    if (now - lastSent >= 250) go();
-    else sendTimer = setTimeout(go, 250 - (now - lastSent));
+    const wait = 250 - (Date.now() - lastSent);
+    if (wait <= 0) go();
+    else sendTimer = setTimeout(go, wait);
   }
 
+  const overlaySize = () => {
+    const [w, h] = Array.isArray(settings.overlaySize) ? settings.overlaySize : [300, 330];
+    return { width: Math.max(180, Math.min(900, w)), height: Math.max(180, Math.min(900, h)) };
+  };
   async function applyOverlay() {
     try {
       if (settings.overlay) {
-        const [width, height] = SIZES[settings.overlaySize] || SIZES.m;
-        await a2.widgets.open("overlay", { width, height });
+        await a2.widgets.open("overlay", overlaySize());
         await a2.widgets.lock(!!settings.overlayLock);
         lastSent = 0;
         render();
@@ -181,10 +309,21 @@
     }
   }
 
+  let resizeTimer = 0;
   a2.on("widget-message", ({ name, data }) => {
     if (name !== "overlay" || !data) return;
     if (data.type === "zoom" && Number.isFinite(data.value)) {
       settings.overlayZoom = Math.max(0.3, Math.min(12, data.value));
+      saveLater();
+      render();
+    } else if (data.type === "resize" && Number.isFinite(data.width) && Number.isFinite(data.height)) {
+      settings.overlaySize = [Math.round(data.width), Math.round(data.height)];
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => a2.widgets.open("overlay", overlaySize()).catch(() => {}), 40);
+      saveLater();
+    } else if (data.type === "opacity" && Number.isFinite(data.value)) {
+      settings.overlayOpacity = Math.max(0.2, Math.min(1, data.value));
+      $(".overlayOpacity").value = String(Math.round(settings.overlayOpacity * 100));
       saveLater();
       render();
     } else if (data.type === "close") {
@@ -210,14 +349,15 @@
     $(".petsMode").hidden = !settings.layers.pets;
     const kinds = $(".kinds");
     kinds.hidden = !settings.layers.gather || compact;
-    kinds.replaceChildren(...KINDS.map((k) => {
+    kinds.replaceChildren(...M.KIND_ORDER.map((k) => {
       const b = document.createElement("button");
       b.type = "button";
       b.className = "chip kind";
+      b.title = M.kindTitle(k);
       b.setAttribute("aria-pressed", String(settings.gatherKinds[k] !== false));
       const dot = document.createElement("i");
       dot.style.background = K.GATHER_COLORS[k];
-      b.append(dot, k);
+      b.append(dot, M.kindLabel(k));
       b.addEventListener("click", () => {
         settings.gatherKinds = { ...settings.gatherKinds, [k]: settings.gatherKinds[k] === false };
         saveLater();
@@ -226,15 +366,15 @@
       });
       return b;
     }));
-    $(".overlaySize").value = settings.overlaySize;
+    $(".overlayOpacity").value = String(Math.round(settings.overlayOpacity * 100));
     $(".overlayLock").checked = !!settings.overlayLock;
     const pick = $(".mapPick");
     if (!pick.options.length) {
       const opt = (value, text) => Object.assign(document.createElement("option"), { value, textContent: text });
-      const world = Object.entries(D.maps).filter(([, m]) => !m.instance);
+      const open = Object.entries(D.maps).filter(([, m]) => !m.instance);
       const inst = Object.entries(D.maps).filter(([, m]) => m.instance).sort((a, b) => a[1].title.localeCompare(b[1].title));
       const g1 = Object.assign(document.createElement("optgroup"), { label: "World" });
-      g1.append(...world.map(([k, m]) => opt(k, m.title)));
+      g1.append(...open.map(([k, m]) => opt(k, m.title)));
       const g2 = Object.assign(document.createElement("optgroup"), { label: "Instances" });
       g2.append(...inst.map(([k, m]) => opt(k, m.title)));
       pick.append(opt("auto", "Where you are"), g1, g2);
@@ -259,6 +399,7 @@
   });
   $(".follow").addEventListener("click", () => {
     settings.follow = !settings.follow;
+    if (settings.follow) settings.pick = "auto";
     saveLater();
     renderTools();
     if (!settings.follow) view.fit();
@@ -270,11 +411,10 @@
     renderTools();
     applyOverlay();
   });
-  $(".overlaySize").replaceChildren(...Object.entries(SIZE_NAMES).map(([v, t]) => Object.assign(document.createElement("option"), { value: v, textContent: t })));
-  $(".overlaySize").addEventListener("change", () => {
-    settings.overlaySize = $(".overlaySize").value;
+  $(".overlayOpacity").addEventListener("input", () => {
+    settings.overlayOpacity = Number($(".overlayOpacity").value) / 100;
     saveLater();
-    if (settings.overlay) a2.widgets.close("overlay").catch(() => {}).then(applyOverlay);
+    render();
   });
   $(".overlayLock").addEventListener("change", () => {
     settings.overlayLock = $(".overlayLock").checked;
@@ -288,7 +428,11 @@
     saveLater();
     renderTools();
     view.setMap(currentKey());
-    if (!settings.follow) view.fit();
+    if (!settings.follow) {
+      const pts = settings.focus ? M.focusPoints(settings.focus, currentKey()).flat() : [];
+      if (pts.length) view.fitPoints(pts);
+      else view.fit();
+    }
     render();
   });
   // Double-click: back to following you.
@@ -310,6 +454,22 @@
     if (value == null) delete shared[plugin];
     else shared[plugin] = value;
     tracked = M.mergeTracked(shared);
+    // A map link clicked in that plugin: its pet or monster, here. Only a
+    // fresh one: the value shared earlier comes again when the map starts.
+    const f = value?.focus;
+    if (f && Number(f.at) > (focusSeen[plugin] || 0)) {
+      focusSeen[plugin] = Number(f.at);
+      if (Date.now() - Number(f.at) < 30_000) {
+        const focus = f.pet != null
+          ? { type: "pet", ids: [String(f.pet)], label: f.name || M.petName(f.pet, tracked) }
+          : f.npc != null ? { type: "npc", ids: [String(f.npc)], label: f.name || D.npcNames[f.npc] || "Monster" } : null;
+        if (focus) {
+          setFocus(focus, { map: mapNamed(f.region) || f.map || null });
+          // Brought forward: its dock tab, or its own window.
+          a2.window?.show?.().catch(() => {});
+        }
+      }
+    }
     render();
   });
   a2.on("compact", (on) => {
@@ -318,14 +478,20 @@
     renderTools();
     view.redraw();
   });
-  a2.on("locked", () => {});
 
   (async () => {
     try {
       const s = await a2.storage.get("settings");
-      if (s && typeof s === "object") settings = { ...settings, ...s, layers: { ...settings.layers, ...(s.layers || {}) } };
+      if (s && typeof s === "object") {
+        settings = { ...settings, ...s, layers: { ...settings.layers, ...(s.layers || {}) } };
+        if (!Array.isArray(settings.overlaySize)) settings.overlaySize = [300, 330];
+      }
     } catch {}
     renderTools();
+    if (settings.focus && !settings.follow) {
+      view.setMap(currentKey());
+      view.fitPoints(M.focusPoints(settings.focus, currentKey()).flat());
+    }
     render();
     if (settings.overlay) applyOverlay();
     a2.ready();

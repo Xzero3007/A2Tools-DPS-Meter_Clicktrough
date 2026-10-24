@@ -6,7 +6,8 @@ Three tabs beside the A2Tools DPS meter:
   rank and souls, how far the nearest one is and which way (north up); pinned
   pets first, then the nearest, and a notice when a pinned pet's mob appears.
 - **Search** – every pet by name, mob, region or source: your rank and souls,
-  which mobs drop its souls, farming maps (aion2maps.com) and other sources.
+  which mobs drop its souls, the regions to farm it (a click shows its spawn
+  points on the Map plugin) and other sources.
 - **Merchant** – a Black Cloud Merchant shopping list: the pets on offer that
   only chests and merchants give and you have not maxed, with price and
   discount; then those on offer you still need that mobs also drop; below, the
