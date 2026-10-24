@@ -1,8 +1,9 @@
 // The Map plugin's overlay: a small map that follows you, north up, with the
 // pets you follow (or what the search shows), the next one to go for and how
 // many are around. It hears the plugin's window (plugin.js) a few times a
-// second. The wheel zooms, the corner resizes it, the slider sets how much
-// of the game shows through.
+// second. The wheel zooms; the buttons S, M, L, XL set its size, or a corner
+// dragged (the window manager resizes it); the slider sets how much of the
+// game shows through.
 (() => {
   const D = globalThis.MAP_DATA;
   const M = globalThis.MapMarks;
@@ -30,7 +31,9 @@
     } else {
       view.fit();
     }
-    $(".title").textContent = `Map · ${map?.title || "—"}`;
+    $(".title").textContent = `${map?.title || "Map"}${state.region ? ` · ${state.region}` : ""}${state.guess ? "?" : ""}`;
+    $(".title").title = $(".title").textContent;
+    for (const b of document.querySelectorAll(".sizes button")) b.setAttribute("aria-pressed", String(b.dataset.size === state.size));
     // Not while the slider is in use: the plugin's answer lags behind it.
     if (Date.now() - opacityTouched > 1500) applyOpacity(state.opacity ?? 0.86);
     const chip = $(".nextChip");
@@ -84,29 +87,27 @@
     a2.widget.post({ type: "zoom", value: next }).catch(() => {});
   }, { passive: false });
 
-  // The corner: the widget grows with the pointer (the plugin resizes its
-  // window); the size is kept.
-  let resizing = null;
-  $(".grip").addEventListener("mousedown", (e) => {
-    if (e.button !== 0 || locked) return;
-    e.preventDefault();
-    resizing = { x: e.screenX, y: e.screenY, w: window.innerWidth, h: window.innerHeight, sent: 0 };
-  });
-  window.addEventListener("mousemove", (e) => {
-    if (!resizing) return;
-    const now = Date.now();
-    if (now - resizing.sent < 50) return;
-    resizing.sent = now;
-    const width = Math.max(180, Math.min(900, resizing.w + e.screenX - resizing.x));
-    const height = Math.max(180, Math.min(900, resizing.h + e.screenY - resizing.y));
-    a2.widget.post({ type: "resize", width, height }).catch(() => {});
-  });
-  window.addEventListener("mouseup", (e) => {
-    if (!resizing) return;
-    const width = Math.max(180, Math.min(900, resizing.w + e.screenX - resizing.x));
-    const height = Math.max(180, Math.min(900, resizing.h + e.screenY - resizing.y));
-    resizing = null;
-    a2.widget.post({ type: "resize", width, height }).catch(() => {});
+  // The sizes: the plugin opens the overlay at that size.
+  for (const b of document.querySelectorAll(".sizes button")) {
+    b.addEventListener("click", () => a2.widget.post({ type: "size", size: b.dataset.size }).catch(() => {}));
+  }
+
+  // A corner: the window manager resizes the widget while the button is down
+  // (a meter without it: no corners); the plugin keeps the size it ends at.
+  const canResize = typeof a2.widget.resize === "function";
+  document.body.classList.toggle("noResize", !canResize);
+  for (const c of document.querySelectorAll(".corner")) {
+    c.addEventListener("mousedown", (e) => {
+      if (e.button !== 0 || locked || !canResize) return;
+      e.preventDefault();
+      e.stopPropagation();
+      a2.widget.resize(c.dataset.edge).catch(() => {});
+    });
+  }
+  a2.on("resized", (size) => {
+    if (Number.isFinite(size?.width) && Number.isFinite(size?.height)) {
+      a2.widget.post({ type: "resized", width: size.width, height: size.height }).catch(() => {});
+    }
   });
 
   a2.on("widget", (data) => {

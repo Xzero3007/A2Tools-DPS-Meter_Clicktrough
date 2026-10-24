@@ -1,0 +1,21 @@
+The Hidden Cube spots, the Monolith pieces, the sealed dungeons, battlefields,
+outposts and villages, the regions (names and outlines) in data.js
+(cubeSpots, monoliths, places, regions), and the Kibelisk places the
+calibration of Verteron and Altgard is fitted to, come from
+
+  AION2 Interactive Map
+  Copyright (c) 2025 Yihao Liu (tc-imba)
+  https://github.com/aion2-interactive-map/aion2-interactive-map
+  (public/data and public/locales/en, revision in dev/provenance.json)
+
+licensed under Creative Commons Attribution-NonCommercial 4.0 International
+(CC BY-NC 4.0), https://creativecommons.org/licenses/by-nc/4.0/
+
+Changes made: only the kinds named above, with their English names; their
+places turned from pixels of the game's map pictures into game coordinates
+with the calibration fitted by dev/make_data.py; the regions' outlines kept
+as polygons, each with its middle for its name. The same licence applies to
+this adapted data: it may be shared and adapted for non-commercial purposes
+only, with credit as above. It is not part of the plugin's GPL-licensed code.
+
+AION 2 names and places belong to their respective owners.

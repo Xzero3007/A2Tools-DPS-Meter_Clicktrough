@@ -1,0 +1,242 @@
+From 2c6ce17f21bce4d1276e3227884ae29656fa6e68 Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Sat, 24 Oct 2026 18:35:33 +0000
+Subject: [PATCH] Plugins: a widget the player resizes from its corners
+ (a2.widget.resize)
+
+A widget could only be resized by its plugin opening it again at a new
+size; the Map overlay did that as its corner was dragged, a step every
+50 ms, each one pinning the size and showing the window again, and lost
+the drag when the button came up outside it: the player called it buggy.
+await a2.widget.resize(edge), called on mousedown on a handle, now has the
+window manager resize the widget from that edge or corner, as the meter's
+own windows are: the size is unpinned (through the compositor on GNOME
+and KDE), the host page starts the drag, and once the button is up the
+size is pinned again and the widget hears it, a2.on("resized",
+({ width, height }) => ...). Not while the widgets are locked, nor on
+Windows, where a widget's window has no border to resize.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01RBQati3x8VviBbpY9juEWf
+---
+ public/src/js/pluginWidget.js    |  10 ++-
+ src-tauri/src/app.rs             |   1 +
+ src-tauri/src/plugins/a2.js      |   8 ++
+ src-tauri/src/plugins/widgets.rs | 128 ++++++++++++++++++++++++++++++-
+ 4 files changed, 145 insertions(+), 2 deletions(-)
+
+diff --git a/public/src/js/pluginWidget.js b/public/src/js/pluginWidget.js
+index a6f8d8e..bb615e5 100644
+--- a/public/src/js/pluginWidget.js
++++ b/public/src/js/pluginWidget.js
+@@ -39,6 +39,14 @@
+     "widget.post": ([data]) => invoke("plugin_widget_post", { data: data ?? null }),
+     // Clicktrough: one of the plugin's own files as a data: URL.
+     file: ([path]) => invoke("plugin_widget_file", { path: String(path) }),
++    // Clicktrough: the window manager resizes the widget from an edge while
++    // the button is down; "resized" once it is up.
++    "widget.resize": async ([edge]) => {
++      const direction = await invoke("plugin_widget_resize", { edge: String(edge || "se") });
++      if (!direction) return false;
++      await window.__TAURI__.window.getCurrentWindow().startResizeDragging(direction);
++      return true;
++    },
+   };
+ 
+   window.addEventListener("message", async (event) => {
+@@ -59,7 +67,7 @@
+   current.listen("plugin-event", (event) => {
+     const payload = event.payload || {};
+     if (payload.plugin !== id || typeof payload.event !== "string") return;
+-    if (payload.event === "widget" || payload.event === "locked" || payload.event === "language") {
++    if (payload.event === "widget" || payload.event === "locked" || payload.event === "language" || payload.event === "resized") {
+       deliver(payload.event, payload.data);
+     }
+   });
+diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
+index 6e25dc2..95ee7a3 100644
+--- a/src-tauri/src/app.rs
++++ b/src-tauri/src/app.rs
+@@ -3987,6 +3987,7 @@ pub fn run() {
+             crate::plugins::plugin_share,
+             crate::plugins::plugin_file,
+             crate::plugins::widgets::plugin_widget_file,
++            crate::plugins::widgets::plugin_widget_resize,
+             open_settings_at,
+             take_settings_section,
+             crate::plugins::dock::dock_hello,
+diff --git a/src-tauri/src/plugins/a2.js b/src-tauri/src/plugins/a2.js
+index 2b6413d..c4eab7e 100644
+--- a/src-tauri/src/plugins/a2.js
++++ b/src-tauri/src/plugins/a2.js
+@@ -81,6 +81,12 @@
+ //   a2.widget.areas([{ x, y, width, height }, ...])  the same as several parts (up to 64), so the
+ //                                              gaps between them let clicks through too (meter 2.0.77 on)
+ //   a2.widget.post(data)                       to the plugin's page ("widget-message")
++//   await a2.widget.resize(edge)               call on mousedown on a handle: the window manager
++//                                              resizes the widget from that edge ("n", "s", "e",
++//                                              "w", "ne", "nw", "se", "sw") while the button is
++//                                              down; false if not (locked, Windows)
++//   a2.on("resized", ({ width, height }) => ...)  its new size (CSS px) once the button is up
++//                                              (Clicktrough)
+ //   a2.on("widget", (data) => ...)             what the plugin sent it
+ //   a2.on("locked", (locked) => ...)           whether the widgets are locked, at start and on change
+ //
+@@ -210,6 +216,8 @@
+       area: (r) => call("widget.area", [r || {}]),
+       areas: (rs) => call("widget.areas", [Array.isArray(rs) ? rs : []]),
+       post: (data) => call("widget.post", [data]),
++      // Clicktrough: resized by the window manager from an edge.
++      resize: (edge) => call("widget.resize", [String(edge || "se")]),
+     }),
+     ready: () => call("ready", []),
+   });
+diff --git a/src-tauri/src/plugins/widgets.rs b/src-tauri/src/plugins/widgets.rs
+index 217b2ec..a129b51 100644
+--- a/src-tauri/src/plugins/widgets.rs
++++ b/src-tauri/src/plugins/widgets.rs
+@@ -512,6 +512,122 @@ pub fn plugin_widget_drag(app: tauri::AppHandle, window: tauri::WebviewWindow) -
+     Ok(())
+ }
+ 
++/// The smallest a player can make a widget by dragging its edge.
++const MIN_RESIZE: f64 = 120.0;
++
++/// The widgets being resized right now, by label.
++fn resizing() -> &'static Mutex<std::collections::HashSet<String>> {
++    static RESIZING: std::sync::OnceLock<Mutex<std::collections::HashSet<String>>> = std::sync::OnceLock::new();
++    RESIZING.get_or_init(Default::default)
++}
++
++/// The window edge a widget is resized from ("n", "s", "e", "w", "ne", "nw",
++/// "se" or "sw"), as the window API names it (startResizeDragging).
++fn resize_direction(edge: &str) -> Option<&'static str> {
++    Some(match edge {
++        "n" => "North",
++        "s" => "South",
++        "e" => "East",
++        "w" => "West",
++        "ne" => "NorthEast",
++        "nw" => "NorthWest",
++        "se" => "SouthEast",
++        "sw" => "SouthWest",
++        _ => return None,
++    })
++}
++
++/// Clicktrough: a widget about to be resized by the window manager from one of
++/// its edges while the button stays down (a2.widget.resize, on mousedown),
++/// the way the meter's own windows are resized (begin_window_resize,
++/// begin_tool_resize): its size is unpinned and the direction to drag in is
++/// the answer (the host page starts the drag, startResizeDragging). Its size
++/// is pinned again once the button is up, and the widget hears it as a
++/// "resized" event ({ width, height }, CSS px). A page that grows its own
++/// window as the pointer moves fights the window manager (KWin moved such a
++/// window about, 2026-10-17; a player called the Map overlay's corner
++/// "buggy", 2026-10-24). None when it can't be done now: the widgets are
++/// locked, the button is already up, a resize is under way, or the widget's
++/// window can't be resized (Windows: its border is the window manager's).
++#[tauri::command]
++pub async fn plugin_widget_resize(app: tauri::AppHandle, window: tauri::WebviewWindow, edge: String) -> Result<Option<&'static str>, String> {
++    let (id, _) = widget_of(&window)?;
++    let direction = resize_direction(&edge).ok_or("an edge is n, s, e, w, ne, nw, se or sw")?;
++    if is_locked(&app, &id) || !cfg!(target_os = "linux") {
++        return Ok(None);
++    }
++    if !resizing().lock().unwrap_or_else(|p| p.into_inner()).insert(window.label().to_string()) {
++        return Ok(None);
++    }
++    let done = |window: &tauri::WebviewWindow| {
++        resizing().lock().unwrap_or_else(|p| p.into_inner()).remove(window.label());
++    };
++    let min = tauri::LogicalSize::new(MIN_RESIZE, MIN_RESIZE);
++    let compositor = crate::platform::window::compositor_resize_supported(&window);
++    if compositor {
++        if let Err(e) = crate::platform::window::prepare_resize(&window, min).await {
++            pin_size(&window);
++            done(&window);
++            return Err(e);
++        }
++        // Released while the hints went out: no resize.
++        if crate::platform::window::resize_pointer_down(&window) != Some(true) {
++            pin_size(&window);
++            done(&window);
++            return Ok(None);
++        }
++    } else {
++        crate::platform::window::release_size(&window, min);
++    }
++    // The drag starts from the page now; should it not, the button is up or
++    // the size stays put, and the watch below pins it again.
++    std::thread::spawn(move || {
++        std::thread::sleep(Duration::from_millis(150));
++        let mut last = window.inner_size().ok();
++        let mut still = 0;
++        // At most a minute; then its size is pinned as it stands.
++        for _ in 0..1200 {
++            std::thread::sleep(Duration::from_millis(50));
++            // Through the compositor GTK hides the button while the resize
++            // goes on: it is up once GTK sees it up over the widget again.
++            // Elsewhere the X server tells, or the size has stopped changing.
++            let down = if compositor {
++                crate::platform::window::resize_pointer_down(&window)
++            } else {
++                crate::platform::window::primary_button_down()
++            };
++            match down {
++                Some(true) => still = 0,
++                Some(false) => break,
++                None if compositor => {}
++                None => {
++                    let now = window.inner_size().ok();
++                    still = if now == last { still + 1 } else { 0 };
++                    last = now;
++                    if still >= 10 {
++                        break;
++                    }
++                }
++            }
++        }
++        let size = pin_size(&window);
++        done(&window);
++        if let Some((width, height)) = size {
++            let event = serde_json::json!({ "plugin": id, "event": "resized", "data": { "width": width, "height": height } });
++            let _ = window.emit("plugin-event", event);
++        }
++    });
++    Ok(Some(direction))
++}
++
++/// Pin a widget's size where it stands; its logical size.
++fn pin_size(window: &tauri::WebviewWindow) -> Option<(f64, f64)> {
++    let size = window.inner_size().ok()?;
++    crate::platform::window::set_size(window, tauri::Size::Physical(size));
++    let logical = size.to_logical::<f64>(window.scale_factor().unwrap_or(1.0));
++    Some((logical.width.round(), logical.height.round()))
++}
++
+ /// Whether a widget is on screen and unlocked (so a double-click on it can
+ /// open its plugin's window): a way back to the plugins with the meter hidden.
+ pub fn any_unlocked_widget_shown(app: &tauri::AppHandle) -> bool {
+@@ -558,7 +674,17 @@ pub fn note_moved(app: &tauri::AppHandle, label: &str, at: tauri::PhysicalPositi
+ 
+ #[cfg(test)]
+ mod tests {
+-    use super::{checked_area, AreaRect, MAX_AREA_RECTS};
++    use super::{checked_area, resize_direction, AreaRect, MAX_AREA_RECTS};
++
++    #[test]
++    fn a_widget_is_resized_from_one_of_its_eight_edges() {
++        assert_eq!(resize_direction("se"), Some("SouthEast"));
++        assert_eq!(resize_direction("nw"), Some("NorthWest"));
++        assert_eq!(resize_direction("e"), Some("East"));
++        for bad in ["", "x", "SE", "south", "nse"] {
++            assert!(resize_direction(bad).is_none(), "{bad:?}");
++        }
++    }
+ 
+     fn rect(x: f64, y: f64, width: f64, height: f64) -> AreaRect {
+         AreaRect { x, y, width, height }
+-- 
+2.43.0
+

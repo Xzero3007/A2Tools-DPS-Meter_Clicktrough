@@ -10,6 +10,7 @@
     Cotton: "#ededed", Wood: "#b0845c", Fragment: "#ffd666", Cube: "#ffd666",
   };
   const PET_RED = "#e5484d";
+  const PLACE_COLORS = { seal: "#ff8a7a", battlefield: "#ffb454", occupation: "#c99af7", village: "#ffffff" };
   const GOLD = "#ffd666";
 
   // The tile pictures come through the meter (a2.file) where it can:
@@ -279,6 +280,52 @@
           ctx.fill();
           ctx.stroke();
           break;
+        case "cubeSpot":
+          // A place a Hidden Cube is known to stand at: an outline of the
+          // cube's diamond (a cube there right now is the filled one).
+          ctx.beginPath();
+          ctx.moveTo(sx, sy - r * 1.3);
+          ctx.lineTo(sx + r, sy);
+          ctx.lineTo(sx, sy + r * 1.3);
+          ctx.lineTo(sx - r, sy);
+          ctx.closePath();
+          ctx.fillStyle = m.all ? "rgba(255,214,102,0.35)" : "rgba(40,32,10,0.65)";
+          ctx.lineWidth = m.all ? 1 : 1.75;
+          ctx.strokeStyle = GOLD;
+          ctx.fill();
+          ctx.stroke();
+          break;
+        case "monolith":
+          // A Monolith piece: a small upright bar.
+          ctx.fillStyle = "#d9c6ff";
+          ctx.strokeStyle = "rgba(0,0,0,0.7)";
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.rect(sx - r * 0.55, sy - r * 1.2, r * 1.1, r * 2.4);
+          ctx.fill();
+          ctx.stroke();
+          break;
+        case "place": {
+          // Sealed dungeon, battlefield, outpost, village: a ring with a dot,
+          // its colour by kind.
+          const c = PLACE_COLORS[m.place] || "#ffffff";
+          circle(sx, sy, r, "rgba(10,12,16,0.7)", c, 2);
+          circle(sx, sy, Math.max(1.5, r * 0.4), c, null);
+          break;
+        }
+        case "region":
+          // A region's name, written where it lies (no mark).
+          if (zoom * map.tile >= 70) {
+            ctx.font = "600 12px system-ui, sans-serif";
+            ctx.textAlign = "center";
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = "rgba(0,0,0,0.75)";
+            ctx.fillStyle = "rgba(255,255,255,0.8)";
+            ctx.strokeText(m.text, sx, sy);
+            ctx.fillText(m.text, sx, sy);
+            ctx.textAlign = "start";
+          }
+          return;
         default:
           circle(sx, sy, r, "#ffffff", "rgba(0,0,0,0.6)");
       }
@@ -382,18 +429,30 @@
   /** The map the player is on from the monsters around him: each pet monster
    *  standing within 40 m of one of its species' spawn points on a map votes
    *  for that map (SkeeveAN, Aion2Maps.Detect). */
-  function detectMap(npcs) {
+  // The map the player is on, from what is around him: each pet monster
+  // standing within 40 m of a spawn point of its kind on a map votes for that
+  // map, and so does each gathering spot or Hidden Cube within 30 m of a place
+  // one stands at on it. Null when nothing around is known anywhere.
+  function detectMap(npcs, objects = []) {
     const votes = {};
-    for (const [, npc, x, y] of npcs) {
+    const near = (pts, x, y, cm) => {
+      for (let i = 0; i < pts.length; i += 2) {
+        if ((pts[i] - x) ** 2 + (pts[i + 1] - y) ** 2 <= cm * cm) return true;
+      }
+      return false;
+    };
+    for (const [, npc, x, y] of npcs || []) {
       for (const [key, per] of Object.entries(D.spawns)) {
         const pts = per[npc];
-        if (!pts) continue;
-        for (let i = 0; i < pts.length; i += 2) {
-          if ((pts[i] - x) ** 2 + (pts[i + 1] - y) ** 2 <= 4000 ** 2) {
-            votes[key] = (votes[key] || 0) + 1;
-            break;
-          }
-        }
+        if (pts && near(pts, x, y, 4000)) votes[key] = (votes[key] || 0) + 1;
+      }
+    }
+    const cubeIds = new Set(D.cubes.map(String));
+    for (const [, env, x, y] of objects || []) {
+      const id = cubeIds.has(String(env)) ? "cube" : String(env);
+      for (const [key, per] of Object.entries(D.gather.points)) {
+        const pts = per[id];
+        if (pts && near(pts, x, y, 3000)) votes[key] = (votes[key] || 0) + 1;
       }
     }
     const best = Object.entries(votes).sort((a, b) => b[1] - a[1])[0];
@@ -404,5 +463,5 @@
   const bearing = (ax, ay, bx, by) => (Math.atan2(by - ay, bx - ax) * 180) / Math.PI + 90;
   const metres = (ax, ay, bx, by) => Math.hypot(bx - ax, by - ay) / 100;
 
-  globalThis.MapKit = Object.freeze({ MapView, detectMap, toNative, bearing, metres, GATHER_COLORS, PET_RED, GOLD });
+  globalThis.MapKit = Object.freeze({ MapView, detectMap, toNative, bearing, metres, GATHER_COLORS, PLACE_COLORS, PET_RED, GOLD });
 })();

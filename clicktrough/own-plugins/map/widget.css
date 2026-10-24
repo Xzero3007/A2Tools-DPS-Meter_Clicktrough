@@ -7,13 +7,21 @@ html, body { height: 100%; margin: 0; background: transparent; overflow: hidden;
 body { --alpha: 0.86; }
 .card { position: absolute; inset: 0; display: flex; flex-direction: column; border-radius: 10px; overflow: hidden;
   background: rgba(14, 16, 20, var(--alpha)); border: 1px solid rgba(255, 255, 255, calc(0.04 + var(--alpha) * 0.1)); }
-.head { display: flex; align-items: center; gap: 8px; padding: 6px 10px; cursor: move; user-select: none; }
+.head { display: flex; align-items: center; gap: 6px; padding: 6px 12px; cursor: move; user-select: none; }
 .title { flex: 1; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8); }
-.opacity { width: 70px; margin: 0; accent-color: #c8ccd2; opacity: 0; transition: opacity 120ms; }
-.card:hover .opacity, .opacity:focus { opacity: 1; }
+.opacity { width: 64px; min-width: 40px; flex: 0 1 64px; margin: 0; accent-color: #c8ccd2; }
+/* The size buttons and the slider show while the pointer is on the overlay. */
+.sizes, .opacity { opacity: 0; transition: opacity 120ms; }
+.card:hover .sizes, .card:hover .opacity, .opacity:focus { opacity: 1; }
+.sizes { display: inline-flex; flex: none; border-radius: 6px; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.18); }
+.sizes button { background: rgba(255, 255, 255, 0.04); border: 0; color: rgba(255, 255, 255, 0.75); font-family: inherit; font-weight: 600; font-size: 11px; line-height: 1;
+  padding: 3px 6px; cursor: pointer; }
+.sizes button + button { border-left: 1px solid rgba(255, 255, 255, 0.14); }
+.sizes button:hover { background: rgba(255, 255, 255, 0.12); color: #fff; }
+.sizes button[aria-pressed="true"] { background: rgba(255, 255, 255, 0.22); color: #fff; }
 .close { background: none; border: 0; color: rgba(255, 255, 255, 0.6); font-size: 16px; line-height: 1; padding: 0 2px; cursor: pointer; }
 .close:hover { color: #fff; }
-body.locked .close, body.locked .opacity, body.locked .grip { display: none; }
+body.locked .close, body.locked .opacity, body.locked .sizes, body.locked .corner, body.noResize .corner { display: none; }
 body.locked .head { cursor: default; }
 .mapBox { position: relative; flex: 1; margin: 0 6px; border-radius: 7px; overflow: hidden; background: rgba(0, 0, 0, calc(var(--alpha) * 0.35)); }
 .mapTiles { position: absolute; inset: 0; overflow: hidden; z-index: 0; opacity: var(--alpha); }
@@ -27,5 +35,13 @@ body.locked .head { cursor: default; }
 .nextChip .dist { color: rgba(255, 255, 255, 0.7); }
 .foot { margin: 6px 8px 8px; align-self: flex-start; padding: 3px 10px; border-radius: 999px; font-size: 12px;
   background: rgba(10, 12, 16, 0.8); border: 1px solid rgba(255, 255, 255, 0.12); }
-.grip { position: absolute; right: 0; bottom: 0; width: 16px; height: 16px; cursor: nwse-resize; z-index: 6;
-  background: linear-gradient(135deg, transparent 50%, rgba(255, 255, 255, 0.35) 50%, rgba(255, 255, 255, 0.35) 60%, transparent 60%, transparent 70%, rgba(255, 255, 255, 0.35) 70%, rgba(255, 255, 255, 0.35) 80%, transparent 80%); }
+/* The corners to resize it from: big enough to hit, a bracket that shows
+   while the pointer is on the overlay. */
+.corner { position: absolute; width: 26px; height: 26px; z-index: 6; box-sizing: border-box; border: 0 solid rgba(255, 255, 255, 0);
+  transition: border-color 120ms; }
+.card:hover .corner { border-color: rgba(255, 255, 255, 0.45); }
+.card .corner:hover { border-color: rgba(255, 255, 255, 0.95); background: rgba(255, 255, 255, 0.08); }
+.corner.nw { left: 0; top: 0; border-width: 3px 0 0 3px; border-top-left-radius: 10px; cursor: nwse-resize; }
+.corner.ne { right: 0; top: 0; border-width: 3px 3px 0 0; border-top-right-radius: 10px; cursor: nesw-resize; }
+.corner.sw { left: 0; bottom: 0; border-width: 0 0 3px 3px; border-bottom-left-radius: 10px; cursor: nesw-resize; }
+.corner.se { right: 0; bottom: 0; border-width: 0 3px 3px 0; border-bottom-right-radius: 10px; cursor: nwse-resize; }
