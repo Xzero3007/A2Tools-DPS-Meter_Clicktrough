@@ -1,7 +1,7 @@
 {
   "id": "pet-finder",
   "name": "Pet Finder",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "apiVersion": 2,
   "author": "community (data and packet layouts from PetTracker, GPLv3)",
   "description": "Pet mobs near you with how far and which way, a search over every pet (your rank and souls, which mobs drop its souls, farming maps, other sources) and a Black Cloud Merchant shopping list.",

@@ -1,6 +1,8 @@
 // The Map plugin's overlay: a small map that follows you, north up, with the
-// pets you follow, the next one to go for and how many are around. It hears
-// the plugin's window (plugin.js) a few times a second; the wheel zooms.
+// pets you follow (or what the search shows), the next one to go for and how
+// many are around. It hears the plugin's window (plugin.js) a few times a
+// second. The wheel zooms, the corner resizes it, the slider sets how much
+// of the game shows through.
 (() => {
   const D = globalThis.MAP_DATA;
   const M = globalThis.MapMarks;
@@ -9,12 +11,16 @@
   const view = globalThis.MapKit.MapView(box, { interactive: false });
   let state = null;
   let locked = false;
+  let opacityTouched = 0;
 
   function draw() {
     if (!state) return;
     const tracked = new Map((state.tracked || []).map(([id, mark, name]) => [String(id), { mark, name }]));
     view.setMap(state.key);
-    const built = M.build({ key: state.key, world: state.world, tracked, heading: state.heading, layers: state.layers, gatherKinds: state.gatherKinds || {}, petsMode: state.petsMode });
+    const built = M.build({
+      key: state.key, world: state.world, tracked, heading: state.heading, layers: state.layers,
+      gatherKinds: state.gatherKinds || {}, petsMode: state.petsMode, focus: state.focus,
+    });
     view.setMarks(built.marks);
     const map = D.maps[state.key];
     const me = state.world?.me;
@@ -25,37 +31,50 @@
       view.fit();
     }
     $(".title").textContent = `Map · ${map?.title || "—"}`;
+    // Not while the slider is in use: the plugin's answer lags behind it.
+    if (Date.now() - opacityTouched > 1500) applyOpacity(state.opacity ?? 0.86);
     const chip = $(".nextChip");
     const n = built.next;
     chip.hidden = !(n && state.onThisMap);
     if (n && state.onThisMap) {
-      chip.replaceChildren();
-      const label = document.createElement("span");
-      label.className = "label";
-      label.textContent = "Next";
-      const name = document.createElement("span");
-      name.textContent = ` ${n.name} `;
-      const dist = document.createElement("span");
-      dist.className = "dist";
-      dist.textContent = `${M.arrow(n.bearing)} ${Math.round(n.metres)} m`;
-      chip.append(label, name, dist);
+      const label = Object.assign(document.createElement("span"), { className: "label", textContent: "Next" });
+      const name = Object.assign(document.createElement("span"), { textContent: ` ${n.name} ` });
+      const dist = Object.assign(document.createElement("span"), { className: "dist", textContent: `${M.arrow(n.bearing)} ${Math.round(n.metres)} m` });
+      chip.replaceChildren(label, name, dist);
     }
     const foot = $(".foot");
-    foot.hidden = !state.layers?.pets;
-    foot.textContent = `${built.petsHere} pet${built.petsHere === 1 ? "" : "s"} here · ${built.around} around you`;
+    foot.hidden = !state.layers?.pets && !state.focus;
     if (!me) foot.textContent = "Waiting for your position";
+    else if (state.focus) foot.textContent = `${state.focus.label}: ${built.hits.length / 2} here`;
+    else foot.textContent = `${built.petsHere} pet${built.petsHere === 1 ? "" : "s"} here · ${built.around} around you`;
+  }
+
+  function applyOpacity(value) {
+    const v = Math.max(0.2, Math.min(1, Number(value) || 0.86));
+    document.body.style.setProperty("--alpha", String(v));
+    const slider = $(".opacity");
+    if (document.activeElement !== slider) slider.value = String(Math.round(v * 100));
   }
 
   // The whole widget takes the mouse (unless the widgets are locked).
   const claim = () => a2.widget.area({ x: 0, y: 0, width: window.innerWidth, height: window.innerHeight }).catch(() => {});
-  new ResizeObserver(claim).observe(document.body);
+  new ResizeObserver(() => {
+    claim();
+    view.redraw();
+  }).observe(document.body);
 
   $(".head").addEventListener("mousedown", (e) => {
-    if (e.button !== 0 || e.target.closest("button") || locked) return;
+    if (e.button !== 0 || e.target.closest("button, input") || locked) return;
     e.preventDefault();
     a2.widget.drag().catch(() => {});
   });
   $(".close").addEventListener("click", () => a2.widget.post({ type: "close" }).catch(() => {}));
+  $(".opacity").addEventListener("input", () => {
+    opacityTouched = Date.now();
+    const v = Number($(".opacity").value) / 100;
+    applyOpacity(v);
+    a2.widget.post({ type: "opacity", value: v }).catch(() => {});
+  });
   box.addEventListener("wheel", (e) => {
     if (!state) return;
     e.preventDefault();
@@ -64,6 +83,31 @@
     draw();
     a2.widget.post({ type: "zoom", value: next }).catch(() => {});
   }, { passive: false });
+
+  // The corner: the widget grows with the pointer (the plugin resizes its
+  // window); the size is kept.
+  let resizing = null;
+  $(".grip").addEventListener("mousedown", (e) => {
+    if (e.button !== 0 || locked) return;
+    e.preventDefault();
+    resizing = { x: e.screenX, y: e.screenY, w: window.innerWidth, h: window.innerHeight, sent: 0 };
+  });
+  window.addEventListener("mousemove", (e) => {
+    if (!resizing) return;
+    const now = Date.now();
+    if (now - resizing.sent < 50) return;
+    resizing.sent = now;
+    const width = Math.max(180, Math.min(900, resizing.w + e.screenX - resizing.x));
+    const height = Math.max(180, Math.min(900, resizing.h + e.screenY - resizing.y));
+    a2.widget.post({ type: "resize", width, height }).catch(() => {});
+  });
+  window.addEventListener("mouseup", (e) => {
+    if (!resizing) return;
+    const width = Math.max(180, Math.min(900, resizing.w + e.screenX - resizing.x));
+    const height = Math.max(180, Math.min(900, resizing.h + e.screenY - resizing.y));
+    resizing = null;
+    a2.widget.post({ type: "resize", width, height }).catch(() => {});
+  });
 
   a2.on("widget", (data) => {
     state = data;
@@ -74,6 +118,7 @@
     document.body.classList.toggle("locked", locked);
   });
 
+  applyOpacity(0.86);
   claim();
   a2.ready().then(() => a2.widget.post({ type: "ready" }).catch(() => {}));
 })();

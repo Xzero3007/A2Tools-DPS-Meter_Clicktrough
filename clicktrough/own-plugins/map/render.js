@@ -12,6 +12,23 @@
   const PET_RED = "#e5484d";
   const GOLD = "#ffd666";
 
+  // The tile pictures come through the meter (a2.file) where it can:
+  // WebKitGTK 2.54 lets a plugin's frame load no file from the plugin scheme
+  // once its page has started. Older meters: the file itself. The last few
+  // dozen are kept.
+  const tileUrls = new Map();
+  function tileUrl(path) {
+    let url = tileUrls.get(path);
+    if (url) {
+      tileUrls.delete(path);
+    } else {
+      url = typeof globalThis.a2?.file === "function" ? globalThis.a2.file(path).catch(() => path) : Promise.resolve(path);
+    }
+    tileUrls.set(path, url);
+    while (tileUrls.size > 48) tileUrls.delete(tileUrls.keys().next().value);
+    return url;
+  }
+
   /** World -> the map's own pixels. */
   const toNative = (map, x, y) => [map.ox + map.scale * x, map.oy + map.scale * y];
 
@@ -133,7 +150,10 @@
             img.draggable = false;
             // WebP with the sea transparent (no CSS mask: WebKitGTK draws
             // none from a plugin's own scheme).
-            img.src = `tiles/${key}/${id}.webp`;
+            const shown = img;
+            tileUrl(`tiles/${key}/${id}.webp`).then((url) => {
+              if (imgs.get(id) === shown) shown.src = url;
+            });
             img.style.zIndex = lo ? "0" : "1";
             tilesEl.append(img);
             imgs.set(id, img);
@@ -262,6 +282,8 @@
         default:
           circle(sx, sy, r, "#ffffff", "rgba(0,0,0,0.6)");
       }
+      // What the search or another plugin asked for: a gold ring around it.
+      if (m.hit) circle(sx, sy, Math.max(r + 4, 7), null, GOLD, 2.5);
       if (m.text && zoom * map.tile >= 180) {
         ctx.font = "11px system-ui, sans-serif";
         ctx.lineWidth = 3;
@@ -332,6 +354,22 @@
       get zoom() { return zoom; },
       setZoom,
       fit() { if (map) { fitMap(); redraw(); } },
+      /** Show these world points (x, y, x, y ...), all of them, not closer
+       *  than about 400 m across. */
+      fitPoints(pts) {
+        if (!map || pts.length < 2) return;
+        let [x0, y0, x1, y1] = [Infinity, Infinity, -Infinity, -Infinity];
+        for (let i = 0; i < pts.length; i += 2) {
+          const [nx, ny] = toNative(map, pts[i], pts[i + 1]);
+          x0 = Math.min(x0, nx); y0 = Math.min(y0, ny); x1 = Math.max(x1, nx); y1 = Math.max(y1, ny);
+        }
+        const [w, h] = size();
+        const minSpan = 40000 * map.scale;
+        cx = (x0 + x1) / 2;
+        cy = (y0 + y1) / 2;
+        zoom = Math.max(fitZoom() * 0.5, Math.min(4, Math.min((w || 300) / Math.max(x1 - x0, minSpan), (h || 300) / Math.max(y1 - y0, minSpan)) * 0.85));
+        redraw();
+      },
       centerOn,
       setMarks(list) { marks = list; redraw(); },
       redraw,

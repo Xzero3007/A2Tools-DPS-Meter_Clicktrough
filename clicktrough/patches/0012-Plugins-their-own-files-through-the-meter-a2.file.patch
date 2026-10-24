@@ -1,0 +1,199 @@
+From 95c1b92ebe3451cd30c579993d4d44e07fd15ee0 Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Sat, 24 Oct 2026 17:16:33 +0000
+Subject: [PATCH] Plugins: their own files through the meter (a2.file)
+
+WebKitGTK 2.54 refuses every file a sandboxed plugin frame asks for from
+the plugin scheme; the meter inlines what a page names at the start, but
+a page that loads files later (a map's tiles, as they come into view)
+got nothing: the Map plugin showed its marks without the map under them.
+await a2.file(path) now returns one of the plugin's own files (images and
+JSON, up to 8 MB, inside its folder only) as a data: URL, from its window,
+its dock tab and its widgets.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01RBQati3x8VviBbpY9juEWf
+---
+ public/src/js/pluginFrame.js     |  3 ++
+ public/src/js/pluginWidget.js    |  2 +
+ src-tauri/src/app.rs             |  2 +
+ src-tauri/src/plugins/a2.js      |  5 +++
+ src-tauri/src/plugins/mod.rs     | 65 +++++++++++++++++++++++++++++++-
+ src-tauri/src/plugins/widgets.rs |  8 ++++
+ 6 files changed, 84 insertions(+), 1 deletion(-)
+
+diff --git a/public/src/js/pluginFrame.js b/public/src/js/pluginFrame.js
+index 72bc462..99e60dc 100644
+--- a/public/src/js/pluginFrame.js
++++ b/public/src/js/pluginFrame.js
+@@ -155,6 +155,9 @@
+         if (!allowed("widgets")) throw new Error('the plugin lacks the "widgets" permission');
+         return call("plugin_widget_place", { name: String(name), x: Math.round(Number(at?.x)), y: Math.round(Number(at?.y)) });
+       },
++      // Clicktrough: one of the plugin's own files as a data: URL (WebKitGTK
++      // 2.54 lets a sandboxed frame load none from the plugin scheme).
++      file: ([path]) => call("plugin_file", { path: String(path) }),
+       // Clicktrough: share a value with plugins allowed to hear it.
+       share: ([value]) => {
+         if (!allowed("share")) throw new Error('the plugin lacks the "share" permission');
+diff --git a/public/src/js/pluginWidget.js b/public/src/js/pluginWidget.js
+index ebc858a..a6f8d8e 100644
+--- a/public/src/js/pluginWidget.js
++++ b/public/src/js/pluginWidget.js
+@@ -37,6 +37,8 @@
+       scale: window.devicePixelRatio || 1,
+     }),
+     "widget.post": ([data]) => invoke("plugin_widget_post", { data: data ?? null }),
++    // Clicktrough: one of the plugin's own files as a data: URL.
++    file: ([path]) => invoke("plugin_widget_file", { path: String(path) }),
+   };
+ 
+   window.addEventListener("message", async (event) => {
+diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
+index dc91f9a..6e25dc2 100644
+--- a/src-tauri/src/app.rs
++++ b/src-tauri/src/app.rs
+@@ -3985,6 +3985,8 @@ pub fn run() {
+             crate::plugins::plugin_set_hide,
+             crate::plugins::plugin_hello,
+             crate::plugins::plugin_share,
++            crate::plugins::plugin_file,
++            crate::plugins::widgets::plugin_widget_file,
+             open_settings_at,
+             take_settings_section,
+             crate::plugins::dock::dock_hello,
+diff --git a/src-tauri/src/plugins/a2.js b/src-tauri/src/plugins/a2.js
+index d10fc18..2b6413d 100644
+--- a/src-tauri/src/plugins/a2.js
++++ b/src-tauri/src/plugins/a2.js
+@@ -31,6 +31,9 @@
+ //                                              objects: [[entity, objectId, x, y]] }; world units are cm.
+ //                                              `me` is exact for 4 s after a report (an action pose, an effect,
+ //                                              a teleport), else the middle of the entities around (~10 m off)
++//   await a2.file("tiles/a.webp")              Clicktrough: one of the plugin's own files (images, JSON) as a
++//                                              data: URL, for files a page loads later (WebKitGTK 2.54 lets a
++//                                              plugin's frame load none from the plugin scheme); in widgets too
+ //   await a2.share(value)                      Clicktrough: share a value (JSON, up to 64 KB) with other plugins
+ //                                              (permission "share"); null withdraws it
+ //   a2.on("shared", ({ plugin, value }) => ...)  what another plugin shared (permission "events:shared"):
+@@ -177,6 +180,8 @@
+       set: (key, value) => call("storage.set", [key, JSON.stringify(value)]),
+     }),
+     notify: (text) => call("notify", [String(text)]),
++    // Clicktrough: one of the plugin's own files as a data: URL.
++    file: (path) => call("file", [String(path)]),
+     // Clicktrough: a value for other plugins (permission "share").
+     share: (value) => call("share", [value ?? null]),
+     bossTimers: (server) => call("bossTimers", [Number(server)]),
+diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
+index 05675cf..88c9044 100644
+--- a/src-tauri/src/plugins/mod.rs
++++ b/src-tauri/src/plugins/mod.rs
+@@ -413,6 +413,51 @@ pub fn plugin_share(app: tauri::AppHandle, window: tauri::WebviewWindow, plugin:
+     Ok(())
+ }
+ 
++/// Clicktrough: a file of the plugin's own folder is read for it at most
++/// this big (a map tile is well under).
++const MAX_OWN_FILE: u64 = 8 * 1024 * 1024;
++
++/// Clicktrough: one of the files in a plugin's folder as a `data:` URL
++/// (images and JSON). WebKitGTK 2.54 refuses every file a sandboxed frame
++/// asks for from the plugin scheme, so a plugin that loads files after its
++/// page (a map's tiles) asks the meter for them instead (`a2.file`).
++fn read_own_file(dir: &Path, path: &str) -> Result<String, String> {
++    let (Ok(root), Ok(file)) = (dir.canonicalize(), dir.join(path.trim_start_matches('/')).canonicalize()) else {
++        return Err(format!("no file {path:?}"));
++    };
++    if !file.starts_with(&root) || !file.is_file() {
++        return Err(format!("no file {path:?}"));
++    }
++    let kind = match file.extension().and_then(|e| e.to_str()).unwrap_or("") {
++        "png" => "image/png",
++        "webp" => "image/webp",
++        "jpg" | "jpeg" => "image/jpeg",
++        "gif" => "image/gif",
++        "svg" => "image/svg+xml",
++        "json" => "application/json",
++        _ => return Err(format!("{path:?}: only images and JSON")),
++    };
++    let size = file.metadata().map(|m| m.len()).unwrap_or(u64::MAX);
++    if size > MAX_OWN_FILE {
++        return Err(format!("{path:?} is larger than {MAX_OWN_FILE} bytes"));
++    }
++    let bytes = std::fs::read(&file).map_err(|e| e.to_string())?;
++    Ok(format!("data:{kind};base64,{}", base64(&bytes)))
++}
++
++/// A plugin's own file, by the folder it runs from.
++pub(crate) fn own_file(app: &tauri::AppHandle, id: &str, path: &str) -> Result<String, String> {
++    let dir = host(app)?.with(id, |l| l.dir.clone()).ok_or("plugin not loaded")?;
++    read_own_file(&dir, path)
++}
++
++/// Clicktrough: `a2.file(path)` from a plugin's window or dock tab.
++#[tauri::command]
++pub fn plugin_file(window: tauri::WebviewWindow, plugin: Option<String>, path: String) -> Result<String, String> {
++    let id = window_plugin(&window, plugin.as_deref())?;
++    own_file(window.app_handle(), &id, &path)
++}
++
+ fn with_world<T>(f: impl FnOnce(&mut world::World) -> T) -> T {
+     let mut slot = WORLD.lock().unwrap_or_else(|p| p.into_inner());
+     f(slot.get_or_insert_with(world::World::default))
+@@ -2296,7 +2341,7 @@ fn percent_decode(s: &str) -> String {
+ #[cfg(test)]
+ mod tests {
+     use super::{base64, content_policy, inline_page, inlined_policy, with_meter_fonts, prompt_texts, should_start, take_ready};
+-    use super::{update_prompt, updates_to_offer, within_reach, Pending, PluginAvailable, PluginInfo, LANGUAGES, SETTLE};
++    use super::{read_own_file, update_prompt, updates_to_offer, within_reach, Pending, PluginAvailable, PluginInfo, LANGUAGES, SETTLE};
+     use std::collections::{HashMap, HashSet};
+     use std::time::{Duration, Instant};
+ 
+@@ -2448,6 +2493,24 @@ mod tests {
+         let _ = std::fs::remove_dir_all(&dir);
+     }
+ 
++    #[test]
++    fn a_plugin_reads_only_its_own_images_and_json() {
++        let dir = std::env::temp_dir().join(format!("ct-own-file-{}", std::process::id()));
++        let _ = std::fs::remove_dir_all(&dir);
++        std::fs::create_dir_all(dir.join("tiles")).unwrap();
++        std::fs::write(dir.join("tiles/a.webp"), [1u8, 2, 3]).unwrap();
++        std::fs::write(dir.join("plugin.js"), "x").unwrap();
++        std::fs::write(dir.with_extension("secret.png"), [9u8]).unwrap();
++        assert_eq!(read_own_file(&dir, "tiles/a.webp").unwrap(), "data:image/webp;base64,AQID");
++        assert_eq!(read_own_file(&dir, "/tiles/a.webp").unwrap(), "data:image/webp;base64,AQID");
++        assert!(read_own_file(&dir, "plugin.js").is_err(), "images and JSON only");
++        assert!(read_own_file(&dir, "tiles/none.webp").is_err());
++        let outside = format!("../{}", dir.with_extension("secret.png").file_name().unwrap().to_string_lossy());
++        assert!(read_own_file(&dir, &outside).is_err(), "nothing outside its folder");
++        let _ = std::fs::remove_dir_all(&dir);
++        let _ = std::fs::remove_file(dir.with_extension("secret.png"));
++    }
++
+     #[test]
+     fn base64_of_a_sha256() {
+         use sha2::Digest;
+diff --git a/src-tauri/src/plugins/widgets.rs b/src-tauri/src/plugins/widgets.rs
+index df9b1f1..217b2ec 100644
+--- a/src-tauri/src/plugins/widgets.rs
++++ b/src-tauri/src/plugins/widgets.rs
+@@ -481,6 +481,14 @@ pub fn plugin_widget_hello(app: tauri::AppHandle, window: tauri::WebviewWindow)
+     Ok(serde_json::json!({ "plugin": id, "name": name, "locked": locked, "language": language }))
+ }
+ 
++/// Clicktrough: `a2.file(path)` from a widget: one of its plugin's own files
++/// as a `data:` URL (see `super::own_file`).
++#[tauri::command]
++pub fn plugin_widget_file(app: tauri::AppHandle, window: tauri::WebviewWindow, path: String) -> Result<String, String> {
++    let (id, _) = widget_of(&window)?;
++    super::own_file(&app, &id, &path)
++}
++
+ /// A widget's message to its plugin's main window, heard there as a
+ /// "widget-message" event: `{ name, data }`.
+ #[tauri::command]
+-- 
+2.43.0
+

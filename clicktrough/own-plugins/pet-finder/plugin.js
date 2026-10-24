@@ -26,7 +26,7 @@
       merchantNone: "Nothing in this stock you still need.", merchantStale: "Stock seen {t}: open the shop again for current offers.",
       lookOut: "Look out for: only chests and merchants give these", merchantToast: "Black Cloud Merchant: {n} pet(s) you still need",
       alsoFarmable: "Also on offer, and mobs drop these too", onlyMerchant: "Only chests and merchants give these",
-      far: "{m} m", nearestFirst: "Nearest first: distances from where you are",
+      far: "{m} m", onMap: "Show its spawn points on the Map", nearestFirst: "Nearest first: distances from where you are",
       merchantUnknown: "The shop was opened {t} ago, but its offer list is in a layout Pet Finder does not know yet (it reads only the one PetTracker checked). See the README: a short packet log helps add it.",
       sideBySide: "Side by side", belowEachOther: "Below each other",
     },
@@ -124,8 +124,17 @@
           pets.push({ id: p.id, name: p.name, mark: "needed" });
         }
       }
-      a2.share({ source: "Pet Finder", pets }).catch(() => {});
+      lastPets = pets;
+      a2.share({ source: "Pet Finder", pets, focus: focusRequest }).catch(() => {});
     }, 500);
+  }
+  // A map link: the Map plugin shows that pet's spawn points (on that
+  // region's map) instead of a website.
+  let lastPets = [];
+  let focusRequest = null;
+  function showOnMap(pet, region) {
+    focusRequest = { pet: pet.id, name: pet.name, region, at: Date.now() };
+    a2.share({ source: "Pet Finder", pets: lastPets, focus: focusRequest }).catch(() => {});
   }
 
   // ---------- where things are (a2.on("world")) ----------
@@ -504,9 +513,11 @@
       if (pet.maps.length) {
         const maps = el("div", "maps");
         for (const map of pet.maps) {
-          const a = el("a", "mapLink", `${map.region} ↗`);
-          a.href = map.url;
-          maps.append(a);
+          const b = el("button", "mapLink", `${map.region} ⌖`);
+          b.type = "button";
+          b.title = t("onMap");
+          b.addEventListener("click", () => showOnMap(pet, map.region));
+          maps.append(b);
         }
         main.append(maps);
       }

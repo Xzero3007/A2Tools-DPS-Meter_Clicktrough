@@ -19,6 +19,26 @@ button[aria-pressed="false"] { color: rgba(255, 255, 255, 0.55); }
 .tools { display: flex; align-items: center; gap: 6px; }
 .tools select { max-width: 170px; }
 
+.searchRow { position: relative; }
+.search { width: 100%; box-sizing: border-box; padding: 5px 9px; border-radius: 6px; font-size: 12px;
+  background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.16); outline: none; }
+.search:focus { border-color: rgba(255, 255, 255, 0.45); }
+.results { position: absolute; z-index: 20; left: 0; right: 0; top: calc(100% + 3px); max-height: 280px; overflow: auto;
+  border-radius: 6px; background: rgba(12, 14, 18, 0.97); border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45); }
+.result { display: grid; grid-template-columns: auto 1fr auto; gap: 0 8px; align-items: baseline; padding: 5px 9px; cursor: pointer; font-size: 12px; }
+.result[aria-selected="true"], .result:hover { background: rgba(255, 255, 255, 0.08); }
+.result strong { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; white-space: nowrap; }
+.result strong i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; }
+.result .muted { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.result .where { color: rgba(255, 255, 255, 0.6); white-space: nowrap; }
+.noResult { padding: 7px 9px; font-size: 12px; color: rgba(255, 255, 255, 0.55); }
+.focusBar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; padding: 4px 8px; border-radius: 6px;
+  background: rgba(255, 214, 102, 0.08); border: 1px solid rgba(255, 214, 102, 0.35); }
+.focusText { font-weight: 600; }
+.focusMaps { display: inline-flex; gap: 4px; flex-wrap: wrap; flex: 1; }
+.focusClear { margin-left: auto; padding: 0 7px; font-size: 14px; line-height: 18px; }
+
 .layers, .kinds { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .chip { border-radius: 999px; padding: 1px 10px; font-size: 12px; }
 .chip.kind { display: inline-flex; align-items: center; gap: 5px; }
@@ -40,7 +60,8 @@ button[aria-pressed="false"] { color: rgba(255, 255, 255, 0.55); }
 
 .overlaySettings { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; font-size: 12px; }
 .overlaySettings label { display: inline-flex; align-items: center; gap: 6px; }
+.overlaySettings input[type=range] { width: 110px; accent-color: #c8ccd2; }
 .check input { margin: 0; accent-color: #c8ccd2; }
 
 /* The window's fold button: only the map. */
-body.compact .bar, body.compact .layers, body.compact .kinds { display: none; }
+body.compact .bar, body.compact .layers, body.compact .kinds, body.compact .searchRow { display: none; }
