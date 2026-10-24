@@ -3,63 +3,25 @@ on:
   push:
     branches: [diag-web]
 jobs:
-  probe:
+  data:
     runs-on: ubuntu-latest
     steps:
-      - name: curl (IPv4, IPv6) and TLS chain
+      - name: answers of the API
         run: |
           exec > >(tee -a $RUNNER_TEMP/out.txt) 2>&1
-          curl -4 -sS -m 20 -o /tmp/a.json -w "v4: %{http_code} %{http_version} %{remote_ip}\n" -H "Accept: application/json" -A "A2Tools-DPS-Meter/2.0.77 Clicktrough" https://aion2.exchange/api/servers || true
-          head -c 400 /tmp/a.json || true; echo
-          curl -6 -sS -m 20 -o /dev/null -w "v6: %{http_code} %{remote_ip}\n" https://aion2.exchange/api/servers || true
-          echo | openssl s_client -connect aion2.exchange:443 -servername aion2.exchange -showcerts 2>/dev/null | grep -E "^ *[0-9] s:|i:|Protocol|Cipher|Verify return" || true
-      - uses: dtolnay/rust-toolchain@stable
-      - name: reqwest as the meter has it
-        run: |
-          cargo new -q probe && cd probe
-          cat >> Cargo.toml <<'T'
-          reqwest = { version = "=0.12.28", default-features = false, features = ["rustls-tls", "stream"] }
-          tokio = { version = "1", features = ["full"] }
-          rustls = { version = "=0.23.37", default-features = false }
-          rustls-webpki = { version = "=0.103.10", default-features = false }
-          webpki-roots = "=1.0.6"
-          hyper-rustls = { version = "=0.27.7", default-features = false }
-          hyper-util = "=0.1.20"
-          hyper = "=1.8.1"
-          tokio-rustls = { version = "=0.26.4", default-features = false }
-          ring = "=0.17.14"
-          rustls-pki-types = "=1.14.0"
-          T
-          cat > src/main.rs <<'R'
-          use std::time::Duration;
-          fn chain(e: &dyn std::error::Error) -> String {
-              let mut s = e.to_string();
-              let mut cur = e.source();
-              while let Some(c) = cur { s.push_str(" <- "); s.push_str(&c.to_string()); cur = c.source(); }
-              s
-          }
-          #[tokio::main]
-          async fn main() {
-              let client = reqwest::Client::builder()
-                  .user_agent("A2Tools-DPS-Meter/2.0.77")
-                  .connect_timeout(Duration::from_secs(10))
-                  .timeout(Duration::from_secs(30))
-                  .build().unwrap();
-              for url in ["https://aion2.exchange/api/servers", "https://aion2.exchange/api/health", "https://github.com/"] {
-                  match client.get(url).header("Accept", "application/json")
-                      .header("User-Agent", "A2Tools-DPS-Meter/2.0.77 Clicktrough (+https://github.com/Xzero3007/A2Tools-DPS-Meter_Clicktrough)")
-                      .send().await {
-                      Ok(r) => { let st = r.status(); let h = format!("{:?}", r.headers().get("server")); let b = r.text().await.unwrap_or_default(); println!("{url}: {st} server={h} body={}", &b.chars().take(300).collect::<String>()); }
-                      Err(e) => println!("{url}: ERROR {}", chain(&e)),
-                  }
-              }
-          }
-          R
-          cargo tree -q -i rustls -e normal | head -3 | tee -a $RUNNER_TEMP/out.txt
-          cargo tree -q -p webpki-roots@1.0.6 --depth 0 | tee -a $RUNNER_TEMP/out.txt
-          cargo run -q 2>&1 | tee -a $RUNNER_TEMP/out.txt
+          get() { echo "== $1"; curl -sS -m 30 --retry 6 --retry-all-errors --retry-delay 10 -H "Accept: application/json" -A "A2Tools-DPS-Meter/2.0.77 Clicktrough" -w "\n[%{http_code}]\n" "https://aion2.exchange/api/$1" > $RUNNER_TEMP/r.json; head -c ${2:-1500} $RUNNER_TEMP/r.json; echo; tail -1 $RUNNER_TEMP/r.json; }
+          get "servers" 600
+          curl -sS -m 30 --retry 6 --retry-all-errors --retry-delay 10 https://aion2.exchange/api/servers | python3 -c 'import json,sys; d=json.load(sys.stdin); print("default", d.get("default"), "keys", sorted(d)); [print(s) for s in d["servers"] if s.get("region") in ("EU","EUW","EUE") or "EU" in str(s.get("region_name"))][:0]; print([ (s["server_id"], s["name"], s["region"], s["faction"], s["has_data"]) for s in d["servers"] if s["name"] in ("Marchutan","Siel","Israphel")])' || true
+          get "items?server=12305&limit=3" 1500
+          get "items?server=12305&limit=10&keys=610610013,610610014,610610015,610610016,610620001,610620002" 2500
+          get "items?server=12305&limit=3&q=Odyle" 1200
+          get "items?server=12305&limit=3&search=Odyle" 600
+          get "items/610610013?server=12305" 800
+          get "items/610610013/prices?server=12305&bucket=1d" 600
+          get "health" 300
+          get "crafts?server=12305&limit=2" 1200
       - name: report
         if: always()
         run: |
           body=$(sed -e 's/%/%25/g' $RUNNER_TEMP/out.txt | sed -e ':a;N;$!ba;s/\n/%0A/g')
-          echo "::notice title=probe::$body"
+          echo "::notice title=data::$body"
