@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header class="bar">
+      <div class="where">
+        <strong class="mapName">Map</strong>
+        <span class="whereNote muted"></span>
+      </div>
+      <div class="tools">
+        <select class="mapPick" title="Which map"></select>
+        <button type="button" class="follow" aria-pressed="true" title="Keep you in the middle">Follow</button>
+        <button type="button" class="overlayBtn" aria-pressed="false" title="A small map that follows you, over the game">Overlay</button>
+      </div>
+    </header>
+    <nav class="layers" aria-label="What the map shows">
+      <button type="button" class="chip" data-layer="pets" aria-pressed="true">Pets</button>
+      <button type="button" class="chip" data-layer="monsters" aria-pressed="false">Monsters</button>
+      <button type="button" class="chip" data-layer="gather" aria-pressed="false">Gathering</button>
+      <button type="button" class="chip" data-layer="cubes" aria-pressed="true">Hidden Cubes</button>
+      <button type="button" class="chip" data-layer="kibelisks" aria-pressed="false">Kibelisks</button>
+      <span class="sep"></span>
+      <button type="button" class="chip petsMode" aria-pressed="false" title="All pets, or only those Pet Finder and Pet Soul Tracker follow">All pets</button>
+    </nav>
+    <nav class="kinds" aria-label="Gathering" hidden></nav>
+    <div class="mapBox"></div>
+    <footer class="status">
+      <span class="next"></span>
+      <span class="counts muted"></span>
+    </footer>
+    <section class="overlaySettings" hidden>
+      <label>Overlay size <select class="overlaySize"></select></label>
+      <label class="check"><input type="checkbox" class="overlayLock" /> Lock the overlay (clicks go to the game)</label>
+    </section>
+    <script src="/_sdk/a2.js"></script>
+    <script src="data.js"></script>
+    <script src="render.js"></script>
+    <script src="marks.js"></script>
+    <script src="plugin.js"></script>
+  </body>
+</html>

@@ -26,6 +26,7 @@
       merchantNone: "Nothing in this stock you still need.", merchantStale: "Stock seen {t}: open the shop again for current offers.",
       lookOut: "Look out for: only chests and merchants give these", merchantToast: "Black Cloud Merchant: {n} pet(s) you still need",
       alsoFarmable: "Also on offer, and mobs drop these too", onlyMerchant: "Only chests and merchants give these",
+      far: "{m} m", nearestFirst: "Nearest first: distances from where you are",
       merchantUnknown: "The shop was opened {t} ago, but its offer list is in a layout Pet Finder does not know yet (it reads only the one PetTracker checked). See the README: a short packet log helps add it.",
       sideBySide: "Side by side", belowEachOther: "Below each other",
     },
@@ -100,9 +101,66 @@
       timers[key] = setTimeout(() => a2.storage.set(key, value).catch(() => {}), 400);
     };
   })();
-  const saveCollection = () => saveLater(L.characterKey(character), collection.toJSON());
+  const saveCollection = () => {
+    saveLater(L.characterKey(character), collection.toJSON());
+    shareLater();
+  };
   const saveSettings = () => saveLater("settings", settings);
-  const savePins = () => saveLater("pins", [...pinned]);
+  const savePins = () => {
+    saveLater("pins", [...pinned]);
+    shareLater();
+  };
+
+  // ---------- the Map plugin: the pets to show (a2.share) ----------
+  // Pinned pets, and once the collection is read every pet not at rank 3.
+  let shareTimer = 0;
+  function shareLater() {
+    clearTimeout(shareTimer);
+    shareTimer = setTimeout(() => {
+      const pets = [...pinned].filter((id) => ix.pets.has(id)).map((id) => ({ id, name: ix.pets.get(id).name, mark: "pinned" }));
+      if (collection.synced) {
+        for (const p of ix.list) {
+          if (pinned.has(p.id) || collection.progress(p.id).rank === 3) continue;
+          pets.push({ id: p.id, name: p.name, mark: "needed" });
+        }
+      }
+      a2.share({ source: "Pet Finder", pets }).catch(() => {});
+    }, 500);
+  }
+
+  // ---------- where things are (a2.on("world")) ----------
+  // The meter's world around the player: where he is and where the monsters
+  // around stand, for the distance to each pet's nearest monster.
+  let world = null;
+  let positions = new Map(); // entity -> [x, y]
+  let worldDrawn = 0;
+  a2.on("world", (w) => {
+    world = w;
+    positions = new Map((w?.npcs || []).map(([e, , x, y]) => [e, [x, y]]));
+    // At most once a second: a list redrawn under the pointer loses clicks.
+    if (Date.now() - worldDrawn >= 1000 && (compact || settings.tab === "nearby")) {
+      worldDrawn = Date.now();
+      dirty();
+    }
+  });
+  const ARROWS = ["↑", "↗", "→", "↘", "↓", "↙", "←", "↖"];
+  /** The nearest monster of a pet around you: { metres, arrow } or null. */
+  function nearestOf(pet) {
+    const me = world?.me;
+    if (!me) return null;
+    let best = null;
+    for (const [entity, e] of nearby.entities) {
+      if (e.pet !== pet) continue;
+      const p = positions.get(entity);
+      if (!p) continue;
+      const metres = Math.hypot(p[0] - me.x, p[1] - me.y) / 100;
+      if (!best || metres < best.metres) {
+        const deg = (Math.atan2(p[1] - me.y, p[0] - me.x) * 180) / Math.PI + 90;
+        best = { metres, arrow: ARROWS[Math.round((((deg % 360) + 360) % 360) / 45) % 8] };
+      }
+    }
+    return best;
+  }
 
   async function loadCharacter(c) {
     const key = L.characterKey(c);
@@ -115,6 +173,7 @@
     if (L.characterKey(character) === key && !collection.synced) {
       collection = new L.Collection(saved);
       render();
+      shareLater();
     }
   }
 
@@ -358,7 +417,10 @@
     nearby.prune(Date.now(), settings.keepMin * MIN);
     let groups = nearby.view();
     if (settings.hideMaxedNearby) groups = groups.filter((g) => collection.progress(g.pet).rank !== 3);
-    groups.sort((a, b) => (pinned.has(b.pet) ? 1 : 0) - (pinned.has(a.pet) ? 1 : 0) || b.seen - a.seen);
+    // Pinned first; then, where the meter knows where you are, the nearest.
+    const near = new Map(groups.map((g) => [g.pet, nearestOf(g.pet)]));
+    const dist = (g) => near.get(g.pet)?.metres ?? Infinity;
+    groups.sort((a, b) => (pinned.has(b.pet) ? 1 : 0) - (pinned.has(a.pet) ? 1 : 0) || dist(a) - dist(b) || b.seen - a.seen);
     if (!groups.length) {
       frag.push(el("p", "empty", t("noNearby")));
     } else {
@@ -371,7 +433,10 @@
         title.append(el("span", "name", pet.name), familyTag(pet.family));
         main.append(title, el("div", "mobs", g.mobs.map((m) => (m.count > 1 ? `${m.name} ×${m.count}` : m.name)).join(", ")), progressLine(g.pet));
         const side = el("div", "side");
-        side.append(pinButton(g.pet), el("span", "seen", ago(g.seen)));
+        const n = near.get(g.pet);
+        side.append(pinButton(g.pet));
+        if (n) side.append(el("span", "far", `${n.arrow} ${t("far", { m: Math.round(n.metres) })}`));
+        side.append(el("span", "seen", ago(g.seen)));
         li.append(portrait(g.pet), main, side);
         ul.append(li);
       }
@@ -586,6 +651,7 @@
       if (Array.isArray(p)) pinned = new Set(p.filter((id) => ix.pets.has(id)));
     } catch {}
     render();
+    shareLater();
     a2.ready();
   })();
 })();

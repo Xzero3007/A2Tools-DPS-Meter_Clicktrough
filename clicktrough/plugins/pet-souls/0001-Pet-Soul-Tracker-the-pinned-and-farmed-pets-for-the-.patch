@@ -1,0 +1,76 @@
+From 2abe578d676ec6fbcd5b3d93ff8ae5b8c05d79cd Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Sat, 24 Oct 2026 14:29:55 +0000
+Subject: [PATCH] Pet Soul Tracker: the pinned and farmed pets for the Map
+ plugin
+
+With the permission "share" (Clicktrough meter), the tracker hands the
+pets pinned and those being farmed (a soul in the last 30 minutes, below
+level 3) to other plugins whenever they change: the Map plugin shows
+where their monsters are, on the map and its overlay. Meters without
+a2.share are left alone.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01RBQati3x8VviBbpY9juEWf
+---
+ plugins/pet-souls/README.md     |  1 +
+ plugins/pet-souls/manifest.json |  2 +-
+ plugins/pet-souls/plugin.js     | 17 +++++++++++++++++
+ 3 files changed, 19 insertions(+), 1 deletion(-)
+
+diff --git a/plugins/pet-souls/README.md b/plugins/pet-souls/README.md
+index e446c1c..e81ff73 100644
+--- a/plugins/pet-souls/README.md
++++ b/plugins/pet-souls/README.md
+@@ -54,6 +54,7 @@ Every name in a pet's sources (monsters, zones, maps, Kibelisks, chests) shows i
+ - `decoder:pet-list`, `decoder:soul-gained`, `decoder:level-up`: read your own pets' levels and soul gains.
+ - `events:character`: keep a separate list per server.
+ - `window`: show the window when you pick up a soul for a pet you are farming, fitted to that list, and hide it again (only with **Pop up while farming** on).
++- `share` (Clicktrough): hand the pinned pets and those you are farming to the Map plugin, which shows where their monsters are.
+ - `storage`: save the counts (with the last 200 changes per server, to trace a count that drifts from the game's), your pet names, the sort order, pins, region choice, filters, layout and the pets you are farming on this computer.
+ 
+ ## Try it (developer mode)
+diff --git a/plugins/pet-souls/manifest.json b/plugins/pet-souls/manifest.json
+index e7eb501..541ede7 100644
+--- a/plugins/pet-souls/manifest.json
++++ b/plugins/pet-souls/manifest.json
+@@ -5,7 +5,7 @@
+   "apiVersion": 2,
+   "author": "A2 Tools",
+   "description": "Souls still needed to raise each pet, from the game's own pet data, and where each pet's souls drop.",
+-  "permissions": ["storage", "events:character", "window", "decoder:pet-list", "decoder:soul-gained", "decoder:level-up"],
++  "permissions": ["storage", "events:character", "window", "share", "decoder:pet-list", "decoder:soul-gained", "decoder:level-up"],
+   "decoders": [
+     {
+       "name": "pet-list",
+diff --git a/plugins/pet-souls/plugin.js b/plugins/pet-souls/plugin.js
+index 9a89437..41c4984 100644
+--- a/plugins/pet-souls/plugin.js
++++ b/plugins/pet-souls/plugin.js
+@@ -295,6 +295,23 @@ function render() {
+ 
+   els.list.replaceChildren(...shown.map((p) => rowOf(p, pinned, farming)));
+   renderFarm(pinned, farming);
++  shareWithMap(pinned);
++}
++
++// Clicktrough: the pets pinned and those being farmed, for the Map plugin
++// (a2.share, permission "share"), each time they change.
++let sharedKey = "";
++function shareWithMap(pinned) {
++  if (typeof a2.share !== "function") return;
++  const pets = pinned.map((id) => ({ id: Number(id), name: petName(id), mark: "pinned" }));
++  for (const p of farmedPets()) {
++    if (!pinned.includes(p.id) && p.level < MAX_LEVEL) pets.push({ id: Number(p.id), name: p.name, mark: "farming" });
++  }
++  const value = { source: "Pet Soul Tracker", pets };
++  const k = JSON.stringify(value);
++  if (k === sharedKey) return;
++  sharedKey = k;
++  a2.share(value).catch(() => {});
+ }
+ 
+ // A pet's row in the chosen layout, its sources under it while open.
+-- 
+2.43.0
+

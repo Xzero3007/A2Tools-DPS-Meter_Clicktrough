@@ -1,0 +1,191 @@
+From 058131e124695b9ecac5e940cbaa998151eaf28a Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Sat, 24 Oct 2026 14:16:36 +0000
+Subject: [PATCH 11/11] Plugins: a value shared with other plugins (share,
+ events:shared)
+
+A plugin with the permission "share" can hand other plugins a value:
+await a2.share(value) (JSON, up to 64 KB; null withdraws it). Plugins
+with "events:shared" hear a2.on("shared", { plugin, value }) at once,
+and every value shared so far when they start. What a plugin no longer
+loaded shared goes with it. So a pet tracker can tell a map which pets to
+show, without either reading the other's data.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01RBQati3x8VviBbpY9juEWf
+---
+ public/src/js/pluginFrame.js    | 13 ++++++++++
+ public/src/js/pluginSettings.js |  6 +++++
+ src-tauri/src/app.rs            |  1 +
+ src-tauri/src/plugins/a2.js     |  6 +++++
+ src-tauri/src/plugins/mod.rs    | 42 +++++++++++++++++++++++++++++++++
+ 5 files changed, 68 insertions(+)
+
+diff --git a/public/src/js/pluginFrame.js b/public/src/js/pluginFrame.js
+index 37ce03e..72bc462 100644
+--- a/public/src/js/pluginFrame.js
++++ b/public/src/js/pluginFrame.js
+@@ -56,6 +56,8 @@
+       if ((event === "bossMap" || event === "bossLive" || event === "abyss") && !allowed("feed:boss-timers")) return;
+       // Clicktrough: the world around the player (plugins/world.rs).
+       if (event === "world" && !allowed("events:world")) return;
++      // Clicktrough: what other plugins share (a2.share).
++      if (event === "shared" && !allowed("events:shared")) return;
+       const msg = { event, data, ...extra };
+       if (ready) send(msg);
+       else queue.push(msg);
+@@ -153,6 +155,11 @@
+         if (!allowed("widgets")) throw new Error('the plugin lacks the "widgets" permission');
+         return call("plugin_widget_place", { name: String(name), x: Math.round(Number(at?.x)), y: Math.round(Number(at?.y)) });
+       },
++      // Clicktrough: share a value with plugins allowed to hear it.
++      share: ([value]) => {
++        if (!allowed("share")) throw new Error('the plugin lacks the "share" permission');
++        return call("plugin_share", { value: JSON.stringify(value ?? null) });
++      },
+       notify: ([text]) => {
+         if (!allowed("notify")) throw new Error('the plugin lacks the "notify" permission');
+         toast(String(text));
+@@ -210,6 +217,12 @@
+       if (typeof hello.visible === "boolean") out.push(["visible", hello.visible]);
+       // The ping to the game server (meter 2.0.73 on); null until it is known.
+       if ("ping" in hello) out.push(["ping", { ms: typeof hello.ping === "number" ? hello.ping : null }]);
++      // Clicktrough: what other plugins shared before this one started.
++      if (hello.shared && allowed("events:shared")) {
++        for (const [plugin, value] of Object.entries(hello.shared)) {
++          if (plugin !== id) out.push(["shared", { plugin, value }]);
++        }
++      }
+       return out;
+     };
+ 
+diff --git a/public/src/js/pluginSettings.js b/public/src/js/pluginSettings.js
+index 0236b5e..70f1f6c 100644
+--- a/public/src/js/pluginSettings.js
++++ b/public/src/js/pluginSettings.js
+@@ -57,6 +57,12 @@
+       if (permission === "events:world") {
+         return t("settings.plugins.permWorld", "See where you and the monsters and objects around you are (from the game data)");
+       }
++      if (permission === "share") {
++        return t("settings.plugins.permShare", "Share what it follows with other plugins (e.g. the pets it tracks, for a map)");
++      }
++      if (permission === "events:shared") {
++        return t("settings.plugins.permShared", "See what other plugins share (e.g. the pets they track)");
++      }
+       if (permission.startsWith("decoder:")) {
+         return t("settings.plugins.permDecoder", "Read your own game data: {name}", { name: permission.slice(8) });
+       }
+diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
+index f2b8d6a..dc91f9a 100644
+--- a/src-tauri/src/app.rs
++++ b/src-tauri/src/app.rs
+@@ -3984,6 +3984,7 @@ pub fn run() {
+             crate::plugins::plugin_set_enabled,
+             crate::plugins::plugin_set_hide,
+             crate::plugins::plugin_hello,
++            crate::plugins::plugin_share,
+             open_settings_at,
+             take_settings_section,
+             crate::plugins::dock::dock_hello,
+diff --git a/src-tauri/src/plugins/a2.js b/src-tauri/src/plugins/a2.js
+index 41ebc2b..d10fc18 100644
+--- a/src-tauri/src/plugins/a2.js
++++ b/src-tauri/src/plugins/a2.js
+@@ -31,6 +31,10 @@
+ //                                              objects: [[entity, objectId, x, y]] }; world units are cm.
+ //                                              `me` is exact for 4 s after a report (an action pose, an effect,
+ //                                              a teleport), else the middle of the entities around (~10 m off)
++//   await a2.share(value)                      Clicktrough: share a value (JSON, up to 64 KB) with other plugins
++//                                              (permission "share"); null withdraws it
++//   a2.on("shared", ({ plugin, value }) => ...)  what another plugin shared (permission "events:shared"):
++//                                              at once, and every value shared so far at start
+ //
+ // Keep the page's background transparent: the window paints the panel at the
+ // opacity the user picks.
+@@ -173,6 +177,8 @@
+       set: (key, value) => call("storage.set", [key, JSON.stringify(value)]),
+     }),
+     notify: (text) => call("notify", [String(text)]),
++    // Clicktrough: a value for other plugins (permission "share").
++    share: (value) => call("share", [value ?? null]),
+     bossTimers: (server) => call("bossTimers", [Number(server)]),
+     // Meter 2.0.72 on: the server's Abyss siege (artifact holders, cores).
+     abyssSiege: (server) => call("abyssSiege", [Number(server)]),
+diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
+index 31fd104..05675cf 100644
+--- a/src-tauri/src/plugins/mod.rs
++++ b/src-tauri/src/plugins/mod.rs
+@@ -379,6 +379,40 @@ pub struct PluginHost {
+ static WORLD: Mutex<Option<world::World>> = Mutex::new(None);
+ static WORLD_WANTED: AtomicBool = AtomicBool::new(false);
+ 
++/// Clicktrough: what plugins with "share" shared (`a2.share`), by plugin, for
++/// plugins with "events:shared" (a map showing the pets a tracker follows).
++static SHARED: Mutex<Option<HashMap<String, Value>>> = Mutex::new(None);
++/// A shared value is at most this big (as JSON).
++const MAX_SHARED: usize = 64 * 1024;
++
++fn shared_values() -> serde_json::Map<String, Value> {
++    SHARED.lock().unwrap_or_else(|p| p.into_inner()).as_ref().map(|m| m.clone().into_iter().collect()).unwrap_or_default()
++}
++
++/// Clicktrough: a plugin shares a value with the plugins allowed to hear it
++/// (permission "share"); they hear a2.on("shared", { plugin, value }) at once,
++/// and every value shared so far when they start. `null` withdraws it.
++#[tauri::command]
++pub fn plugin_share(app: tauri::AppHandle, window: tauri::WebviewWindow, plugin: Option<String>, value: String) -> Result<(), String> {
++    let id = window_plugin(&window, plugin.as_deref())?;
++    require(&app, &id, "share")?;
++    if value.len() > MAX_SHARED {
++        return Err(format!("a shared value is at most {MAX_SHARED} bytes"));
++    }
++    let value: Value = serde_json::from_str(&value).map_err(|e| e.to_string())?;
++    {
++        let mut slot = SHARED.lock().unwrap_or_else(|p| p.into_inner());
++        let map = slot.get_or_insert_with(HashMap::new);
++        if value.is_null() {
++            map.remove(&id);
++        } else {
++            map.insert(id.clone(), value.clone());
++        }
++    }
++    host(&app)?.tell_permitted(&app, "events:shared", "shared", serde_json::json!({ "plugin": id, "value": value }));
++    Ok(())
++}
++
+ fn with_world<T>(f: impl FnOnce(&mut world::World) -> T) -> T {
+     let mut slot = WORLD.lock().unwrap_or_else(|p| p.into_inner());
+     f(slot.get_or_insert_with(world::World::default))
+@@ -577,6 +611,10 @@ impl PluginHost {
+         let any_decoders = loaded.iter().any(|l| !l.decoders.is_empty());
+         let any_world = loaded.iter().any(|l| l.manifest.permissions.iter().any(|p| p == "events:world"));
+         WORLD_WANTED.store(any_world, Ordering::Relaxed);
++        // What a plugin no longer loaded shared is gone with it.
++        if let Some(map) = SHARED.lock().unwrap_or_else(|p| p.into_inner()).as_mut() {
++            map.retain(|id, _| loaded.iter().any(|l| &l.manifest.id == id));
++        }
+         tracing::info!("Plugins: {} loaded (developer mode {})", loaded.len(), if dev { "on" } else { "off" });
+         *self.loaded.write().unwrap_or_else(|p| p.into_inner()) = loaded;
+         *self.errors.write().unwrap_or_else(|p| p.into_inner()) = errors;
+@@ -1083,6 +1121,8 @@ fn describe_permission(t: &PromptTexts, permission: &str) -> String {
+         "widgets" => t.perm_widgets.clone(),
+         "events:character" => t.perm_character.clone(),
+         "events:world" => "See where you and the monsters and objects around you are (from the game data)".into(),
++        "share" => "Share what it follows with other plugins (e.g. the pets it tracks, for a map)".into(),
++        "events:shared" => "See what other plugins share (e.g. the pets they track)".into(),
+         p => match p.strip_prefix("decoder:") {
+             Some(name) => t.perm_decoder.replace("{name}", name),
+             None => p.to_string(),
+@@ -1805,6 +1845,8 @@ pub fn plugin_hello(app: tauri::AppHandle, window: tauri::WebviewWindow, plugin:
+         "reviewed": reviewed,
+         "game": crate::platform::window_detector::find_aion2_window(),
+         "ping": app.try_state::<AppState>().and_then(|s| s.ping_tracker.current_ping_ms()),
++        // Clicktrough: what other plugins shared so far (`events:shared`).
++        "shared": if manifest.permissions.iter().any(|p| p == "events:shared") { Some(shared_values()) } else { None },
+     }))
+ }
+ 
+-- 
+2.43.0
+
