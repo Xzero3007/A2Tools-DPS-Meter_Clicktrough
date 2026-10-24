@@ -1,0 +1,370 @@
+// The map view the Map plugin's window and its overlay share: the map's
+// tiles as images (WebP, the sea transparent), and the
+// marks drawn on a canvas above them. World units are centimetres; a map's
+// pixel is offset + scale * world (no flip, no rotation).
+(() => {
+  const D = globalThis.MAP_DATA;
+
+  const GATHER_COLORS = {
+    Ore: "#c9b08f", Herb: "#79d38a", Food: "#f0a35e", Gemstone: "#c99af7", Od: "#62d6c8",
+    Cotton: "#ededed", Wood: "#b0845c", Fragment: "#ffd666", Cube: "#ffd666",
+  };
+  const PET_RED = "#e5484d";
+  const GOLD = "#ffd666";
+
+  /** World -> the map's own pixels. */
+  const toNative = (map, x, y) => [map.ox + map.scale * x, map.oy + map.scale * y];
+
+  function MapView(root, { interactive = true, onView } = {}) {
+    root.classList.add("mapView");
+    const tilesEl = document.createElement("div");
+    tilesEl.className = "mapTiles";
+    const canvas = document.createElement("canvas");
+    canvas.className = "mapMarks";
+    const tip = document.createElement("div");
+    tip.className = "mapTip";
+    tip.hidden = true;
+    root.append(tilesEl, canvas, tip);
+    const ctx = canvas.getContext("2d");
+
+    let key = null;
+    let map = null;
+    // The view: the native pixel at the middle, and screen px per native px.
+    let cx = 0;
+    let cy = 0;
+    let zoom = 0.05;
+    let marks = [];
+    // A fit asked for while the view had no size yet (a hidden dock tab).
+    let fitPending = false;
+    let drawn = []; // [sx, sy, r, label] for the tooltip
+    const imgs = new Map(); // "lo/1_2" -> <img>
+    let queued = false;
+
+    const size = () => [root.clientWidth, root.clientHeight];
+
+    function screenOf(nx, ny) {
+      const [w, h] = size();
+      return [(nx - cx) * zoom + w / 2, (ny - cy) * zoom + h / 2];
+    }
+
+    function setMap(next) {
+      if (next === key) return;
+      key = next;
+      map = next ? D.maps[next] : null;
+      for (const img of imgs.values()) img.remove();
+      imgs.clear();
+      if (map) fitMap();
+      redraw();
+    }
+
+    function fitMap() {
+      const full = map.tile * map.grid;
+      cx = full / 2;
+      cy = full / 2;
+      const [w, h] = size();
+      fitPending = !w || !h;
+      zoom = fitZoom();
+    }
+
+    const fitZoom = () => {
+      if (!map) return 0.05;
+      const [w, h] = size();
+      return Math.max(0.005, Math.min(w, h) / (map.tile * map.grid));
+    };
+
+    function centerOn(x, y) {
+      if (!map) return;
+      [cx, cy] = toNative(map, x, y);
+      redraw();
+    }
+
+    function setZoom(z, at) {
+      if (!map) return;
+      const min = fitZoom() * 0.5;
+      const next = Math.max(min, Math.min(4, z));
+      if (at) {
+        // Keep the native pixel under the pointer where it is.
+        const [w, h] = size();
+        const nx = cx + (at[0] - w / 2) / zoom;
+        const ny = cy + (at[1] - h / 2) / zoom;
+        cx = nx - (at[0] - w / 2) / next;
+        cy = ny - (at[1] - h / 2) / next;
+      }
+      zoom = next;
+      redraw();
+    }
+
+    function redraw() {
+      if (queued) return;
+      queued = true;
+      requestAnimationFrame(() => {
+        queued = false;
+        drawTiles();
+        drawMarks();
+        onView?.({ key, cx, cy, zoom });
+      });
+    }
+
+    function drawTiles() {
+      const [w, h] = size();
+      if (!map || !w || !h) return;
+      // The small copies always (they are light), and the sharp tiles on top
+      // once a tile shows a little bigger than its small copy.
+      const sharp = map.tile * zoom > map.lo * 1.25;
+      const want = new Set();
+      const x0 = cx - w / 2 / zoom;
+      const y0 = cy - h / 2 / zoom;
+      const x1 = cx + w / 2 / zoom;
+      const y1 = cy + h / 2 / zoom;
+      const px = map.tile * zoom;
+      for (const name of map.tiles) {
+        const [c, r] = name.split("_").map(Number);
+        const tx = c * map.tile;
+        const ty = r * map.tile;
+        if (tx > x1 || ty > y1 || tx + map.tile < x0 || ty + map.tile < y0) continue;
+        const [sx, sy] = screenOf(tx, ty);
+        for (const lo of sharp ? [true, false] : [true]) {
+          const id = `${lo ? "lo/" : ""}${name}`;
+          want.add(id);
+          let img = imgs.get(id);
+          if (!img) {
+            img = document.createElement("img");
+            img.decoding = "async";
+            img.draggable = false;
+            // WebP with the sea transparent (no CSS mask: WebKitGTK draws
+            // none from a plugin's own scheme).
+            img.src = `tiles/${key}/${id}.webp`;
+            img.style.zIndex = lo ? "0" : "1";
+            tilesEl.append(img);
+            imgs.set(id, img);
+          }
+          img.style.transform = `translate(${sx}px, ${sy}px)`;
+          img.style.width = `${px + 0.5}px`;
+          img.style.height = `${px + 0.5}px`;
+        }
+      }
+      for (const [id, img] of imgs) {
+        if (want.has(id)) continue;
+        img.remove();
+        imgs.delete(id);
+      }
+    }
+
+    function drawMarks() {
+      const [w, h] = size();
+      const dpr = window.devicePixelRatio || 1;
+      if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
+        canvas.width = Math.round(w * dpr);
+        canvas.height = Math.round(h * dpr);
+      }
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, w, h);
+      drawn = [];
+      if (!map) return;
+      // Least important first: what matters most lies on top. Zoomed far
+      // out the marks shrink, so a whole map of them stays readable.
+      const ordered = [...marks].sort((a, b) => (a.z || 0) - (b.z || 0));
+      shrink = Math.max(0.5, Math.min(1, 0.45 + map.scale * 100 * zoom));
+      for (const m of ordered) {
+        const [nx, ny] = toNative(map, m.x, m.y);
+        const [sx, sy] = screenOf(nx, ny);
+        const pad = (m.r || 4) + 12;
+        if (sx < -pad || sy < -pad || sx > w + pad || sy > h + pad) continue;
+        drawMark(m, sx, sy);
+        if (m.label) drawn.push([sx, sy, (m.r || 4) + 3, m.label]);
+      }
+    }
+
+    function circle(sx, sy, r, fill, stroke, width = 1.5) {
+      ctx.beginPath();
+      ctx.arc(sx, sy, r, 0, Math.PI * 2);
+      if (fill) {
+        ctx.fillStyle = fill;
+        ctx.fill();
+      }
+      if (stroke) {
+        ctx.lineWidth = width;
+        ctx.strokeStyle = stroke;
+        ctx.stroke();
+      }
+    }
+
+    let shrink = 1;
+    function drawMark(m, sx, sy) {
+      const r = (m.r || 4) * (m.kind === "me" ? 1 : shrink);
+      switch (m.kind) {
+        case "me": {
+          // Not exact: a ring as large as the guess is uncertain (~10 m).
+          if (!m.exact) {
+            const ring = Math.max(r + 4, 1000 * map.scale * zoom);
+            circle(sx, sy, ring, "rgba(255,255,255,0.08)", "rgba(255,255,255,0.35)", 1);
+          }
+          ctx.save();
+          ctx.translate(sx, sy);
+          ctx.rotate(((m.heading ?? 0) * Math.PI) / 180);
+          ctx.beginPath();
+          ctx.moveTo(0, -r * 1.6);
+          ctx.lineTo(r, r);
+          ctx.lineTo(0, r * 0.45);
+          ctx.lineTo(-r, r);
+          ctx.closePath();
+          ctx.fillStyle = "#ffffff";
+          ctx.lineWidth = 2;
+          ctx.strokeStyle = "rgba(0,0,0,0.75)";
+          ctx.stroke();
+          ctx.fill();
+          ctx.restore();
+          break;
+        }
+        case "petSpawn":
+          circle(sx, sy, r, m.color || PET_RED, m.ring || "rgba(0,0,0,0.55)", m.ring ? 1.5 : 1);
+          break;
+        case "petLive":
+          circle(sx, sy, r, m.color || PET_RED, m.ring || "#ffffff", 2);
+          break;
+        case "monster":
+          circle(sx, sy, r, "rgba(220,220,220,0.75)", "rgba(0,0,0,0.5)", 1);
+          break;
+        case "gather":
+          ctx.fillStyle = GATHER_COLORS[m.gather] || "#ddd";
+          ctx.strokeStyle = m.live ? "#ffffff" : "rgba(0,0,0,0.6)";
+          ctx.lineWidth = m.live ? 2 : 1;
+          ctx.beginPath();
+          ctx.rect(sx - r, sy - r, r * 2, r * 2);
+          ctx.fill();
+          ctx.stroke();
+          break;
+        case "cube":
+          ctx.beginPath();
+          ctx.moveTo(sx, sy - r * 1.3);
+          ctx.lineTo(sx + r, sy);
+          ctx.lineTo(sx, sy + r * 1.3);
+          ctx.lineTo(sx - r, sy);
+          ctx.closePath();
+          ctx.fillStyle = GOLD;
+          ctx.lineWidth = 2;
+          ctx.strokeStyle = "#ffffff";
+          ctx.fill();
+          ctx.stroke();
+          break;
+        case "kibelisk":
+          ctx.beginPath();
+          ctx.moveTo(sx, sy - r * 1.4);
+          ctx.lineTo(sx + r, sy + r * 0.8);
+          ctx.lineTo(sx - r, sy + r * 0.8);
+          ctx.closePath();
+          ctx.fillStyle = "#9ee6d8";
+          ctx.lineWidth = 1.5;
+          ctx.strokeStyle = "rgba(0,0,0,0.7)";
+          ctx.fill();
+          ctx.stroke();
+          break;
+        default:
+          circle(sx, sy, r, "#ffffff", "rgba(0,0,0,0.6)");
+      }
+      if (m.text && zoom * map.tile >= 180) {
+        ctx.font = "11px system-ui, sans-serif";
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = "rgba(0,0,0,0.8)";
+        ctx.fillStyle = "#fff";
+        ctx.strokeText(m.text, sx + r + 4, sy + 4);
+        ctx.fillText(m.text, sx + r + 4, sy + 4);
+      }
+    }
+
+    // The nearest labelled mark under the pointer, as a tooltip.
+    function hover(px, py) {
+      let best = null;
+      for (const [sx, sy, r, label] of drawn) {
+        const d = Math.hypot(sx - px, sy - py);
+        if (d <= Math.max(r, 7) && (!best || d < best[0])) best = [d, label, sx, sy];
+      }
+      if (!best) {
+        tip.hidden = true;
+        return;
+      }
+      tip.textContent = best[1];
+      tip.hidden = false;
+      const [w] = size();
+      tip.style.left = `${Math.min(best[2] + 10, w - tip.offsetWidth - 4)}px`;
+      tip.style.top = `${Math.max(0, best[3] - 28)}px`;
+    }
+
+    if (interactive) {
+      let drag = null;
+      root.addEventListener("mousedown", (e) => {
+        if (e.button !== 0) return;
+        drag = { x: e.clientX, y: e.clientY, cx, cy, moved: false };
+        e.preventDefault();
+      });
+      window.addEventListener("mousemove", (e) => {
+        const rect = root.getBoundingClientRect();
+        if (drag) {
+          const dx = e.clientX - drag.x;
+          const dy = e.clientY - drag.y;
+          if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
+          cx = drag.cx - dx / zoom;
+          cy = drag.cy - dy / zoom;
+          redraw();
+          root.dispatchEvent(new CustomEvent("mapdrag"));
+        } else if (e.target === canvas || root.contains(e.target)) {
+          hover(e.clientX - rect.left, e.clientY - rect.top);
+        }
+      });
+      window.addEventListener("mouseup", () => { drag = null; });
+      root.addEventListener("mouseleave", () => { tip.hidden = true; });
+      root.addEventListener("wheel", (e) => {
+        e.preventDefault();
+        const rect = root.getBoundingClientRect();
+        setZoom(zoom * (e.deltaY < 0 ? 1.25 : 0.8), [e.clientX - rect.left, e.clientY - rect.top]);
+        root.dispatchEvent(new CustomEvent("mapzoom", { detail: zoom }));
+      }, { passive: false });
+    }
+    new ResizeObserver(() => {
+      if (fitPending && map) fitMap();
+      redraw();
+    }).observe(root);
+
+    return {
+      setMap,
+      get key() { return key; },
+      get map() { return map; },
+      get zoom() { return zoom; },
+      setZoom,
+      fit() { if (map) { fitMap(); redraw(); } },
+      centerOn,
+      setMarks(list) { marks = list; redraw(); },
+      redraw,
+      /** Screen px per world metre at this zoom, and setting it. */
+      pxPerMetre: () => (map ? map.scale * 100 * zoom : 0),
+      setPxPerMetre(v) { if (map) setZoom(v / (map.scale * 100)); },
+    };
+  }
+
+  /** The map the player is on from the monsters around him: each pet monster
+   *  standing within 40 m of one of its species' spawn points on a map votes
+   *  for that map (SkeeveAN, Aion2Maps.Detect). */
+  function detectMap(npcs) {
+    const votes = {};
+    for (const [, npc, x, y] of npcs) {
+      for (const [key, per] of Object.entries(D.spawns)) {
+        const pts = per[npc];
+        if (!pts) continue;
+        for (let i = 0; i < pts.length; i += 2) {
+          if ((pts[i] - x) ** 2 + (pts[i + 1] - y) ** 2 <= 4000 ** 2) {
+            votes[key] = (votes[key] || 0) + 1;
+            break;
+          }
+        }
+      }
+    }
+    const best = Object.entries(votes).sort((a, b) => b[1] - a[1])[0];
+    return best ? best[0] : null;
+  }
+
+  /** Compass bearing from a to b, 0 = up (north on the map), clockwise. */
+  const bearing = (ax, ay, bx, by) => (Math.atan2(by - ay, bx - ax) * 180) / Math.PI + 90;
+  const metres = (ax, ay, bx, by) => Math.hypot(bx - ax, by - ay) / 100;
+
+  globalThis.MapKit = Object.freeze({ MapView, detectMap, toNative, bearing, metres, GATHER_COLORS, PET_RED, GOLD });
+})();

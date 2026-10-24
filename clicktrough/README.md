@@ -14,6 +14,8 @@ automatically with these changes:
 | 0007 | **Buttons stay clickable when locked**: the meter's header and footer (lock, Battle History, Settings, update, BOSS/DPS, sorting; not reset and recording), the headers of Details (with "History" and its settings menu) and Battle History (with its filters), the plugin dock's tabs and bars, and the plugins' bars. Everywhere else clicks go to the game. Turn off: Settings → Meter settings → "Locked: buttons stay clickable". |
 | 0008 | **A plugins button on the meter**: the puzzle icon in the meter's header hides and shows the plugin window (dock), with the tabs that were open. It is a little brighter while the dock shows (no colour of its own) and missing while no plugin is in the dock. Locked, it stays clickable. |
 | 0009 | **Text size per plugin**: two buttons (text smaller / larger) in the dock's bar and in a plugin's own window set the plugin's text size, 60 % to 125 %. Per plugin, the same in the dock and in its own window, and kept. The plugin gets correspondingly more room. |
+| 0010 | **The world around the player for plugins** (permission `events:world`): at most four times a second, the zone, where you are, and the monsters and objects around you with their ids and places. The game sends your own position only with some actions, so it is the last exact report (an action pose, an effect you put on, a teleport) for 4 s, then the middle of the entities around you (about 10 m off). Frame layouts and estimate from SkeeveAN's Aion-DPS-Meter (MIT). |
+| 0011 | **Plugins share with each other** (permissions `share` and `events:shared`): a plugin hands other plugins a value, e.g. Pet Finder and Pet Soul Tracker the pets they follow, which the Map plugin shows. |
 
 ### Taken early from the original
 
@@ -31,6 +33,7 @@ build leaves it out; the file can be deleted then.
 | Plugin | What's different |
 |---|---|
 | Daily Checklist | **Side by side**: the button next to "Edit" puts Daily, Weekly and One-time side by side as columns, a wide bar. Too narrow for that, they wrap under each other. |
+| Pet Soul Tracker | **For the Map plugin**: the pets pinned and those being farmed go to the map (`share`), which shows where their monsters are. |
 | Event Timers | **Folded**, with the controls off, it shows the **bosses** below the next events too: scheduled bosses running or starting soon, and world bosses that are up, in their window or back soon, in three parts: **now** (up, running, in their window), **soon** (within 15 min) and **later** (within Settings → "Folded: bosses due within": off, 30 min, 1 h, 2 h, 3 h; 1 h at first). The next **Artifact Siege** always stays visible folded, however far off. The bar at the top of the folded view has a button for each part (**Events, Now, Soon, Later**) to show or hide it, and the layout button (or Settings → "Folded: layout") puts the parts **side by side** as columns, a wide bar; too narrow for that, they wrap under each other. Side by side an empty part keeps its column. |
 
 The changes live in `clicktrough/plugins/<id>/`. When the author changes such
@@ -42,7 +45,8 @@ the reviewed catalogue.
 
 | Plugin | What it does |
 |---|---|
-| Pet Finder | Pet mobs near you, a search over every pet (rank, souls, who drops the souls, maps) and a shopping list for the Black Cloud Merchant; data and packet layouts from [PetTracker](https://github.com/0Fox2Give/PetTracker) (GPLv3). The button right of the tabs puts the **Merchant** tab's three lists side by side as columns, a wide bar; too narrow for that, they wrap under each other. English only, in the meter's neutral colours. |
+| Map | The map you are on (Verteron, Altgard, the Abyss, 25 instances) with **your position**, the pets Pet Finder and Pet Soul Tracker follow (red; pinned with a gold ring, farmed with a white one), the pet monsters around you, **Monsters** around you, **Gathering** spots by kind, **Hidden Cubes** in range and **Kibelisk** camps, each layer on or off; the next pet to go for, which way and how far. **Overlay** opens a small map that follows you over the game (three sizes, the wheel zooms, lockable so clicks go to the game). Maps and data from SkeeveAN's [Aion-DPS-Meter](https://github.com/SkeeveAN/Aion-DPS-Meter) (MIT). |
+| Pet Finder | Pet mobs near you **with how far and which way**, a search over every pet (rank, souls, who drops the souls, maps) and a shopping list for the Black Cloud Merchant; data and packet layouts from [PetTracker](https://github.com/0Fox2Give/PetTracker) (GPLv3). Its pinned pets and those not at rank 3 go to the Map plugin. The button right of the tabs puts the **Merchant** tab's three lists side by side as columns, a wide bar; too narrow for that, they wrap under each other. English only, in the meter's neutral colours. |
 
 They live complete in `clicktrough/own-plugins/<id>/` and come with every
 package, with no install and no developer mode. What lies in `dev/` (data
@@ -89,5 +93,7 @@ apply the fixes and patches, add the plugins, `makepkg`, install.
 
 GPL-3.0 like the original (see `LICENSE`). The source of every package is the
 original at its version tag plus the fixes and patches in this folder. Pet
-Finder is licensed under the GPL-3.0-or-later (`own-plugins/pet-finder/LICENSE`);
-AION 2 names and images belong to their rights holders.
+Finder and Map are licensed under the GPL-3.0-or-later (`own-plugins/*/LICENSE`);
+Map's maps and data and patch 0010's layouts come from SkeeveAN's
+Aion-DPS-Meter under the MIT licence (`own-plugins/map/NOTICE-SkeeveAN.txt`).
+AION 2 names, maps and images belong to their rights holders.

@@ -70,6 +70,7 @@ input[type=checkbox] { accent-color: #c8ccd2; margin: 0; }
 .pin.on { color: #ffd666; }
 .pin:hover { background: none; color: #ffd666; }
 .seen { font-size: 11px; color: rgba(255,255,255,.45); white-space: nowrap; }
+.far { font-size: 13px; font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; }
 
 /* The window's fold button: the nearby list only. */
 body.compact #status { display: none; }

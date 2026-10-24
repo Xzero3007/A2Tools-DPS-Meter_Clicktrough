@@ -1,0 +1,20 @@
+{
+  "id": "map",
+  "name": "Map",
+  "version": "0.1.0",
+  "apiVersion": 2,
+  "author": "Clicktrough (maps and data from SkeeveAN's Aion-DPS-Meter, MIT)",
+  "description": "The map you are on with your position, the pets Pet Finder and Pet Soul Tracker follow, monsters around, gathering spots, Hidden Cubes and Kibelisk camps; and an overlay with a small map that follows you.",
+  "permissions": [
+    "storage",
+    "widgets",
+    "events:world",
+    "events:shared"
+  ],
+  "ui": {
+    "panel": {
+      "width": 520,
+      "height": 560
+    }
+  }
+}

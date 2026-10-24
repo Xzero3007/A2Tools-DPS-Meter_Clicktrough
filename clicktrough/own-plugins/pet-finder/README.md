@@ -3,7 +3,8 @@
 Three tabs beside the A2Tools DPS meter:
 
 - **Nearby** – the pet mobs the game has shown you, grouped by pet, with your
-  rank and souls; pinned pets first, and a notice when a pinned pet's mob appears.
+  rank and souls, how far the nearest one is and which way (north up); pinned
+  pets first, then the nearest, and a notice when a pinned pet's mob appears.
 - **Search** – every pet by name, mob, region or source: your rank and souls,
   which mobs drop its souls, farming maps (aion2maps.com) and other sources.
 - **Merchant** – a Black Cloud Merchant shopping list: the pets on offer that
@@ -34,9 +35,12 @@ Needs A2Tools 2.0.65 or newer (plugin API 2).
 - **Collection** – the login collection (`00 90`), souls gained and spent
   (`0D/0E 90`) and rank-ups (`14 90`), saved per character.
 - **Nearby** – NPC appearances (`40/41/42 36`) whose NPC drops a pet's souls, until
-  the game removes them (`42 36`) or after the time you keep them. No distance:
-  "nearby" means the game sent you that mob. Changing map leaves old mobs until they
-  time out; **Clear** empties the list.
+  the game removes them (`42 36`) or after the time you keep them. The distance and
+  direction come from the meter's `events:world` (Clicktrough): where you are (exact
+  for a few seconds after an action, else about 10 m off) and where the mob stands.
+  Changing map leaves old mobs until they time out; **Clear** empties the list.
+- **Map** – your pinned pets, and once the collection is read every pet not at rank 3,
+  go to the Map plugin (`share`), which shows where their monsters are.
 - **Merchant** – the shop's stock (`91 56`), only in the layout PetTracker checked
   against the game; anything else is dropped. Open the shop after your collection is
   read; offers show for two minutes, as the stock may change.
@@ -67,8 +71,9 @@ each is checked as PetTracker checks it, and a frame that does not fit is droppe
 ## Permissions
 
 `storage` (settings, pins, your collection), `notify` (pinned pet nearby, merchant
-offers), `events:character` (whose collection it is), and one `decoder:` per frame
-type above. No network.
+offers), `events:character` (whose collection it is), `events:world` (distances),
+`share` (the pets for the Map plugin), and one `decoder:` per frame type above. No
+network.
 
 ## Data
 

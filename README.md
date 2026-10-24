@@ -30,8 +30,14 @@ package.
   next Artifact Siege, below each other or side by side in columns (Events,
   bosses now, soon and later), each part shown or hidden with a button. The
   **Daily Checklist** the same way: Daily, Weekly and One-time as columns.
-- **Pet Finder built in**: pet mobs near you, a search over every pet and a
-  Black Cloud Merchant shopping list (data from
+- **A map with your position**: the Map plugin shows the map you are on, where
+  you are, the pets Pet Finder and Pet Soul Tracker follow, monsters around,
+  gathering spots by kind, Hidden Cubes and Kibelisk camps, each layer on or
+  off; and an overlay with a small map that follows you, the next pet to go
+  for and how far (maps and data from SkeeveAN's
+  [Aion-DPS-Meter](https://github.com/SkeeveAN/Aion-DPS-Meter)).
+- **Pet Finder built in**: pet mobs near you with how far and which way, a
+  search over every pet and a Black Cloud Merchant shopping list (data from
   [PetTracker](https://github.com/0Fox2Give/PetTracker)); the Merchant tab
   optionally in columns.
 - **No stuck tooltip**: the box that opens when you hover a row closes
@@ -71,7 +77,12 @@ OBS overlay …) is covered by the original:
   tag plus these patches.
 - Pet Finder (`clicktrough/own-plugins/pet-finder`) takes its data and packet
   layouts from [PetTracker](https://github.com/0Fox2Give/PetTracker) and is
-  licensed under the GPL-3.0-or-later. AION 2 names and images belong to their
+  licensed under the GPL-3.0-or-later. The Map plugin
+  (`clicktrough/own-plugins/map`, GPL-3.0-or-later) and the meter's position
+  service (patch 0010) take their maps, map data, frame layouts and position
+  estimate from SkeeveAN's
+  [Aion-DPS-Meter](https://github.com/SkeeveAN/Aion-DPS-Meter) (MIT, see
+  `NOTICE-SkeeveAN.txt` there). AION 2 names, maps and images belong to their
   rights holders.
 - As in the original: parts of the parser come from
   [Daevalog](https://github.com/Seralth/Daevalog) by Seralth (GPL-3.0). The
