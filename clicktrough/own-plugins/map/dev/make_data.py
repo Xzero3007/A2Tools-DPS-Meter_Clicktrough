@@ -1,12 +1,14 @@
 """Builds the Map plugin's data.js and tiles/ from a checkout of SkeeveAN's
 Aion-DPS-Meter (MIT, https://github.com/SkeeveAN/Aion-DPS-Meter) and of the
 AION2 Interactive Map (its data CC BY-NC 4.0,
-https://github.com/aion2-interactive-map/aion2-interactive-map).
+https://github.com/aion2-interactive-map/aion2-interactive-map), and the
+game's own map pictures as that map publishes them (its gh-pages branch).
 
     python3 -I dev/make_data.py <Aion-DPS-Meter checkout> <plugin folder> \
-        [--aim <aion2-interactive-map checkout>] [--no-tiles]
+        [--aim <aion2-interactive-map checkout>] \
+        [--game-maps <aion2-interactive-map gh-pages checkout>] [--no-tiles]
 
-What it takes (Client/assets/aion2/ of that repo), English names only:
+What it takes (Client/assets/aion2/ of SkeeveAN's repo), English names only:
   maps/maps.json, maps/instances.json  the maps: tiles, grid, world -> pixel
                                        (pixel = offset + scale * world)
   maps/<key>/<col>_<row>.jpg, _a.png   the map pictures and their masks (the
@@ -22,15 +24,25 @@ What it takes (Client/assets/aion2/ of that repo), English names only:
   npcs/npc_names.json                  monster names (for monsters around)
   zones/zones.json                     zone names
 
+With --game-maps: the game's own world map pictures (UI/Map/WorldMap/<name>/
+Res/<name>_<col>_<row>.webp, 1024 px tiles) of Verteron, Altgard, the Abyss,
+Poeta and Ishalgen, whole: SkeeveAN's are the same pictures, but taken as a
+player had explored them, so Altgard had dark holes (Black Claw Village,
+Immortal Isle ...). Where SkeeveAN's tile is sharper (Verteron, 2048 px), it
+goes over the game's (upscaled) where its mask has land. Each picture covers
+a rectangle of the world, GAME_MAPS (the bounds the map sites use, as the
+client has them): one pixel is 99.6 cm on every map, and that is the
+calibration of these maps. It agrees with the Kibelisks of both sources (6
+to 8 m apart on average) and puts 99 % of the spawn points of Verteron and
+the Abyss on land; SkeeveAN's own fit was 2 % too small (up to 90 m off at
+Altgard's edges).
+
 From the AION2 Interactive Map (public/data, English names from
 public/locales/en), with --aim: the Hidden Cube spots, the Monolith pieces,
 the sealed dungeons, battlefields, outposts and villages, and the regions
-(their names and outlines) of Verteron, Altgard and the Abyss. Its places are
-pixels of the game's own map pictures, which SkeeveAN's tiles are cut from;
-its Kibelisks, matched with SkeeveAN's (game coordinates), give how the
-game's coordinates lie on the pictures (see calibrate()), better than the
-fit SkeeveAN had by hand: about 2 % larger, off by up to 90 m towards the
-edges of Altgard.
+(their names and outlines). Its places are pixels of the game's own map
+pictures; turned into game coordinates with the calibration above (without
+--game-maps, one fitted to its Kibelisks and SkeeveAN's, see calibrate()).
 
 --no-tiles leaves tiles/ as it is (data.js only).
 
@@ -40,6 +52,7 @@ it read, so a rebuild can be checked against the same sources.
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -49,7 +62,8 @@ from PIL import Image
 args = sys.argv[1:]
 NO_TILES = "--no-tiles" in args
 AIM = args[args.index("--aim") + 1] if "--aim" in args else None
-SRC, OUT = [a for i, a in enumerate(args) if not a.startswith("--") and (i == 0 or args[i - 1] != "--aim")][:2]
+GAME = args[args.index("--game-maps") + 1] if "--game-maps" in args else None
+SRC, OUT = [a for i, a in enumerate(args) if not a.startswith("--") and (i == 0 or args[i - 1] not in ("--aim", "--game-maps"))][:2]
 ASSETS = os.path.join(SRC, "Client", "assets", "aion2")
 LO = 512  # px per tile of the zoomed-out copies
 QUALITY = 72  # WebP
@@ -74,8 +88,20 @@ CUBES = [*range(1200036, 1200042), 1200667, 1200707, *range(1201502, 1201506), *
          1301199, 1301200, *range(1301242, 1301246), 1100056, 1100094]
 
 # Open-world zone ids -> map (SkeeveAN Aion2Maps.OfZone; the Abyss's three
-# layers from zones.json); instances bring their own.
-WORLD_ZONES = {1010: "verteron", 902: "verteron", 1110: "altgard", 901: "altgard", 20: "abyss", 22: "abyss", 23: "abyss"}
+# layers, Poeta and Ishalgen from zones.json); instances bring their own.
+WORLD_ZONES = {1010: "verteron", 902: "verteron", 1110: "altgard", 901: "altgard", 20: "abyss", 22: "abyss", 23: "abyss",
+               100001: "poeta", 100002: "poeta", 1100: "ishalgen", 110001: "ishalgen"}
+
+# The game's own map pictures (--game-maps): map -> (picture, title, the
+# client's spawn table, the world rectangle it covers: x0, y0, x1, y1 in cm,
+# x to the right, y down).
+GAME_MAPS = {
+    "verteron": ("World_L_A", "Verteron", "World/World_L/World_L_A", (-408000, -408000, 408000, 408000)),
+    "altgard": ("World_D_A", "Altgard", "World/World_D/World_D_A", (-408000, -408000, 408000, 408000)),
+    "abyss": ("Abyss_Reshanta_A", "Abyss", "Intersever/Abyss/Abyss_Reshanta_A", (-204000, -204000, 204000, 204000)),
+    "poeta": ("World_L_Starter", "Poeta", "World/World_L/World_L_Starter", (-204000, -204000, 204000, 204000)),
+    "ishalgen": ("World_D_Starter", "Ishalgen", "World/World_D/World_D_Starter", (-329748, -257999.78125, 180252, 252000.21875)),
+}
 
 maps_src = {**{k: {**v, "instance": False} for k, v in load("maps/maps.json")["maps"].items()},
             **{k: {**v, "instance": True} for k, v in load("maps/instances.json")["maps"].items()}}
@@ -91,39 +117,76 @@ if not NO_TILES:
     shutil.rmtree(tiles_out, ignore_errors=True)
 
 maps, zones, spawns, gather_points, kibelisks = {}, {}, {}, {}, {}
-for key, m in maps_src.items():
-    folder = os.path.join(ASSETS, "maps", key)
-    names = sorted(f[:-4] for f in os.listdir(folder) if f.endswith(".jpg"))
-    names = [n for n in names if os.path.exists(os.path.join(folder, f"{n}_a.png"))]
-    if not names:
-        continue
+calibration = {}
+
+
+def note(path, name):
+    read[name] = hashlib.sha256(open(path, "rb").read()).hexdigest()
+
+
+def skeeve_tile(jpg, mask, size, out):
+    """One of SkeeveAN's tiles as WebP, its mask as alpha."""
+    if NO_TILES:
+        return
+    im = Image.open(jpg).convert("RGB")
+    if size:
+        im = im.resize((size, size), Image.LANCZOS)
+    im.putalpha(Image.open(mask).convert("L").resize(im.size, Image.LANCZOS))
+    im.save(out, "WEBP", quality=QUALITY, method=6)
+
+
+def game_map(key, skeeve=None):
+    """A map from the game's own picture (whole, the sea painted): its tiles,
+    with SkeeveAN's on top where they are sharper, and its calibration from
+    the rectangle it covers."""
+    name, title, _, (x0, y0, x1, y1) = GAME_MAPS[key]
+    folder = os.path.join(GAME, "UI", "Map", "WorldMap", name, "Res")
+    files = {}
+    for f in os.listdir(folder):
+        m = re.fullmatch(rf"{re.escape(name)}_(\d+)_(\d+)\.webp", f)
+        if m:
+            files[(int(m[1]), int(m[2]))] = os.path.join(folder, f)
+    grid = max(max(c, r) for c, r in files) + 1
+    if len(files) != grid * grid:
+        raise SystemExit(f"{name}: {len(files)} tiles, not {grid} x {grid}")
+    tex = Image.open(next(iter(files.values()))).size[0]
+    sharper = skeeve and skeeve["grid"] == grid and skeeve["tile"] > tex
+    size = skeeve["tile"] if sharper else tex
+    sk_folder = os.path.join(ASSETS, "maps", key)
     if not NO_TILES:
         os.makedirs(os.path.join(tiles_out, key, "lo"), exist_ok=True)
-    def tile(jpg, mask, size, out):
+    names = []
+    for (c, r), path in sorted(files.items()):
+        n = f"{c}_{r}"
+        names.append(n)
+        note(path, f"game:UI/Map/WorldMap/{name}/Res/{os.path.basename(path)}")
+        jpg, mask = os.path.join(sk_folder, f"{n}.jpg"), os.path.join(sk_folder, f"{n}_a.png")
+        over = sharper and os.path.exists(jpg) and os.path.exists(mask)
+        if over:
+            note(jpg, f"maps/{key}/{n}.jpg")
+            note(mask, f"maps/{key}/{n}_a.png")
         if NO_TILES:
-            return
-        im = Image.open(jpg).convert("RGB")
-        if size:
+            continue
+        out = os.path.join(tiles_out, key, f"{n}.webp")
+        im = Image.open(path).convert("RGB")
+        if size == tex:
+            shutil.copyfile(path, out)
+        else:
             im = im.resize((size, size), Image.LANCZOS)
-        im.putalpha(Image.open(mask).convert("L").resize(im.size, Image.LANCZOS))
-        im.save(out, "WEBP", quality=QUALITY, method=6)
+            if over:
+                im.paste(Image.open(jpg).convert("RGB").resize((size, size), Image.LANCZOS), (0, 0),
+                         Image.open(mask).convert("L").resize((size, size), Image.LANCZOS))
+            im.save(out, "WEBP", quality=QUALITY, method=6)
+        im.resize((LO, LO), Image.LANCZOS).save(os.path.join(tiles_out, key, "lo", f"{n}.webp"), "WEBP", quality=QUALITY, method=6)
+    scale = grid * size / (x1 - x0)
+    calibration[key] = {"bounds": [x0, y0, x1, y1], "from": "the game's map bounds"}
+    return {"title": title, "tile": size, "grid": grid, "scale": scale, "ox": -x0 * scale, "oy": -y0 * scale,
+            "tiles": names, "lo": LO, "instance": False, "picture": "game"}
 
-    for n in names:
-        for suffix in (".jpg", "_a.png"):
-            rel = f"maps/{key}/{n}{suffix}"
-            read[rel] = hashlib.sha256(open(os.path.join(ASSETS, rel), "rb").read()).hexdigest()
-        jpg, mask = os.path.join(folder, f"{n}.jpg"), os.path.join(folder, f"{n}_a.png")
-        tile(jpg, mask, None, os.path.join(tiles_out, key, f"{n}.webp"))
-        tile(jpg, mask, LO, os.path.join(tiles_out, key, "lo", f"{n}.webp"))
-    tables = m.get("tables") or [m["table"]]
-    maps[key] = {
-        "title": m.get("title", key), "tile": m["tile"], "grid": m["grid"], "scale": m["scale"],
-        "ox": m["offsetX"], "oy": m["offsetY"], "tiles": names, "lo": LO, "instance": m["instance"],
-    }
-    for z in m.get("zones") or []:
-        zones[str(z)] = key
-    # Spawn points of the pet monsters: each place once (an instance has a
-    # table per difficulty with the same places).
+
+def collect(key, tables):
+    """A map's spawn points (each place once: an instance has a table per
+    difficulty with the same places) and gathering spots."""
     points = {}
     for table in tables:
         for npc, pts in (spawns_src.get(table) or {}).items():
@@ -145,12 +208,52 @@ for key, m in maps_src.items():
     if key in kib_src:
         kibelisks[key] = [[en(k["names"]), round(k["x"]), round(k["y"])] for k in kib_src[key]]
 
+
+for key, m in maps_src.items():
+    tables = m.get("tables") or [m["table"]]
+    if GAME and key in GAME_MAPS:
+        maps[key] = game_map(key, m)
+        collect(key, tables)
+        continue
+    folder = os.path.join(ASSETS, "maps", key)
+    names = sorted(f[:-4] for f in os.listdir(folder) if f.endswith(".jpg"))
+    names = [n for n in names if os.path.exists(os.path.join(folder, f"{n}_a.png"))]
+    if not names:
+        continue
+    if not NO_TILES:
+        os.makedirs(os.path.join(tiles_out, key, "lo"), exist_ok=True)
+    for n in names:
+        jpg, mask = os.path.join(folder, f"{n}.jpg"), os.path.join(folder, f"{n}_a.png")
+        note(jpg, f"maps/{key}/{n}.jpg")
+        note(mask, f"maps/{key}/{n}_a.png")
+        skeeve_tile(jpg, mask, None, os.path.join(tiles_out, key, f"{n}.webp"))
+        skeeve_tile(jpg, mask, LO, os.path.join(tiles_out, key, "lo", f"{n}.webp"))
+    maps[key] = {
+        "title": m.get("title", key), "tile": m["tile"], "grid": m["grid"], "scale": m["scale"],
+        "ox": m["offsetX"], "oy": m["offsetY"], "tiles": names, "lo": LO, "instance": m["instance"],
+    }
+    for z in m.get("zones") or []:
+        zones[str(z)] = key
+    collect(key, tables)
+
+# Maps only the game's pictures have (Poeta, Ishalgen).
+if GAME:
+    for key, (_, _, table, _) in GAME_MAPS.items():
+        if key not in maps:
+            maps[key] = game_map(key)
+            collect(key, [table, *[t for t in spawns_src if t.startswith(table + "/")]])
+game_commit = None
+if GAME:
+    try:
+        game_commit = subprocess.run(["git", "-C", GAME, "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        pass
+
 # ---------- the AION2 Interactive Map (--aim) ----------
-# Its map -> ours, and how many of our pixels one of its pixels is.
-AIM_MAPS = {"verteron": ("World_L_A", 2), "altgard": ("World_D_A", 1), "abyss": ("Abyss_Reshanta_A", 1)}
+# Its map -> ours (its pictures are the game's: GAME_MAPS).
+AIM_MAPS = {key: g[0] for key, g in GAME_MAPS.items()}
 AIM_PLACES = {"seal": "Sealed dungeon", "battlefield": "Battlefield", "occupation": "Outpost", "village": "Village"}
 aim_commit = None
-calibration = {}
 cube_spots, monoliths, places, regions = {}, {}, {}, {}
 
 
@@ -164,9 +267,10 @@ def calibrate(key, teleports, factor):
     """World -> pixel of a map from its Kibelisks: each of SkeeveAN's (game
     coordinates) paired with the nearest of the AION2 Interactive Map's
     (pixels of the game's map picture, y up) under the fit so far, starting
-    from SkeeveAN's; one scale and offset fitted to the pairs by least squares,
-    three times over. None when they don't agree (too few, or more than 15 m
-    apart on average): SkeeveAN's fit stays."""
+    from the map's own; one scale and offset fitted to the pairs by least
+    squares, three times over. None when they don't agree (too few, or more
+    than 15 m apart on average). With the game's pictures the fit only checks
+    their bounds; without, it replaces SkeeveAN's fit."""
     m = maps[key]
     size = m["tile"] * m["grid"]
     tel = np.array([(x * factor, size - y * factor) for x, y in teleports], float)
@@ -210,17 +314,27 @@ if AIM:
     import numpy as np
     import yaml
 
-    for key, (name, factor) in AIM_MAPS.items():
-        if key not in maps:
+    aim_sizes = {m["name"]: m["tileWidth"] * m["tilesCountX"] for m in aim_load("data/maps.yaml").get("maps") or []}
+    for key, name in AIM_MAPS.items():
+        if key not in maps or name not in aim_sizes:
             continue
-        markers = aim_load(f"data/markers/{name}.yaml").get("markers") or []
-        words = aim_load(f"locales/en/markers/{name}.yaml")
-        fit = calibrate(key, [(mk["x"], mk["y"]) for mk in markers if mk.get("subtype") == "teleport"], factor)
-        if fit:
-            calibration[key] = {"from": {k: maps[key][k] for k in ("scale", "ox", "oy")}, **fit}
-            maps[key].update({k: fit[k] for k in ("scale", "ox", "oy")})
         m = maps[key]
         size = m["tile"] * m["grid"]
+        factor = size / aim_sizes[name]
+        markers = aim_load(f"data/markers/{name}.yaml").get("markers") or []
+        words = aim_load(f"locales/en/markers/{name}.yaml") if os.path.exists(
+            os.path.join(AIM, "public", "locales", "en", "markers", f"{name}.yaml")) else {}
+        fit = calibrate(key, [(mk["x"], mk["y"]) for mk in markers if mk.get("subtype") == "teleport"], factor)
+        if fit and m.get("picture") == "game":
+            # The Kibelisks against the bounds: how far apart their own fit
+            # puts the map's corners.
+            far = max(abs((fit[o] + fit["scale"] * c) - (m[o] + m["scale"] * c)) / m["scale"] / 100
+                      for o, cs in (("ox", (calibration[key]["bounds"][0], calibration[key]["bounds"][2])),
+                                    ("oy", (calibration[key]["bounds"][1], calibration[key]["bounds"][3]))) for c in cs)
+            calibration[key]["kibelisks"] = {"pairs": fit["pairs"], "rmsMetres": fit["rmsMetres"], "cornersApartMetres": round(far, 1)}
+        elif fit:
+            calibration[key] = {"from": {k: m[k] for k in ("scale", "ox", "oy")}, **fit}
+            m.update({k: fit[k] for k in ("scale", "ox", "oy")})
 
         def world(x, y):
             return [round((x * factor - m["ox"]) / m["scale"]), round((size - y * factor - m["oy"]) / m["scale"])]
@@ -283,6 +397,9 @@ data = {
     "regions": regions,
     "calibration": calibration,
 }
+if GAME:
+    data["pictures"] = {"repo": "https://github.com/aion2-interactive-map/aion2-interactive-map", "branch": "gh-pages",
+                        "commit": game_commit, "path": "UI/Map/WorldMap", "owner": "NCSOFT (the game's own map pictures)"}
 if AIM:
     data["aim"] = {"repo": "https://github.com/aion2-interactive-map/aion2-interactive-map", "commit": aim_commit,
                    "license": "CC BY-NC 4.0", "author": "Yihao Liu (tc-imba)"}
@@ -295,6 +412,8 @@ with open(os.path.join(OUT, "data.js"), "w", encoding="utf8") as f:
     f.write("// Generated by dev/make_data.py from SkeeveAN's Aion-DPS-Meter (MIT) and, for cubeSpots,\n")
     f.write("// monoliths, places, regions and the calibration, the AION2 Interactive Map's data\n")
     f.write("// (CC BY-NC 4.0, Yihao Liu (tc-imba); see NOTICE-AION2-Interactive-Map.txt). Do not edit by hand.\n")
+    f.write("// The world map pictures (tiles/) of Verteron, Altgard, the Abyss, Poeta and Ishalgen are the\n")
+    f.write("// game's own, as the AION2 Interactive Map publishes them (its gh-pages branch).\n")
     f.write("// AION 2 names, maps and game data belong to their respective owners.\n")
     f.write("globalThis.MAP_DATA = ")
     json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
@@ -303,6 +422,7 @@ with open(os.path.join(OUT, "data.js"), "w", encoding="utf8") as f:
 with open(os.path.join(OUT, "dev", "provenance.json"), "w", encoding="utf8") as f:
     json.dump({"repo": data["source"]["repo"], "commit": data["source"]["commit"],
                **({"aim": {"repo": data["aim"]["repo"], "commit": aim_commit}} if AIM else {}),
+               **({"pictures": data["pictures"]} if GAME else {}),
                "calibration": calibration, "sha256": dict(sorted(read.items()))}, f, indent=1)
     f.write("\n")
 
