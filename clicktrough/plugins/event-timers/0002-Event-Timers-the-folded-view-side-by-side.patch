@@ -1,7 +1,7 @@
-From 68f03af67632be3feaae5417d7b7e5cd89d3503d Mon Sep 17 00:00:00 2001
+From aa4a7c46327a36b672dd616041ef9b1ce9921d2c Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Sat, 24 Oct 2026 11:46:50 +0000
-Subject: [PATCH] Event Timers: the folded view side by side
+Subject: [PATCH 2/2] Event Timers: the folded view side by side
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
@@ -214,7 +214,7 @@ index c2d7b26..2ab5f23 100644
    prefs.region = els.regionSelect.value;
    savePrefs();
 diff --git a/plugins/event-timers/style.css b/plugins/event-timers/style.css
-index 1983d8b..df390a4 100644
+index 1983d8b..f46f2b9 100644
 --- a/plugins/event-timers/style.css
 +++ b/plugins/event-timers/style.css
 @@ -43,6 +43,65 @@ body.compact .eventList li.keepFolded {
@@ -258,8 +258,8 @@ index 1983d8b..df390a4 100644
 +  border-color: rgba(255, 255, 255, 0.3);
 +}
 +.foldedLayoutBtn[aria-pressed="true"] {
-+  color: var(--a2-accent, #8fc2ff);
-+  border-color: var(--a2-accent, #8fc2ff);
++  color: rgba(255, 255, 255, 0.9);
++  border-color: rgba(255, 255, 255, 0.35);
 +}
 +/* Side by side: a wide bar, a column each (events, bosses now and soon,
 +   later bosses). Too narrow for that, they wrap under each other. */

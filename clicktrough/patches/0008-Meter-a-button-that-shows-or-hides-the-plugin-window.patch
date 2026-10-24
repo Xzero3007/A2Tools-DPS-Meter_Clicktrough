@@ -1,7 +1,7 @@
-From 7dc2600798386dfc828a370f0ddbd5b438a50a78 Mon Sep 17 00:00:00 2001
+From 70eb3b546eb619843691b26b2d85fb7e34701018 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Sat, 24 Oct 2026 11:53:44 +0000
-Subject: [PATCH 8/8] Meter: a button that shows or hides the plugin window
+Subject: [PATCH 8/9] Meter: a button that shows or hides the plugin window
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
@@ -9,12 +9,12 @@ Content-Transfer-Encoding: 8bit
 The plugin window (the dock) could be hidden by its × and brought back
 only through Settings → Plugins. A puzzle button in the meter's header
 now does both: it hides the dock as its × does, and shows it again with
-the tabs it was hidden with (all of them if it never was). It is lit
-while the dock is shown, follows it when the dock is hidden or shown
-any other way (dock-status, sent by plugins::dock::sync), and is absent
-while no plugin is in the dock. While the meter is locked it stays
-clickable with the other header buttons ("Locked: buttons stay
-clickable").
+the tabs it was hidden with (all of them if it never was). It is a
+little brighter while the dock is shown (no colour of its own), follows
+the dock when it is hidden or shown any other way (dock-status, sent by
+plugins::dock::sync), and is absent while no plugin is in the dock.
+While the meter is locked it stays clickable with the other header
+buttons ("Locked: buttons stay clickable").
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_01RBQati3x8VviBbpY9juEWf
@@ -33,9 +33,9 @@ Claude-Session: https://claude.ai/code/session_01RBQati3x8VviBbpY9juEWf
  src/data/i18n/ui/ru.json       |  1 +
  src/data/i18n/ui/zh-Hans.json  |  1 +
  src/data/i18n/ui/zh-Hant.json  |  1 +
- src/styles.css                 |  4 ++
+ src/styles.css                 |  3 ++
  tests/plugins-button.test.mjs  | 70 ++++++++++++++++++++++++++++++++++
- 16 files changed, 168 insertions(+), 1 deletion(-)
+ 16 files changed, 167 insertions(+), 1 deletion(-)
  create mode 100644 public/src/js/pluginsButton.js
  create mode 100644 tests/plugins-button.test.mjs
 
@@ -292,17 +292,16 @@ index 62f4d90..ff0e211 100644
      "stack": "堆疊顯示外掛",
      "fold": "收合停靠欄",
 diff --git a/src/styles.css b/src/styles.css
-index 433ebed..9fa5023 100644
+index 433ebed..723fa36 100644
 --- a/src/styles.css
 +++ b/src/styles.css
-@@ -560,6 +560,10 @@ body.linuxOverlay .meter {
+@@ -560,6 +560,9 @@ body.linuxOverlay .meter {
  .header .headerBtns .updatesBtn { color: #3ddc84; }
  .header .headerBtns .updatesBtn:hover { color: #7af0ae; }
  .header .headerBtns .updatesBtn[hidden] { display: none; }
-+/* Clicktrough: the plugin window's button; lit while the window is shown. */
++/* Clicktrough: the plugin window's button; brighter while the window is shown. */
 +.header .headerBtns .pluginsBtn[hidden] { display: none; }
-+.header .headerBtns .pluginsBtn.isActive { color: var(--accent, #8fc2ff); }
-+.header .headerBtns .pluginsBtn.isActive:hover { color: #fff; }
++.header .headerBtns .pluginsBtn.isActive { color: rgba(255, 255, 255, 0.9); }
  
  /* ---------- boss HP: the waterline ---------- */
  
