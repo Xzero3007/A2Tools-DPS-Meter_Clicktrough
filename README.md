@@ -45,6 +45,10 @@ package.
   every plugin's widgets (the Map overlay) off and on.
 - **Usable with the game closed**: "Hide when AION2 isn't focused" hides the
   meter only while AION2 runs.
+- **Market**: your server's prices of the gathered materials (from
+  [aion2.exchange](https://aion2.exchange)), what they cost made from Odyle
+  (Substance Morph), what every recipe costs and brings with and without
+  morphing, and which recipes need each material, with its cost.
 - **Pet Finder built in**: pet mobs near you with how far and which way, a
   search over every pet and a Black Cloud Merchant shopping list (data from
   [PetTracker](https://github.com/0Fox2Give/PetTracker)); the Merchant tab
