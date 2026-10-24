@@ -17,7 +17,7 @@
       </div>
     </header>
     <div class="searchRow">
-      <input type="search" class="search" placeholder="Search: Orichalcum, Aria, a pet, a monster, a Kibelisk camp …" autocomplete="off" spellcheck="false" />
+      <input type="search" class="search" placeholder="Search: Orichalcum, Hidden Cube, Monolith, a pet, a monster, a place …" autocomplete="off" spellcheck="false" />
       <div class="results" role="listbox" hidden></div>
     </div>
     <div class="focusBar" hidden>
@@ -29,16 +29,23 @@
       <button type="button" class="chip" data-layer="pets" aria-pressed="true">Pets</button>
       <button type="button" class="chip" data-layer="monsters" aria-pressed="false" title="The monsters around you right now">Monsters</button>
       <button type="button" class="chip" data-layer="gather" aria-pressed="false">Gathering</button>
-      <button type="button" class="chip" data-layer="cubes" aria-pressed="true" title="Shown as soon as one is in range">Hidden Cubes</button>
+      <button type="button" class="chip" data-layer="cubes" aria-pressed="true" title="Where one is known to stand (outlined), and one in range right now (filled)">Hidden Cubes</button>
+      <button type="button" class="chip" data-layer="monoliths" aria-pressed="false" title="Monolith pieces to collect">Monoliths</button>
       <button type="button" class="chip" data-layer="kibelisks" aria-pressed="false">Kibelisks</button>
+      <button type="button" class="chip" data-layer="places" aria-pressed="false" title="Sealed dungeons, battlefields, outposts, villages and the names of the regions">Places</button>
       <span class="sep"></span>
       <button type="button" class="chip petsMode" aria-pressed="false" title="All pets, or only those Pet Finder and Pet Soul Tracker follow">All pets</button>
     </nav>
     <nav class="kinds" aria-label="Gathering" hidden></nav>
     <section class="overlaySettings" hidden>
-      <label>Overlay opacity <input type="range" class="overlayOpacity" min="20" max="100" step="5" /></label>
+      <span class="sizeLabel">Overlay size
+        <span class="overlaySizes" role="group" aria-label="Overlay size">
+          <button type="button" data-size="s">S</button><button type="button" data-size="m">M</button><button type="button" data-size="l">L</button><button type="button" data-size="xl">XL</button>
+        </span>
+      </span>
+      <label>Opacity <input type="range" class="overlayOpacity" min="20" max="100" step="5" /></label>
       <label class="check"><input type="checkbox" class="overlayLock" /> Lock it (clicks go to the game)</label>
-      <span class="muted">Drag its corner to resize it.</span>
+      <span class="muted">Or drag one of its corners.</span>
     </section>
     <div class="mapBox"></div>
     <footer class="status">

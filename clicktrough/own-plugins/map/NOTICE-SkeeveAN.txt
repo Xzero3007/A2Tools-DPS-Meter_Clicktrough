@@ -1,6 +1,8 @@
-The maps (tiles/, made from the game's own world maps), their calibration and
-the map data in data.js (spawn points, gathering spots, Kibelisk camps, monster
-and zone names, the Hidden Cube ids) come from SkeeveAN's Aion-DPS-Meter,
+The maps (tiles/, made from the game's own world maps), their calibration
+(Verteron's and Altgard's refitted, see NOTICE-AION2-Interactive-Map.txt) and
+the map data in data.js (spawn points, gathering spots, every place a Hidden
+Cube may appear, Kibelisk camps, monster and zone names, the Hidden Cube ids)
+come from SkeeveAN's Aion-DPS-Meter,
 https://github.com/SkeeveAN/Aion-DPS-Meter (revision in dev/provenance.json),
 and so do the frame layouts and the position estimate of the meter's
 plugins/world.rs. That project's tooling and data are under this license:

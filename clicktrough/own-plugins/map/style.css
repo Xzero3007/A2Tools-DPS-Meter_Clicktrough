@@ -62,6 +62,13 @@ button[aria-pressed="false"] { color: rgba(255, 255, 255, 0.55); }
 .overlaySettings label { display: inline-flex; align-items: center; gap: 6px; }
 .overlaySettings input[type=range] { width: 110px; accent-color: #c8ccd2; }
 .check input { margin: 0; accent-color: #c8ccd2; }
+.sizeLabel { display: inline-flex; align-items: center; gap: 6px; }
+.overlaySizes { display: inline-flex; border-radius: 6px; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.18); }
+.overlaySizes button { background: rgba(255, 255, 255, 0.04); border: 0; color: rgba(255, 255, 255, 0.75); font-family: inherit; font-weight: 600; font-size: 11px; line-height: 1;
+  padding: 4px 8px; cursor: pointer; }
+.overlaySizes button + button { border-left: 1px solid rgba(255, 255, 255, 0.14); }
+.overlaySizes button:hover { background: rgba(255, 255, 255, 0.12); color: #fff; }
+.overlaySizes button[aria-pressed="true"] { background: rgba(255, 255, 255, 0.22); color: #fff; }
 
 /* The window's fold button: only the map. */
 body.compact .bar, body.compact .layers, body.compact .kinds, body.compact .searchRow { display: none; }

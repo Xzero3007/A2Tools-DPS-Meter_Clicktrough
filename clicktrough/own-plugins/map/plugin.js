@@ -1,7 +1,8 @@
 // The Map plugin's window: the map you are on with where you are, the pets
 // Pet Finder and Pet Soul Tracker follow, monsters around, gathering spots,
-// Hidden Cubes and Kibelisk camps; a search; and an overlay (a widget) with a
-// small map that follows you.
+// Hidden Cubes, Monolith pieces, Kibelisk camps, sealed dungeons and other
+// places; a search; and an overlay (a widget) with a small map that follows
+// you.
 (() => {
   const D = globalThis.MAP_DATA;
   const K = globalThis.MapKit;
@@ -9,7 +10,7 @@
   const $ = (s) => document.querySelector(s);
 
   let settings = {
-    layers: { pets: true, monsters: false, gather: false, cubes: true, kibelisks: false },
+    layers: { pets: true, monsters: false, gather: false, cubes: true, monoliths: false, kibelisks: false, places: false },
     gatherKinds: {},
     petsMode: "tracked",
     follow: true,
@@ -54,9 +55,19 @@
   });
 
   // ---------- which map ----------
+  /** The map you are on: { key, guess }. The zone says it (or what is around
+   *  you); until the meter has seen a zone (it hears one at each teleport or
+   *  zone change, not while you stay), the map you were on last, as a guess.
+   *  Null: no position, or a place with no map. */
+  function whereAmI() {
+    const key = M.mapOf(world);
+    if (key) return { key, guess: false };
+    if (world?.me && world.zone == null && D.maps[settings.lastKey]) return { key: settings.lastKey, guess: true };
+    return null;
+  }
   function currentKey() {
     if (settings.pick !== "auto" && D.maps[settings.pick]) return settings.pick;
-    return M.mapOf(world) || settings.lastKey || "verteron";
+    return whereAmI()?.key || settings.lastKey || "verteron";
   }
   const titleOf = (key) => D.maps[key]?.title || key;
   /** A map by a region's name (Pet Finder's "Verteron", "Altgard" ...). */
@@ -96,8 +107,9 @@
 
   function draw() {
     const key = currentKey();
-    const inZone = M.mapOf(world);
-    if (inZone && inZone !== settings.lastKey) {
+    const where = whereAmI();
+    const inZone = where?.key || null;
+    if (inZone && !where.guess && inZone !== settings.lastKey) {
       settings.lastKey = inZone;
       saveLater();
     }
@@ -113,22 +125,29 @@
       else view.setPxPerMetre(2);
       view.centerOn(me.x, me.y);
     }
-    renderHeader(key, onThisMap);
+    const region = me && inZone ? M.regionAt(inZone, me.x, me.y) : null;
+    renderHeader(key, onThisMap, where, region);
     renderStatus(built, onThisMap);
     renderFocus(key);
     // The overlay follows you on your own map, whichever one this window shows.
     const own = inZone || key;
-    sendOverlay(own, !!me && inZone === own);
+    sendOverlay(own, !!me && inZone === own, { region: inZone === own ? region : null, guess: !!where?.guess });
   }
 
-  function renderHeader(key, onThisMap) {
+  function renderHeader(key, onThisMap, where, region) {
     $(".mapName").textContent = titleOf(key) || "Map";
-    const zoneName = world?.zone != null ? D.zoneNames[String(world.zone)] : null;
+    const zone = world?.zone;
+    const zoneName = zone != null ? D.zoneNames[String(zone)] : null;
     let note = "";
     if (!world?.me) note = "Waiting for your position: log in with the meter running";
-    else if (!M.mapOf(world)) note = zoneName ? `No map for ${zoneName}` : "This place has no map";
-    else if (!onThisMap) note = `You are in ${titleOf(M.mapOf(world)) || zoneName || "another map"}`;
-    else note = world.me.exact ? "Your position" : "Your position (about, from what's around you)";
+    else if (!where && zone == null) note = "Zone not known yet: it comes with your next teleport or zone change";
+    else if (!where) note = `No map for ${zoneName || `zone ${zone}`}`;
+    else if (!onThisMap) note = `You are in ${titleOf(where.key)}${where.guess ? "?" : ""}`;
+    else {
+      note = world.me.exact ? "Your position" : "Your position (about, from what's around you)";
+      if (region) note += ` · ${region}`;
+      if (where.guess) note += " · map as last time (the zone comes with your next teleport)";
+    }
     $(".whereNote").textContent = note;
   }
 
@@ -157,7 +176,7 @@
     if (!focus || focus.label !== searchBox.value.trim()) searchBox.value = "";
     if (focus) {
       const maps = M.focusMaps(focus);
-      const here = M.mapOf(world);
+      const here = whereAmI()?.key;
       const key = (map && maps[map] && map) || (here && maps[here] && here) || Object.keys(maps)[0] || null;
       if (key) showFocusOn(key);
     }
@@ -168,7 +187,7 @@
 
   /** The focus on a map: that map, framed around its places. */
   function showFocusOn(key) {
-    settings.pick = key === M.mapOf(world) ? "auto" : key;
+    settings.pick = key === whereAmI()?.key ? "auto" : key;
     settings.follow = false;
     view.setMap(key);
     view.fitPoints(M.focusPoints(settings.focus, key).flat());
@@ -263,9 +282,12 @@
   });
 
   // ---------- the overlay (a widget) ----------
+  // Its sizes (the buttons S, M, L, XL); a corner dragged sets any other.
+  const SIZES = { s: [220, 240], m: [300, 330], l: [400, 440], xl: [520, 570] };
+  const sizeName = () => Object.keys(SIZES).find((k) => SIZES[k][0] === settings.overlaySize?.[0] && SIZES[k][1] === settings.overlaySize?.[1]) || null;
   let lastSent = 0;
   let sendTimer = 0;
-  function sendOverlay(key, onThisMap) {
+  function sendOverlay(key, onThisMap, { region = null, guess = false } = {}) {
     if (!settings.overlay) return;
     const go = () => {
       lastSent = Date.now();
@@ -282,6 +304,9 @@
         opacity: settings.overlayOpacity,
         onThisMap: !!onThisMap,
         locked: settings.overlayLock,
+        size: sizeName(),
+        region,
+        guess,
       }).catch(() => {});
     };
     clearTimeout(sendTimer);
@@ -291,9 +316,16 @@
   }
 
   const overlaySize = () => {
-    const [w, h] = Array.isArray(settings.overlaySize) ? settings.overlaySize : [300, 330];
-    return { width: Math.max(180, Math.min(900, w)), height: Math.max(180, Math.min(900, h)) };
+    const [w, h] = Array.isArray(settings.overlaySize) ? settings.overlaySize : SIZES.m;
+    return { width: Math.max(120, Math.min(800, w)), height: Math.max(120, Math.min(800, h)) };
   };
+  function setOverlaySize(name) {
+    if (!SIZES[name]) return;
+    settings.overlaySize = [...SIZES[name]];
+    saveLater();
+    renderTools();
+    if (settings.overlay) a2.widgets.open("overlay", overlaySize()).then(() => { lastSent = 0; render(); }).catch(() => {});
+  }
   async function applyOverlay() {
     try {
       if (settings.overlay) {
@@ -309,18 +341,20 @@
     }
   }
 
-  let resizeTimer = 0;
   a2.on("widget-message", ({ name, data }) => {
     if (name !== "overlay" || !data) return;
     if (data.type === "zoom" && Number.isFinite(data.value)) {
       settings.overlayZoom = Math.max(0.3, Math.min(12, data.value));
       saveLater();
       render();
-    } else if (data.type === "resize" && Number.isFinite(data.width) && Number.isFinite(data.height)) {
+    } else if (data.type === "size") {
+      setOverlaySize(data.size);
+    } else if (data.type === "resized" && Number.isFinite(data.width) && Number.isFinite(data.height)) {
+      // A corner dragged: the window has its size already, it is only kept.
       settings.overlaySize = [Math.round(data.width), Math.round(data.height)];
-      clearTimeout(resizeTimer);
-      resizeTimer = setTimeout(() => a2.widgets.open("overlay", overlaySize()).catch(() => {}), 40);
       saveLater();
+      renderTools();
+      render();
     } else if (data.type === "opacity" && Number.isFinite(data.value)) {
       settings.overlayOpacity = Math.max(0.2, Math.min(1, data.value));
       $(".overlayOpacity").value = String(Math.round(settings.overlayOpacity * 100));
@@ -368,6 +402,8 @@
     }));
     $(".overlayOpacity").value = String(Math.round(settings.overlayOpacity * 100));
     $(".overlayLock").checked = !!settings.overlayLock;
+    const size = sizeName();
+    for (const b of document.querySelectorAll(".overlaySizes button")) b.setAttribute("aria-pressed", String(b.dataset.size === size));
     const pick = $(".mapPick");
     if (!pick.options.length) {
       const opt = (value, text) => Object.assign(document.createElement("option"), { value, textContent: text });
@@ -411,6 +447,9 @@
     renderTools();
     applyOverlay();
   });
+  for (const b of document.querySelectorAll(".overlaySizes button")) {
+    b.addEventListener("click", () => setOverlaySize(b.dataset.size));
+  }
   $(".overlayOpacity").addEventListener("input", () => {
     settings.overlayOpacity = Number($(".overlayOpacity").value) / 100;
     saveLater();
@@ -484,7 +523,7 @@
       const s = await a2.storage.get("settings");
       if (s && typeof s === "object") {
         settings = { ...settings, ...s, layers: { ...settings.layers, ...(s.layers || {}) } };
-        if (!Array.isArray(settings.overlaySize)) settings.overlaySize = [300, 330];
+        if (!Array.isArray(settings.overlaySize)) settings.overlaySize = [...SIZES.m];
       }
     } catch {}
     renderTools();

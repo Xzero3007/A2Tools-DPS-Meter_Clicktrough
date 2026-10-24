@@ -126,3 +126,64 @@ test("the gathering kinds have plain names and say what they hold", () => {
   assert.equal(M.kindLabel("Fragment"), "Empyrean Traces");
   assert.ok(M.kindTitle("Ore").includes("Orichalcum"));
 });
+
+test("the calibration of Verteron and Altgard is the Kibelisks' fit", () => {
+  for (const key of ["verteron", "altgard"]) {
+    const c = D.calibration[key];
+    assert.ok(c && c.pairs >= 50 && c.rmsMetres < 10, key);
+    assert.equal(D.maps[key].scale, c.scale);
+  }
+  // The game's map pictures: the world's middle in the middle, Altgard half
+  // the pixels of Verteron.
+  assert.ok(Math.abs(D.maps.verteron.ox - 8192) < 20 && Math.abs(D.maps.altgard.ox - 4096) < 20);
+  assert.ok(Math.abs(D.maps.verteron.scale / D.maps.altgard.scale - 2) < 0.01);
+});
+
+test("the search finds Hidden Cubes, Monoliths, places and regions", () => {
+  const cubes = M.search("hidden cube");
+  const spots = cubes.find((r) => r.focus.type === "cube" && r.focus.ids[0] === "spots");
+  const all = cubes.find((r) => r.focus.type === "cube" && r.focus.ids[0] === "all");
+  assert.ok(spots && spots.maps.altgard > 50 && spots.maps.verteron > 50);
+  assert.ok(all && all.maps.altgard > 1000, "every place the game may put one");
+  assert.ok(M.search("cubes").length >= 2);
+  const mono = M.search("monolith").find((r) => r.focus.type === "monolith");
+  assert.ok(mono && mono.maps.altgard > 100 && mono.maps.abyss > 100);
+  const seals = M.search("sealed dungeons").find((r) => r.focus.ids[0] === "seal:*");
+  assert.ok(seals && seals.maps.altgard > 30);
+  const one = M.search("Lagta Fafnite Storage").find((r) => r.focus.type === "place");
+  assert.ok(one && one.total === 1);
+  const region = M.search("Safe Haven").find((r) => r.focus.type === "region");
+  assert.ok(region && region.maps.altgard === 1);
+});
+
+test("the Hidden Cubes layer shows the known spots, the Places layer places and region names", () => {
+  const b = M.build({ key: "altgard", world: null, tracked: new Map(), layers: { cubes: true, places: true, monoliths: true }, gatherKinds: {}, petsMode: "all" });
+  assert.equal(b.marks.filter((m) => m.kind === "cubeSpot").length, D.cubeSpots.altgard.length / 2);
+  assert.ok(b.marks.filter((m) => m.kind === "place").length > 50);
+  assert.ok(b.marks.some((m) => m.kind === "region" && m.text === "Safe Haven"));
+  assert.ok(b.marks.filter((m) => m.kind === "monolith").length > 100);
+  const off = M.build({ key: "altgard", world: null, tracked: new Map(), layers: {}, gatherKinds: {}, petsMode: "all" });
+  assert.equal(off.marks.length, 0);
+});
+
+test("a Hidden Cube in range is the next one when searching for cubes", () => {
+  const focus = M.search("hidden cube").find((r) => r.focus.ids[0] === "spots").focus;
+  const [cx, cy] = M.focusPoints(focus, "altgard")[0];
+  const world = { zone: 1110, me: { x: cx + 9000, y: cy, exact: true }, npcs: [], objects: [[5, D.cubes[0], cx + 9500, cy]] };
+  const b = M.build({ key: "altgard", world, tracked: new Map(), heading: 0, layers: {}, gatherKinds: {}, petsMode: "tracked", focus });
+  assert.equal(b.next.live, true);
+  assert.equal(Math.round(b.next.metres), 5);
+});
+
+test("the region you are in, by its outline", () => {
+  const [, x, y] = D.regions.altgard.find(([name]) => name === "Safe Haven");
+  assert.equal(M.regionAt("altgard", x, y), "Safe Haven");
+  assert.equal(M.regionAt("altgard", 10e6, 10e6), null);
+});
+
+test("without a zone, the map comes from the gathering spots and cubes around", () => {
+  const [env, pts] = Object.entries(D.gather.points.altgard).find(([e]) => e !== "cube");
+  assert.equal(M.mapOf({ zone: null, npcs: [], objects: [[1, Number(env), pts[0] + 200, pts[1]]] }), "altgard");
+  const cube = D.gather.points.verteron.cube;
+  assert.equal(M.mapOf({ zone: null, npcs: [], objects: [[2, D.cubes[0], cube[0], cube[1] + 100]] }), "verteron");
+});

@@ -1,7 +1,49 @@
 {
  "repo": "https://github.com/SkeeveAN/Aion-DPS-Meter",
  "commit": "03026182c4ae2059b41804189852af6e945e365a",
+ "aim": {
+  "repo": "https://github.com/aion2-interactive-map/aion2-interactive-map",
+  "commit": "89ce3984d569ff1a03ee6311d064231211212981"
+ },
+ "calibration": {
+  "verteron": {
+   "from": {
+    "scale": 0.019583509634873143,
+    "ox": 8218.937975984913,
+    "oy": 8147.450753846877
+   },
+   "scale": 0.020063104925611697,
+   "ox": 8188.203134041561,
+   "oy": 8189.321504857005,
+   "pairs": 60,
+   "rmsMetres": 5.7
+  },
+  "altgard": {
+   "from": {
+    "scale": 0.0098227439264612,
+    "ox": 4137.781824319782,
+    "oy": 4062.9907075320293
+   },
+   "scale": 0.010038075184638728,
+   "ox": 4092.8019580632745,
+   "oy": 4093.2101249068305,
+   "pairs": 61,
+   "rmsMetres": 7.7
+  }
+ },
  "sha256": {
+  "aion2-interactive-map:public/data/markers/Abyss_Reshanta_A.yaml": "a7b9432199cf8fc4a90083d95fedb229e2b03238c4a8e2bf84b92e7a860ab899",
+  "aion2-interactive-map:public/data/markers/World_D_A.yaml": "aa1788538e35a75bd5b63e963385eb9decb0b07fa2d6084928f27109d7faa3cb",
+  "aion2-interactive-map:public/data/markers/World_L_A.yaml": "8191964834b0561d2b775d149ff0463ceee20e514159db3e4d46a7a05e39ccc9",
+  "aion2-interactive-map:public/data/regions/Abyss_Reshanta_A.yaml": "8dffbf1448440807b0cc2be94402064b80d2906c44cf20263d97c37a58acec96",
+  "aion2-interactive-map:public/data/regions/World_D_A.yaml": "2485542668eadafbafb5ced808c2dc3da9f2dc2d54b1fa2165a66daf443d6ddb",
+  "aion2-interactive-map:public/data/regions/World_L_A.yaml": "9f29dd1fa955dd02de6e71d5ead99a7ddb481c87071b28abd02eb22053d4e7eb",
+  "aion2-interactive-map:public/locales/en/markers/Abyss_Reshanta_A.yaml": "ca3d163bab055381827226140568f3bef7eaac187cebd76878e0b63e9e442356",
+  "aion2-interactive-map:public/locales/en/markers/World_D_A.yaml": "4eb19f54de75662c51b669264be58260947edcdaacf5e29ac1286262f71ac63d",
+  "aion2-interactive-map:public/locales/en/markers/World_L_A.yaml": "19de57d21bce1126ade171269b1d4c501934a2e2e7df7b3253afd2de4b8ab2d2",
+  "aion2-interactive-map:public/locales/en/regions/Abyss_Reshanta_A.yaml": "2d76f967abbf722536c43f6497ce8ef981ebb48af38394ae1ffa6bd709a0e638",
+  "aion2-interactive-map:public/locales/en/regions/World_D_A.yaml": "2d76f967abbf722536c43f6497ce8ef981ebb48af38394ae1ffa6bd709a0e638",
+  "aion2-interactive-map:public/locales/en/regions/World_L_A.yaml": "2d76f967abbf722536c43f6497ce8ef981ebb48af38394ae1ffa6bd709a0e638",
   "maps/Arkanis/0_0.jpg": "f2cfdb74710d547833f276aafa2dd7925949a01263d2b97e5499595b7a0b432b",
   "maps/Arkanis/0_0_a.png": "2dcadb20b135b2ba811f11b3f95bb8b80832700a6061385902b4fe93e7aa1df9",
   "maps/BakronIsland/0_0.jpg": "c30402e0172bdbfce5890c81f5e0a3af265d0e9f8263e32c116474ab2c13916c",
