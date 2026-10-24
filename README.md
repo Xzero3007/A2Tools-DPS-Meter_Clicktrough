@@ -21,12 +21,14 @@ veröffentlicht sie als Arch-Paket.
 - **Gesperrt bleiben die Knöpfe klickbar**: Kampfverlauf, Einstellungen,
   BOSS/DPS am Meter, die Köpfe von Details und Kampfverlauf, die Tabs des
   Plugin-Docks. Überall sonst gehen Klicks ins Spiel.
+- **Plugin-Knopf am Meter**: blendet das Plugin-Fenster aus und wieder ein.
 - **Gesperrt am rechten Rand scrollen**: Gesperrte Fenster nehmen das Mausrad in
   einem 24 px breiten Streifen an ihrem rechten Rand an; gesperrt gibt es dort
   keinen Resize-Rand.
 - **Das Meter bleibt an seinem Platz**, wenn es wächst oder schrumpft (KDE).
 - **Event Timers zeigt eingeklappt auch die Bosse**, die laufen oder bald
-  beginnen, und immer die nächste Artefakt-Belagerung.
+  beginnen, und immer die nächste Artefakt-Belagerung, wahlweise als Spalten
+  nebeneinander (breiter Balken).
 - **Keine Supporter-Funktionen und keine Links zum Autor** in der App.
 - **Updates kommen aus diesem Repo**, damit ein offizielles Update die
   Anpassungen nicht wieder ersetzt.

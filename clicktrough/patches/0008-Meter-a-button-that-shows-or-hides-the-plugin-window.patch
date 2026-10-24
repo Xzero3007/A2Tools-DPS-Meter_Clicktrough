@@ -1,0 +1,387 @@
+From 7dc2600798386dfc828a370f0ddbd5b438a50a78 Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Sat, 24 Oct 2026 11:53:44 +0000
+Subject: [PATCH 8/8] Meter: a button that shows or hides the plugin window
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The plugin window (the dock) could be hidden by its × and brought back
+only through Settings → Plugins. A puzzle button in the meter's header
+now does both: it hides the dock as its × does, and shows it again with
+the tabs it was hidden with (all of them if it never was). It is lit
+while the dock is shown, follows it when the dock is hidden or shown
+any other way (dock-status, sent by plugins::dock::sync), and is absent
+while no plugin is in the dock. While the meter is locked it stays
+clickable with the other header buttons ("Locked: buttons stay
+clickable").
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01RBQati3x8VviBbpY9juEWf
+---
+ index.html                     |  2 +
+ public/src/js/pluginsButton.js | 39 +++++++++++++++++++
+ src-tauri/src/app.rs           |  2 +
+ src-tauri/src/plugins/dock.rs  | 42 +++++++++++++++++++-
+ src/data/i18n/ui/de.json       |  1 +
+ src/data/i18n/ui/en.json       |  1 +
+ src/data/i18n/ui/es.json       |  1 +
+ src/data/i18n/ui/fr.json       |  1 +
+ src/data/i18n/ui/ja.json       |  1 +
+ src/data/i18n/ui/ko.json       |  1 +
+ src/data/i18n/ui/pt.json       |  1 +
+ src/data/i18n/ui/ru.json       |  1 +
+ src/data/i18n/ui/zh-Hans.json  |  1 +
+ src/data/i18n/ui/zh-Hant.json  |  1 +
+ src/styles.css                 |  4 ++
+ tests/plugins-button.test.mjs  | 70 ++++++++++++++++++++++++++++++++++
+ 16 files changed, 168 insertions(+), 1 deletion(-)
+ create mode 100644 public/src/js/pluginsButton.js
+ create mode 100644 tests/plugins-button.test.mjs
+
+diff --git a/index.html b/index.html
+index eb55342..23a7f15 100644
+--- a/index.html
++++ b/index.html
+@@ -59,6 +59,7 @@
+             <div class="headerBtn updatesBtn" role="button" hidden><i data-lucide="circle-arrow-down"></i></div>
+             <div class="headerBtn suspendBtn" style="display:none"><i data-lucide="power"></i></div>
+             <div class="headerBtn historyBtn" role="button" tabindex="0" aria-label="Fight history" data-i18n-aria-label="history.title"><i data-lucide="scroll-text"></i></div>
++            <div class="headerBtn pluginsBtn" role="button" tabindex="0" hidden aria-pressed="false" aria-label="Show or hide the plugin window" data-i18n-aria-label="pluginDock.toggle"><i data-lucide="puzzle"></i></div>
+             <div class="headerBtn resetBtn"><i data-lucide="rotate-ccw"></i></div>
+             <div class="headerBtn settingsBtn"><i data-lucide="settings"></i></div>
+           </div>
+@@ -1477,6 +1478,7 @@
+     <script src="/src/js/i18n.js"></script>
+     <script src="/src/js/core.js?v=2076a"></script>
+     <script src="/src/js/lockedButtons.js"></script>
++    <script src="/src/js/pluginsButton.js"></script>
+     <script src="/src/js/pluginIcons.js"></script>
+     <script src="/src/js/pluginSettings.js"></script>
+   </body>
+diff --git a/public/src/js/pluginsButton.js b/public/src/js/pluginsButton.js
+new file mode 100644
+index 0000000..9327a0d
+--- /dev/null
++++ b/public/src/js/pluginsButton.js
+@@ -0,0 +1,39 @@
++// Clicktrough: a button in the meter's header that shows or hides the plugin
++// window (the dock), as its × hides it; lit while it is shown, absent while no
++// plugin is in it. While the meter is locked it stays clickable with the other
++// header buttons (lockedButtons.js). The backend: plugins/dock.rs, dock_toggle.
++(() => {
++  const view = window.A2_VIEW || window.__A2_VIEW__ || "main";
++  const invoke = window.__TAURI__?.core?.invoke;
++  const listen = window.__TAURI__?.event?.listen;
++  if (view !== "main" || typeof invoke !== "function") return;
++
++  const start = () => {
++    const btn = document.querySelector(".pluginsBtn");
++    if (!btn) return;
++    const show = (status) => {
++      if (!status || typeof status !== "object") return;
++      const wasHidden = btn.hidden;
++      btn.hidden = !status.available;
++      btn.classList.toggle("isActive", !!status.shown);
++      btn.setAttribute("aria-pressed", String(!!status.shown));
++      btn.title = btn.getAttribute("aria-label") || "";
++      // The header's buttons moved: the lock button's place is sent again.
++      if (wasHidden !== btn.hidden) requestAnimationFrame(() => window._dpsApp?._sendLockBtnRect?.());
++    };
++    const toggle = () => Promise.resolve(invoke("dock_toggle")).then(show).catch(() => {});
++    btn.addEventListener("click", (event) => {
++      event.stopPropagation();
++      toggle();
++    });
++    btn.addEventListener("keydown", (event) => {
++      if (event.key !== "Enter" && event.key !== " ") return;
++      event.preventDefault();
++      toggle();
++    });
++    Promise.resolve(invoke("dock_status")).then(show).catch(() => {});
++    Promise.resolve(listen?.("dock-status", (event) => show(event?.payload))).catch(() => {});
++  };
++  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start, { once: true });
++  else start();
++})();
+diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
+index 96a666d..f2b8d6a 100644
+--- a/src-tauri/src/app.rs
++++ b/src-tauri/src/app.rs
+@@ -3988,6 +3988,8 @@ pub fn run() {
+             take_settings_section,
+             crate::plugins::dock::dock_hello,
+             crate::plugins::dock::dock_close,
++            crate::plugins::dock::dock_status,
++            crate::plugins::dock::dock_toggle,
+             crate::plugins::dock::dock_fold,
+             crate::plugins::dock::plugin_set_docked,
+             crate::plugins::set_plugin_theme,
+diff --git a/src-tauri/src/plugins/dock.rs b/src-tauri/src/plugins/dock.rs
+index 53c90d8..efd1162 100644
+--- a/src-tauri/src/plugins/dock.rs
++++ b/src-tauri/src/plugins/dock.rs
+@@ -99,8 +99,48 @@ pub fn layout(app: &tauri::AppHandle) -> Value {
+ 
+ /// Bring the dock in line with its plugins: built when it has any, closed
+ /// when it has none, shown while any tab is shown, and its page told the
+-/// tabs. `focus` also opens that plugin's tab.
++/// tabs. `focus` also opens that plugin's tab. The meter's plugins button
++/// hears how it stands (`dock-status`).
+ pub fn sync(app: &tauri::AppHandle, focus: Option<&str>) {
++    sync_dock(app, focus);
++    let _ = app.emit_to("main", "dock-status", status(app));
++}
++
++/// Clicktrough: whether the dock has plugins, and whether any tab is shown,
++/// for the meter's plugins button.
++pub fn status(app: &tauri::AppHandle) -> Value {
++    serde_json::json!({ "available": !members(app).is_empty(), "shown": !shown_members(app).is_empty() })
++}
++
++#[tauri::command]
++pub fn dock_status(app: tauri::AppHandle) -> Value {
++    status(&app)
++}
++
++/// The meter's plugins button: the dock hidden as by its ×, or shown again
++/// with the tabs it was hidden with (all of them if it never was).
++#[tauri::command]
++pub fn dock_toggle(app: tauri::AppHandle) -> Value {
++    let members = members(&app);
++    if members.is_empty() {
++        return status(&app);
++    }
++    if !shown_members(&app).is_empty() {
++        dock_close(app.clone());
++        return status(&app);
++    }
++    let closed_with: Vec<String> = listed(&app, CLOSED_WITH_KEY).into_iter().filter(|id| members.contains(id)).collect();
++    if let Some(state) = app.try_state::<AppState>() {
++        state.settings.set(CLOSED_WITH_KEY, "[]");
++    }
++    for id in if closed_with.is_empty() { &members } else { &closed_with } {
++        super::remember_window(&app, id, Some("shown"));
++    }
++    sync(&app, None);
++    status(&app)
++}
++
++fn sync_dock(app: &tauri::AppHandle, focus: Option<&str>) {
+     let members = members(app);
+     let window = app.get_webview_window(LABEL);
+     if members.is_empty() {
+diff --git a/src/data/i18n/ui/de.json b/src/data/i18n/ui/de.json
+index 62cd8ff..de3d05c 100644
+--- a/src/data/i18n/ui/de.json
++++ b/src/data/i18n/ui/de.json
+@@ -794,6 +794,7 @@
+     "failed": "Konnte nicht aktualisiert werden:"
+   },
+   "pluginDock": {
++    "toggle": "Plugin-Fenster ein- oder ausblenden",
+     "tabs": "Plugins als Tabs zeigen",
+     "stack": "Plugins untereinander zeigen",
+     "fold": "Dock einklappen",
+diff --git a/src/data/i18n/ui/en.json b/src/data/i18n/ui/en.json
+index 46bccad..54c2f41 100644
+--- a/src/data/i18n/ui/en.json
++++ b/src/data/i18n/ui/en.json
+@@ -806,6 +806,7 @@
+     "failed": "Couldn't update:"
+   },
+   "pluginDock": {
++    "toggle": "Show or hide the plugin window",
+     "tabs": "Show the plugins as tabs",
+     "stack": "Stack the plugins",
+     "fold": "Fold the dock",
+diff --git a/src/data/i18n/ui/es.json b/src/data/i18n/ui/es.json
+index 238ffb7..4007aa7 100644
+--- a/src/data/i18n/ui/es.json
++++ b/src/data/i18n/ui/es.json
+@@ -794,6 +794,7 @@
+     "failed": "No se pudo actualizar:"
+   },
+   "pluginDock": {
++    "toggle": "Mostrar u ocultar la ventana de plugins",
+     "tabs": "Mostrar los plugins en pestañas",
+     "stack": "Apilar los plugins",
+     "fold": "Plegar el dock",
+diff --git a/src/data/i18n/ui/fr.json b/src/data/i18n/ui/fr.json
+index e081218..3f4ac38 100644
+--- a/src/data/i18n/ui/fr.json
++++ b/src/data/i18n/ui/fr.json
+@@ -794,6 +794,7 @@
+     "failed": "Échec de la mise à jour :"
+   },
+   "pluginDock": {
++    "toggle": "Afficher ou masquer la fenêtre des plugins",
+     "tabs": "Afficher les plugins en onglets",
+     "stack": "Empiler les plugins",
+     "fold": "Replier le dock",
+diff --git a/src/data/i18n/ui/ja.json b/src/data/i18n/ui/ja.json
+index 9299565..b4f1afb 100644
+--- a/src/data/i18n/ui/ja.json
++++ b/src/data/i18n/ui/ja.json
+@@ -794,6 +794,7 @@
+     "failed": "更新できませんでした："
+   },
+   "pluginDock": {
++    "toggle": "プラグインウィンドウを表示／非表示",
+     "tabs": "プラグインをタブで表示",
+     "stack": "プラグインを縦に並べる",
+     "fold": "ドックを折りたたむ",
+diff --git a/src/data/i18n/ui/ko.json b/src/data/i18n/ui/ko.json
+index 347802e..061655a 100644
+--- a/src/data/i18n/ui/ko.json
++++ b/src/data/i18n/ui/ko.json
+@@ -801,6 +801,7 @@
+     "failed": "업데이트하지 못했습니다:"
+   },
+   "pluginDock": {
++    "toggle": "플러그인 창 표시/숨기기",
+     "tabs": "플러그인을 탭으로 보기",
+     "stack": "플러그인을 세로로 쌓기",
+     "fold": "독 접기",
+diff --git a/src/data/i18n/ui/pt.json b/src/data/i18n/ui/pt.json
+index d3d1ffe..a961f2c 100644
+--- a/src/data/i18n/ui/pt.json
++++ b/src/data/i18n/ui/pt.json
+@@ -794,6 +794,7 @@
+     "failed": "Não foi possível atualizar:"
+   },
+   "pluginDock": {
++    "toggle": "Mostrar ou ocultar a janela de plugins",
+     "tabs": "Mostrar os plugins em abas",
+     "stack": "Empilhar os plugins",
+     "fold": "Recolher o dock",
+diff --git a/src/data/i18n/ui/ru.json b/src/data/i18n/ui/ru.json
+index f4d2be9..99c971c 100644
+--- a/src/data/i18n/ui/ru.json
++++ b/src/data/i18n/ui/ru.json
+@@ -799,6 +799,7 @@
+     "failed": "Не удалось обновить:"
+   },
+   "pluginDock": {
++    "toggle": "Показать или скрыть окно плагинов",
+     "tabs": "Показывать плагины вкладками",
+     "stack": "Показывать плагины друг под другом",
+     "fold": "Свернуть док",
+diff --git a/src/data/i18n/ui/zh-Hans.json b/src/data/i18n/ui/zh-Hans.json
+index ced35fd..62e00a2 100644
+--- a/src/data/i18n/ui/zh-Hans.json
++++ b/src/data/i18n/ui/zh-Hans.json
+@@ -801,6 +801,7 @@
+     "failed": "无法更新："
+   },
+   "pluginDock": {
++    "toggle": "显示或隐藏插件窗口",
+     "tabs": "以标签页显示插件",
+     "stack": "堆叠显示插件",
+     "fold": "收起停靠栏",
+diff --git a/src/data/i18n/ui/zh-Hant.json b/src/data/i18n/ui/zh-Hant.json
+index 62f4d90..ff0e211 100644
+--- a/src/data/i18n/ui/zh-Hant.json
++++ b/src/data/i18n/ui/zh-Hant.json
+@@ -801,6 +801,7 @@
+     "failed": "無法更新："
+   },
+   "pluginDock": {
++    "toggle": "顯示或隱藏外掛視窗",
+     "tabs": "以分頁顯示外掛",
+     "stack": "堆疊顯示外掛",
+     "fold": "收合停靠欄",
+diff --git a/src/styles.css b/src/styles.css
+index 433ebed..9fa5023 100644
+--- a/src/styles.css
++++ b/src/styles.css
+@@ -560,6 +560,10 @@ body.linuxOverlay .meter {
+ .header .headerBtns .updatesBtn { color: #3ddc84; }
+ .header .headerBtns .updatesBtn:hover { color: #7af0ae; }
+ .header .headerBtns .updatesBtn[hidden] { display: none; }
++/* Clicktrough: the plugin window's button; lit while the window is shown. */
++.header .headerBtns .pluginsBtn[hidden] { display: none; }
++.header .headerBtns .pluginsBtn.isActive { color: var(--accent, #8fc2ff); }
++.header .headerBtns .pluginsBtn.isActive:hover { color: #fff; }
+ 
+ /* ---------- boss HP: the waterline ---------- */
+ 
+diff --git a/tests/plugins-button.test.mjs b/tests/plugins-button.test.mjs
+new file mode 100644
+index 0000000..41d2a5d
+--- /dev/null
++++ b/tests/plugins-button.test.mjs
+@@ -0,0 +1,70 @@
++// Clicktrough: the meter's plugins button (pluginsButton.js) shows or hides
++// the plugin window through dock_toggle and follows dock-status.
++import assert from "node:assert/strict";
++import { readFileSync } from "node:fs";
++import test from "node:test";
++import vm from "node:vm";
++
++const source = readFileSync(new URL("../public/src/js/pluginsButton.js", import.meta.url), "utf8");
++const tick = () => new Promise((resolve) => setImmediate(resolve));
++
++function setup({ view = "main", status = { available: true, shown: false }, toggled = { available: true, shown: true } } = {}) {
++  const calls = [];
++  const listeners = {};
++  const attrs = { "aria-label": "Show or hide the plugin window" };
++  const classes = new Set();
++  const handlers = {};
++  const btn = {
++    hidden: true,
++    title: "",
++    classList: { toggle: (name, on) => (on ? classes.add(name) : classes.delete(name)) },
++    setAttribute: (k, v) => { attrs[k] = v; },
++    getAttribute: (k) => attrs[k],
++    addEventListener: (name, handler) => { handlers[name] = handler; },
++  };
++  const window = {
++    A2_VIEW: view,
++    _dpsApp: { _sendLockBtnRect: () => calls.push("lockRect") },
++    __TAURI__: {
++      core: { invoke: (command) => { calls.push(command); return Promise.resolve(command === "dock_toggle" ? toggled : status); } },
++      event: { listen: (name, handler) => { listeners[name] = handler; return Promise.resolve(); } },
++    },
++  };
++  const document = { readyState: "complete", querySelector: (s) => (s === ".pluginsBtn" ? btn : null) };
++  vm.runInContext(source, vm.createContext({ window, document, Promise, requestAnimationFrame: (f) => f() }));
++  return { btn, calls, listeners, handlers, attrs, classes };
++}
++
++test("shows the button while the dock has plugins, lit while it is shown", async () => {
++  const app = setup({ status: { available: true, shown: true } });
++  await tick();
++  assert.equal(app.btn.hidden, false);
++  assert.ok(app.classes.has("isActive"));
++  assert.equal(app.attrs["aria-pressed"], "true");
++  assert.ok(app.calls.includes("lockRect"), "the lock button's place is sent again");
++});
++
++test("a click toggles the dock and follows its answer", async () => {
++  const app = setup();
++  await tick();
++  assert.equal(app.classes.has("isActive"), false);
++  let stopped = false;
++  app.handlers.click({ stopPropagation: () => { stopped = true; } });
++  await tick();
++  assert.equal(stopped, true, "the click doesn't reach the header (no drag)");
++  assert.ok(app.calls.includes("dock_toggle"));
++  assert.ok(app.classes.has("isActive"));
++});
++
++test("follows dock-status from the backend, and hides with no plugins", async () => {
++  const app = setup();
++  await tick();
++  app.listeners["dock-status"]({ payload: { available: false, shown: false } });
++  assert.equal(app.btn.hidden, true);
++});
++
++test("only in the meter's window", async () => {
++  const app = setup({ view: "details" });
++  await tick();
++  assert.deepEqual(app.calls, []);
++});
+-- 
+2.43.0
+
