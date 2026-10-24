@@ -5,8 +5,15 @@ name: Clicktrough release
 # als Release dieses Repos. Plugins mit Anpassungen (clicktrough/plugins/<id>)
 # kommen aus taengu/A2Tools-Plugins, werden angepasst und im Paket mitgeliefert
 # (data/ct-plugins, siehe Patch 0004); ändert sich so ein Plugin im Original,
-# wird ebenfalls neu gebaut. Das Meter aus diesem Repo holt seine Updates von
-# hier (releases/latest/download/latest-v2.json, siehe Patch 0003).
+# wird ebenfalls neu gebaut. Eigene Plugins dieses Repos
+# (clicktrough/own-plugins/<id>) kommen ebenfalls ins Paket. Das Meter aus
+# diesem Repo holt seine Updates von hier (releases/latest/download/latest-v2.json,
+# siehe Patch 0003).
+#
+# clicktrough/backports: Korrekturen, die das Original schon gemacht, aber noch
+# nicht als Version veröffentlicht hat. Sie kommen vor die Patches; enthält die
+# gebaute Version den Commit schon (erste Zeile des Patches), wird er
+# übersprungen.
 #
 # Passt ein Patch nicht mehr auf eine neue Version, wird nichts veröffentlicht:
 # Das installierte Meter bleibt, wie es ist, und es öffnet sich ein Issue.
@@ -18,7 +25,9 @@ on:
     branches: [main]
     paths:
       - "clicktrough/patches/**"
+      - "clicktrough/backports/**"
       - "clicktrough/plugins/**"
+      - "clicktrough/own-plugins/**"
       - ".github/workflows/clicktrough-release.yml"
   workflow_dispatch:
     inputs:
@@ -74,9 +83,10 @@ jobs:
             done
           fi
           echo "plugins_commit=$plugins_commit" >> "$GITHUB_OUTPUT"
-          # Ein Release je Version des Originals, Stand der Patches und Stand
-          # der angepassten Plugins.
-          hash=$( { cat clicktrough/patches/*.patch; cat clicktrough/plugins/*/*.patch 2>/dev/null || true; echo "$plugins_state"; } \
+          # Ein Release je Version des Originals, Stand der Patches, Stand
+          # der angepassten Plugins und Stand der eigenen Plugins.
+          hash=$( { cat clicktrough/patches/*.patch; cat clicktrough/plugins/*/*.patch 2>/dev/null || true; echo "$plugins_state";
+                    cat clicktrough/backports/*.patch 2>/dev/null || true; git ls-files -s clicktrough/own-plugins; } \
             | sha256sum | cut -c1-8)
           release="${tag}-ct-${hash}"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
@@ -109,7 +119,7 @@ jobs:
         run: |
           exec > >(tee -a "$GITHUB_WORKSPACE/ct-build.log") 2>&1
           echo "== Werkzeuge"
-          pacman -Syu --noconfirm --needed git github-cli rust nodejs npm pkgconf \
+          pacman -Syu --noconfirm --needed git github-cli rust nodejs npm pkgconf python \
             webkit2gtk-4.1 gtk3 libpcap libcap hicolor-icon-theme gst-plugins-base gst-plugins-good
           git config --global --add safe.directory '*'
       - uses: actions/checkout@v7
@@ -124,6 +134,17 @@ jobs:
           git clone --filter=blob:none "$UPSTREAM" src
           cd src
           git checkout -q --detach "$TAG"
+          # Vorgezogene Korrekturen des Originals, die diese Version noch nicht hat.
+          for p in ../fork/clicktrough/backports/*.patch; do
+            [ -e "$p" ] || continue
+            sha=$(sed -n '1s/^From \([0-9a-f]\{40\}\) .*/\1/p' "$p")
+            if [ -n "$sha" ] && git merge-base --is-ancestor "$sha" HEAD 2>/dev/null; then
+              echo "Schon in ${TAG}: $(basename "$p")"
+              continue
+            fi
+            git -c user.name="Clicktrough" -c user.email="clicktrough@users.noreply.github.com" am "$p"
+          done
+          git rev-parse HEAD > "$GITHUB_WORKSPACE/ct-backported"
           git -c user.name="Clicktrough" -c user.email="clicktrough@users.noreply.github.com" \
             am ../fork/clicktrough/patches/*.patch
           # Welcher Build dieses Repos das ist: das Meter erkennt daran ein
@@ -152,6 +173,25 @@ jobs:
             cp -r "plugins-up/plugins/$id" "src/src/data/ct-plugins/$id"
             echo "$id $(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "plugins-up/plugins/$id/manifest.json" | head -n1)"
           done
+      - name: Eigene Plugins mitliefern
+        run: |
+          exec > >(tee -a "$GITHUB_WORKSPACE/ct-build.log") 2>&1
+          echo "== Eigene Plugins mitliefern"
+          set -euo pipefail
+          for d in fork/clicktrough/own-plugins/*/; do
+            [ -f "$d/manifest.json" ] || continue
+            id=$(basename "$d")
+            dest="src/src/data/ct-plugins/$id"
+            if [ -e "$dest" ]; then
+              echo "$id gibt es schon unter den angepassten Plugins." >&2
+              exit 1
+            fi
+            mkdir -p "$dest"
+            cp -r "$d/." "$dest/"
+            # Entwicklerwerkzeuge und Tests gehören nicht ins Paket.
+            rm -rf "$dest/dev"
+            echo "$id $(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$dest/manifest.json" | head -n1)"
+          done
       - name: Arch-Paket bauen
         run: |
           exec > >(tee -a "$GITHUB_WORKSPACE/ct-build.log") 2>&1
@@ -175,6 +215,12 @@ jobs:
               for (const f of process.argv.slice(1)) new vm.Script(fs.readFileSync(f, "utf8"), { filename: f });' \
               src/src/data/ct-plugins/*/*.js
           fi
+          # Eigene Plugins mit eigenen Tests: gegen den Code dieser Version.
+          for t in fork/clicktrough/own-plugins/*/dev/ci.sh; do
+            [ -e "$t" ] || continue
+            echo "-- $t"
+            su - builder -c "cd '$GITHUB_WORKSPACE' && bash '$t' src"
+          done
           echo ok
       - name: Veröffentlichen
         run: |
@@ -193,10 +239,26 @@ jobs:
           {
             echo "A2Tools DPS Meter **${version}** vom Original-Autor, neu gebaut mit den Anpassungen dieses Repos (Build ${REVISION})."
             echo
+            backported=$(cat ct-backported)
             echo "**Anpassungen:**"
-            git -C src log --reverse --format='- %s' "${TAG}..HEAD"
+            git -C src log --reverse --format='- %s' "${backported}..HEAD"
             if [ -n "$PLUGINS_COMMIT" ]; then
               git -C plugins-up log --reverse --format='- %s' "${PLUGINS_COMMIT}..HEAD"
+            fi
+            own=$(for m in fork/clicktrough/own-plugins/*/manifest.json; do
+              [ -e "$m" ] || continue
+              printf -- '- %s %s\n' "$(sed -n 's/.*"name": *"\([^"]*\)".*/\1/p' "$m" | head -n1)" \
+                "$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$m" | head -n1)"
+            done)
+            if [ -n "$own" ]; then
+              echo
+              echo "**Mitgelieferte Plugins dieses Repos:**"
+              echo "$own"
+            fi
+            if [ "$backported" != "$(git -C src rev-parse "${TAG}^{commit}")" ]; then
+              echo
+              echo "**Aus dem Original vorgezogen** (kommt mit dessen nächster Version von selbst):"
+              git -C src log --reverse --format='- %s' "${TAG}..${backported}"
             fi
             echo
             echo "**Erstinstallation:** \`${name}\` herunterladen, dann \`sudo pacman -U ${name}\`."

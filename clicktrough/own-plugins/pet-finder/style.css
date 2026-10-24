@@ -1,0 +1,98 @@
+/* The host window paints the panel; the page stays transparent. */
+[hidden] { display: none !important; }
+html, body { margin: 0; background: transparent; color: rgba(255,255,255,.9);
+  font: 13px/1.35 "Segoe UI", system-ui, sans-serif; }
+body { padding: 8px 10px 12px; box-sizing: border-box; }
+button, input, select { font: inherit; color: inherit; }
+button { background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14);
+  border-radius: 4px; padding: 2px 8px; cursor: pointer; }
+button:hover { background: rgba(255,255,255,.16); }
+input[type=search] { background: rgba(0,0,0,.35); border: 1px solid rgba(255,255,255,.18);
+  border-radius: 5px; padding: 5px 8px; }
+input[type=checkbox] { accent-color: #6aa9ff; margin: 0; }
+.muted { color: rgba(255,255,255,.55); font-size: 12px; }
+.who { color: rgba(255,255,255,.85); font-weight: 600; }
+.totals { font-weight: 600; margin-top: 2px; }
+#status { margin-bottom: 8px; }
+
+#tabs { display: flex; gap: 4px; margin-bottom: 8px; }
+.tab { flex: 1; background: none; border: 0; border-bottom: 2px solid transparent; border-radius: 0;
+  padding: 5px 2px; color: rgba(255,255,255,.55); }
+.tab.on { color: #fff; border-bottom-color: #6aa9ff; }
+.tab:hover { background: none; color: #fff; }
+
+.controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
+.check { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.keep { display: inline-flex; align-items: center; gap: 0; color: rgba(255,255,255,.6); }
+.keep span { margin-right: 6px; }
+.seg { border-radius: 0; padding: 1px 7px; font-size: 12px; margin-left: -1px; }
+.seg:first-of-type { border-radius: 4px 0 0 4px; }
+.seg:last-of-type { border-radius: 0 4px 4px 0; }
+.seg.on { background: rgba(106,169,255,.28); border-color: rgba(106,169,255,.7); color: #fff; }
+.small { padding: 1px 8px; font-size: 12px; }
+.empty { color: rgba(255,255,255,.55); font-size: 12px; margin: 10px 2px; }
+
+.searchBox input[type=search] { width: 100%; box-sizing: border-box; margin-bottom: 6px; }
+.searchBox input[type=search]:focus { outline: none; border-color: #6aa9ff; }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
+.chip { border-radius: 999px; padding: 1px 10px; font-size: 12px; }
+.chip.on { background: rgba(106,169,255,.28); border-color: rgba(106,169,255,.7); }
+.count { margin: 6px 0 2px; }
+.more { display: block; margin: 8px auto 0; }
+
+.rows { list-style: none; margin: 0; padding: 0; }
+.row { display: grid; grid-template-columns: 40px 1fr auto; gap: 8px; align-items: start;
+  padding: 7px 2px; border-bottom: 1px solid rgba(255,255,255,.07); }
+.row.pinned { background: rgba(255,214,102,.06); }
+.portrait { width: 40px; height: 40px; border-radius: 6px; background: rgba(255,255,255,.05); overflow: hidden; }
+.portrait img { width: 40px; height: 40px; object-fit: cover; display: block; }
+.main { min-width: 0; }
+.title { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.name { font-weight: 600; }
+.family { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; color: rgba(255,255,255,.7); }
+.family img { width: 13px; height: 13px; }
+.mobs, .source, .maps { font-size: 12px; color: rgba(255,255,255,.65); margin-top: 3px; }
+.label { color: rgba(255,255,255,.45); }
+.window { color: rgba(255,255,255,.4); font-size: 11px; margin-top: 1px; }
+.maps { display: flex; gap: 4px; flex-wrap: wrap; }
+.mapLink { color: #9cc4ff; text-decoration: none; border: 1px solid rgba(156,196,255,.35); border-radius: 4px; padding: 0 6px; }
+.mapLink:hover { background: rgba(156,196,255,.12); }
+.progress { display: grid; grid-template-columns: auto 1fr; gap: 0 8px; align-items: center; margin-top: 3px; font-size: 12px; }
+.progress:empty { display: none; }
+.rankText { color: rgba(255,255,255,.6); }
+.count { justify-self: end; font-variant-numeric: tabular-nums; }
+.progress .count { margin: 0; font-weight: 600; }
+.bar { grid-column: 1 / -1; height: 4px; border-radius: 2px; background: rgba(255,255,255,.1); overflow: hidden; margin-top: 3px; }
+.fill { height: 100%; background: #e2b33c; }
+.bar.maxed .fill { background: #6fcf7f; }
+.side { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.pin { background: none; border: 0; font-size: 16px; line-height: 1; padding: 0 2px; color: rgba(255,255,255,.45); }
+.pin.on { color: #ffd666; }
+.pin:hover { background: none; color: #ffd666; }
+.seen { font-size: 11px; color: rgba(255,255,255,.45); white-space: nowrap; }
+
+/* The window's fold button: the nearby list only. */
+body.compact #status { display: none; }
+
+.section { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: rgba(255,255,255,.5);
+  margin: 14px 0 4px; font-weight: 600; }
+.row.offer { background: rgba(106,169,255,.07); }
+.row.done { opacity: .75; }
+.price { font-weight: 700; color: #ffd666; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.bought { color: #6fcf7f; font-size: 12px; white-space: nowrap; }
+.rows.small .portrait, .rows.small .portrait img { width: 30px; height: 30px; }
+.rows.small .row { grid-template-columns: 30px 1fr auto; padding: 4px 2px; }
+
+.empty.warn { color: #ffd666; }
+.section.first { margin-top: 2px; }
+
+/* Merchant: the layout button (neutral, like the buttons of the meter), and
+   the sections side by side, a column each; too narrow, they wrap. */
+#tabs .layoutBtn { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; height: 22px; padding: 0; align-self: center;
+  color: rgba(255,255,255,.55); background: transparent; border-color: rgba(255,255,255,.12); }
+#tabs .layoutBtn:hover { color: rgba(255,255,255,.9); border-color: rgba(255,255,255,.3); background: transparent; }
+#tabs .layoutBtn[aria-pressed="true"] { color: rgba(255,255,255,.9); border-color: rgba(255,255,255,.35); }
+.merchantCols { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 0 20px; align-items: start; }
+.merchantCol { min-width: 0; }
+.merchantCol > :first-child { margin-top: 2px; }

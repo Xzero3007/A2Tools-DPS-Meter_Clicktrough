@@ -15,6 +15,18 @@ automatisch mit diesen Anpassungen neu:
 | 0008 | **Plugin-Knopf am Meter**: Das Puzzle-Symbol im Kopf des Meters blendet das Plugin-Fenster (Dock) aus und wieder ein, mit den Tabs, die offen waren. Es ist etwas heller, solange das Dock zu sehen ist (keine eigene Farbe), und fehlt, solange kein Plugin im Dock ist. Gesperrt bleibt es klickbar. |
 | 0009 | **Schriftgröße je Plugin**: Zwei Knöpfe (Schrift kleiner / größer) in der Leiste des Docks und im eigenen Plugin-Fenster stellen die Schriftgröße des Plugins ein, 60 % bis 125 %. Gilt pro Plugin, im Dock wie im eigenen Fenster gleich, und bleibt gespeichert. Das Plugin bekommt dabei entsprechend mehr Platz. |
 
+### Vorgezogen aus dem Original
+
+`clicktrough/backports/` enthält Korrekturen, die der Original-Autor schon
+gemacht, aber noch in keiner Version veröffentlicht hat. Sie kommen vor die
+Patches. Enthält eine neue Version des Originals den Commit schon (er steht in
+der ersten Zeile jedes Patches), lässt der Build ihn weg; danach kann die Datei
+gelöscht werden.
+
+| Korrektur | Was sie macht |
+|---|---|
+| 0001–0004 (taengu, 24.10.2026) | **Hängender Tooltip am Meter**: Das Info-Fenster beim Drüberfahren über eine Zeile (Schaden, DPS, Fähigkeiten) blieb unter Linux/Wayland stehen, wenn das Meter das Verlassen der Zeile nicht mitbekam, etwa weil die Maus ins Spiel ging. Jetzt schließt es, sobald die Maus das Fenster verlässt, nach 4 s ohne Mausbewegung über dem Meter und wenn seine Zeile verschwindet (neuer Kampf, Zurücksetzen, Meter eingeklappt). |
+
 ### Angepasste Plugins
 
 | Plugin | Was anders ist |
@@ -26,6 +38,20 @@ Die Anpassungen liegen in `clicktrough/plugins/<id>/`. Ändert der Autor so ein
 Plugin, baut der Automat das Paket neu, und das Update kommt über den grünen
 Knopf. In den Einstellungen steht bei so einem Plugin „Dev“, weil es nicht aus
 dem geprüften Katalog kommt.
+
+### Eigene Plugins
+
+| Plugin | Was es macht |
+|---|---|
+| Pet Finder | Pet-Mobs in der Nähe, Suche über alle Pets (Rang, Seelen, wer die Seelen droppt, Karten) und eine Einkaufsliste für den Black Cloud Merchant; Daten und Paket-Layouts aus [PetTracker](https://github.com/0Fox2Give/PetTracker) (GPLv3). Der Knopf rechts neben den Tabs stellt im **Händler**-Tab die drei Listen als Spalten nebeneinander, als breiter Balken; zu schmal dafür, rutschen sie untereinander. |
+
+Sie liegen vollständig in `clicktrough/own-plugins/<id>/` und kommen mit jedem
+Paket, ohne Installation und ohne Entwicklermodus. Was in `dev/` liegt
+(Datengenerator, Tests), bleibt draußen; `dev/ci.sh` prüft das Plugin bei jedem
+Build gegen den Plugin-Decoder der gebauten Meter-Version. Wer so ein Plugin
+früher über „Plugin-Ordner laden“ eingebunden hat: Der Entwicklerordner hat
+Vorrang vor der mitgelieferten Kopie, also dort entfernen. Einstellungen und
+gespeicherte Daten bleiben, sie hängen an der ID.
 
 ## Erstinstallation (Arch, CachyOS, EndeavourOS)
 
@@ -42,8 +68,11 @@ wie gewohnt nach dem Passwort.
 
 * Alle zwei Stunden sieht der Workflow [Clicktrough release](../.github/workflows/clicktrough-release.yml)
   nach, ob das Original eine neue Version hat.
-* Gibt es eine, setzt er die Patches aus `clicktrough/patches/` darauf, baut das
-  Arch-Paket, prüft es mit den Tests des Projekts und veröffentlicht es als Release.
+* Gibt es eine, setzt er die vorgezogenen Korrekturen aus `clicktrough/backports/`
+  (soweit die Version sie noch nicht hat) und die Patches aus `clicktrough/patches/`
+  darauf, legt die angepassten und eigenen Plugins dazu, baut das Arch-Paket,
+  prüft es mit den Tests des Projekts und der Plugins und veröffentlicht es als
+  Release.
 * Passt ein Patch nicht mehr (der Original-Autor hat genau diese Stellen geändert),
   wird **nichts** veröffentlicht: Dein Meter bleibt auf der letzten
   funktionierenden Version, und es öffnet sich ein Issue. Dann wird der Patch
@@ -55,10 +84,12 @@ bestimmten Version, z. B. `v2.0.76`).
 
 ## Ohne GitHub bauen
 
-`clicktrough/a2tools-rebuild.sh` baut dasselbe lokal: Original holen, Patches
-anwenden, `makepkg`, installieren.
+`clicktrough/a2tools-rebuild.sh` baut dasselbe lokal: Original holen,
+Korrekturen und Patches anwenden, Plugins dazulegen, `makepkg`, installieren.
 
 ## Lizenz
 
 Wie das Original GPL-3.0 (siehe `LICENSE`). Der Quellcode jedes Pakets ist das
-Original zum jeweiligen Versions-Tag plus die Patches in diesem Ordner.
+Original zum jeweiligen Versions-Tag plus die Korrekturen und Patches in diesem
+Ordner. Pet Finder steht unter GPL-3.0-or-later (`own-plugins/pet-finder/LICENSE`);
+Namen und Bilder aus Aion 2 gehören ihren Rechteinhabern.
