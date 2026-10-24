@@ -1,0 +1,840 @@
+From 2631da1c570523c322f66d6f2c8a4d9bc7da4aa0 Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Sat, 24 Oct 2026 10:31:21 +0000
+Subject: [PATCH 7/7] Locked windows keep their buttons clickable
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Locked, a window let all of the mouse through but its scroll strip, so
+none of its buttons could be reached: not History from the meter, not
+Details' History button, not the plugin dock's tabs. Each page now tells
+the backend where its buttons are (lockedButtons.js, set_locked_buttons),
+and while the window is locked those rectangles stay in its input region
+next to the lock button and the scroll strip; everywhere else clicks go
+to the game. They follow the page: a menu that opens, the meter growing,
+the window resized.
+
+Kept clickable: the meter's header and footer buttons (not reset and the
+capture switch, so a stray click can't end a fight's numbers), Details'
+header and its settings menu, Battle History's header and filters, the
+plugin dock's bar, tabs and panel bars, and plugins' bars. Settings →
+Meter Settings → "Locked: buttons stay clickable", on unless turned off.
+Not while a screenshot tool is in front. Linux; on Windows the lock is a
+pointer watch and this does nothing.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01RBQati3x8VviBbpY9juEWf
+---
+ index.html                                   |   8 ++
+ public/plugin-dock.html                      |   1 +
+ public/plugin-host.html                      |   1 +
+ public/src/js/core.js                        |  10 ++
+ public/src/js/lockedButtons.js               | 108 ++++++++++++++++++
+ src-tauri/src/app.rs                         |  40 ++++++-
+ src-tauri/src/platform/linux/window.rs       | 109 ++++++++++++++++---
+ src-tauri/src/platform/unsupported/window.rs |   5 +
+ src-tauri/src/platform/win32/window.rs       |   5 +
+ src/data/i18n/ui/de.json                     |   2 +
+ src/data/i18n/ui/en.json                     |   2 +
+ src/data/i18n/ui/es.json                     |   2 +
+ src/data/i18n/ui/fr.json                     |   2 +
+ src/data/i18n/ui/ja.json                     |   2 +
+ src/data/i18n/ui/ko.json                     |   2 +
+ src/data/i18n/ui/pt.json                     |   2 +
+ src/data/i18n/ui/ru.json                     |   2 +
+ src/data/i18n/ui/zh-Hans.json                |   2 +
+ src/data/i18n/ui/zh-Hant.json                |   2 +
+ tests/locked-buttons.test.mjs                | 106 ++++++++++++++++++
+ 20 files changed, 399 insertions(+), 14 deletions(-)
+ create mode 100644 public/src/js/lockedButtons.js
+ create mode 100644 tests/locked-buttons.test.mjs
+
+diff --git a/index.html b/index.html
+index deda02c..cc456b4 100644
+--- a/index.html
++++ b/index.html
+@@ -765,6 +765,13 @@
+                       <span class="settingsToggleTrack" aria-hidden="true"></span>
+                     </span>
+                   </label>
++                  <label class="settingsToggle lockSetting" style="display:none">
++                    <span class="settingsToggleLabel settingsLabel" data-i18n="settings.lockButtons" title="While locked, the windows' buttons stay clickable: the meter's header and footer buttons (not reset and capture), Details' and Battle History's headers, the plugin dock's tabs and plugins' bars. Everywhere else clicks go to the game." data-i18n-title="settings.tips.lockButtons">Locked: buttons stay clickable</span>
++                    <span class="settingsToggleControl">
++                      <input type="checkbox" class="lockButtonsCheckbox" />
++                      <span class="settingsToggleTrack" aria-hidden="true"></span>
++                    </span>
++                  </label>
+                 </div>
+               </section>
+               <section class="settingsSection" id="settingsSection-appearance" role="tabpanel" aria-labelledby="settingsTab-appearance" data-section="appearance" hidden>
+@@ -1551,6 +1558,7 @@
+ 
+     <script src="/src/js/i18n.js"></script>
+     <script src="/src/js/core.js?v=2076a"></script>
++    <script src="/src/js/lockedButtons.js"></script>
+     <script src="/src/js/pluginIcons.js"></script>
+     <script src="/src/js/pluginSettings.js"></script>
+   </body>
+diff --git a/public/plugin-dock.html b/public/plugin-dock.html
+index b04c1e1..130de5a 100644
+--- a/public/plugin-dock.html
++++ b/public/plugin-dock.html
+@@ -50,5 +50,6 @@
+     <script src="/src/js/pluginIcons.js"></script>
+     <script src="/src/js/pluginFrame.js"></script>
+     <script src="/src/js/pluginDock.js"></script>
++    <script src="/src/js/lockedButtons.js"></script>
+   </body>
+ </html>
+diff --git a/public/plugin-host.html b/public/plugin-host.html
+index 529b6a7..05a4b87 100644
+--- a/public/plugin-host.html
++++ b/public/plugin-host.html
+@@ -30,5 +30,6 @@
+     <div class="pluginToast" role="status" hidden></div>
+     <script src="/src/js/pluginFrame.js"></script>
+     <script src="/src/js/pluginHost.js"></script>
++    <script src="/src/js/lockedButtons.js"></script>
+   </body>
+ </html>
+diff --git a/public/src/js/core.js b/public/src/js/core.js
+index 2a49919..093fbc0 100644
+--- a/public/src/js/core.js
++++ b/public/src/js/core.js
+@@ -57,6 +57,7 @@ const REMOTE_APPLIED_SETTING_CONTROLS = {
+   "dpsMeter.showLockBtn": ".showLockBtnCheckbox",
+   "dpsMeter.lockAllWindows": ".lockAllWindowsCheckbox",
+   "dpsMeter.lockScrollEdge": ".lockScrollEdgeCheckbox",
++  "dpsMeter.lockButtons": ".lockButtonsCheckbox",
+   // Set from the main window by the account offer.
+   "dpsMeter.autoUpload": ".autoUploadCheckbox",
+ };
+@@ -150,6 +151,7 @@ class DpsApp {
+       showLockBtn: "dpsMeter.showLockBtn",
+       lockAllWindows: "dpsMeter.lockAllWindows",
+       lockScrollEdge: "dpsMeter.lockScrollEdge",
++      lockButtons: "dpsMeter.lockButtons",
+       overlayLocked: "dpsMeter.overlayLocked",
+     };
+ 
+@@ -6805,6 +6807,7 @@ class DpsApp {
+     this.showLockBtnCheckbox = document.querySelector(".showLockBtnCheckbox");
+     this.lockAllWindowsCheckbox = document.querySelector(".lockAllWindowsCheckbox");
+     this.lockScrollEdgeCheckbox = document.querySelector(".lockScrollEdgeCheckbox");
++    this.lockButtonsCheckbox = document.querySelector(".lockButtonsCheckbox");
+     const isOverlay = window.A2_VIEW === "main";
+     Promise.resolve(window.javaBridge?.overlayLockSupported?.())
+       .then((supported) => {
+@@ -6835,6 +6838,13 @@ class DpsApp {
+             this.safeSetSetting(this.storageKeys.lockScrollEdge, String(!!event.target?.checked));
+           });
+         }
++        if (this.lockButtonsCheckbox) {
++          // On unless turned off.
++          this.lockButtonsCheckbox.checked = this.safeGetSetting(this.storageKeys.lockButtons) !== "false";
++          this.lockButtonsCheckbox.addEventListener("change", (event) => {
++            this.safeSetSetting(this.storageKeys.lockButtons, String(!!event.target?.checked));
++          });
++        }
+         if (!isOverlay) return;
+         this._applyLockBtnVisibility(show);
+         window.addEventListener("resize", () => this._sendLockBtnRect());
+diff --git a/public/src/js/lockedButtons.js b/public/src/js/lockedButtons.js
+new file mode 100644
+index 0000000..b64d7b2
+--- /dev/null
++++ b/public/src/js/lockedButtons.js
+@@ -0,0 +1,108 @@
++// Clicktrough: while the meter's windows are locked (click-through), their
++// buttons stay clickable. Each page tells the backend where its buttons are,
++// and the backend keeps those rectangles in the window's input region next to
++// the lock button and the scroll strip (platform/linux/window.rs,
++// set_locked_buttons); everywhere else clicks still go to the game. Settings
++// → Meter Settings → "Locked: buttons stay clickable", on unless turned off
++// (the backend decides; the pages always report). Linux only: on Windows the
++// lock works by a pointer watch, not a region.
++(() => {
++  const invoke = window.__TAURI__?.core?.invoke;
++  if (typeof invoke !== "function" || !/Linux/.test(navigator.userAgent || "")) return;
++
++  const path = String(window.location?.pathname || "");
++  const view = path.endsWith("plugin-dock.html") ? "dock"
++    : path.endsWith("plugin-host.html") ? "plugin"
++    : window.A2_VIEW || window.__A2_VIEW__ || "main";
++
++  // What stays clickable in each window: the controls that open, close and
++  // switch windows, views and tabs, and the menus they open. Not the meter's
++  // reset and capture switch, so a stray click can't end a fight's numbers.
++  const BUTTONS = {
++    main: ".headerBtns .headerBtn:not(.resetBtn):not(.suspendBtn), .footerBtns .footerBtn",
++    details: ".detailsHeader button, .detailsHeader .closeX, .detailsSettingsMenu",
++    history: ".historyHeader button, .historyHeader .closeX, .historyFilters select,"
++      + " .historyFilters .historyClassDropdownTrigger, .historyFilters .historyClassDropdownMenu",
++    dock: ".dockBar button, .dockBar input, .dockPanelBar button",
++    plugin: ".pluginBar button, .pluginBar input",
++  };
++  const selector = BUTTONS[view];
++  if (!selector) return; // Settings never locks.
++
++  // A little room around each, so a click on a button's rim isn't lost.
++  const PAD = 2;
++
++  const shown = (el) => {
++    if (!el.getClientRects().length) return false; // display: none, or detached
++    const style = getComputedStyle(el);
++    return style.visibility !== "hidden" && style.pointerEvents !== "none" && Number(style.opacity) !== 0;
++  };
++
++  const measure = () => {
++    const width = window.innerWidth;
++    const height = window.innerHeight;
++    const rects = [];
++    for (const el of document.querySelectorAll(selector)) {
++      if (!shown(el)) continue;
++      const r = el.getBoundingClientRect();
++      const left = Math.max(0, r.left - PAD);
++      const top = Math.max(0, r.top - PAD);
++      const right = Math.min(width, r.right + PAD);
++      const bottom = Math.min(height, r.bottom + PAD);
++      if (right - left < 1 || bottom - top < 1) continue;
++      rects.push([left, top, right - left, bottom - top].map((v) => Math.round(v * 2) / 2));
++    }
++    return rects.slice(0, 64);
++  };
++
++  let sent = "";
++  let pending = false;
++  const report = () => {
++    pending = false;
++    const rects = measure();
++    const scale = window.devicePixelRatio || 1;
++    const key = JSON.stringify([rects, scale]);
++    if (key === sent) return;
++    sent = key;
++    Promise.resolve(invoke("set_locked_buttons", { rects, scale })).catch(() => { sent = ""; });
++  };
++  const schedule = () => {
++    if (pending) return;
++    pending = true;
++    (window.requestAnimationFrame || setTimeout)(report);
++  };
++
++  const start = () => {
++    // Where the buttons live, so the meter's rows updating don't count; the
++    // meter's own size does (its footer moves as rows come and go).
++    const ROOTS = {
++      main: [".header", ".meterFooter"],
++      details: [".detailsHeader"],
++      history: [".historyHeader", ".historyFilters"],
++      dock: ["body"],
++      plugin: [".pluginBar"],
++    };
++    const roots = ROOTS[view].map((s) => document.querySelector(s)).filter(Boolean);
++    if (typeof MutationObserver === "function") {
++      const observer = new MutationObserver(schedule);
++      for (const root of roots) {
++        observer.observe(root, {
++          subtree: true, childList: true, attributes: true,
++          attributeFilter: ["class", "style", "hidden", "open", "aria-hidden", "aria-pressed"],
++        });
++      }
++    }
++    if (typeof ResizeObserver === "function") {
++      const resized = new ResizeObserver(schedule);
++      for (const el of [document.body, document.querySelector(".meter"), ...roots]) if (el) resized.observe(el);
++    }
++    window.addEventListener("resize", schedule);
++    for (const name of ["scroll", "transitionend", "animationend"]) document.addEventListener(name, schedule, { capture: true, passive: true });
++    document.fonts?.ready?.then(schedule).catch(() => {});
++    schedule();
++  };
++  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start, { once: true });
++  else start();
++
++  window.__a2LockedButtons = { measure, report, view, selector };
++})();
+diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
+index 3ece757..13f5248 100644
+--- a/src-tauri/src/app.rs
++++ b/src-tauri/src/app.rs
+@@ -344,6 +344,17 @@ pub const LOCK_ALL_WINDOWS_KEY: &str = "dpsMeter.lockAllWindows";
+ /// unless turned off.
+ pub const LOCK_SCROLL_EDGE_KEY: &str = "dpsMeter.lockScrollEdge";
+ 
++/// While locked, the windows' buttons stay clickable (the overlay's header and
++/// footer buttons but reset and capture, Details' and History's headers, the
++/// plugin dock's tabs and bars, plugins' bars); the rest lets clicks through.
++/// On unless turned off. Linux (an input region, see lockedButtons.js).
++pub const LOCK_BUTTONS_KEY: &str = "dpsMeter.lockButtons";
++
++fn lock_buttons_on(app: &tauri::AppHandle) -> bool {
++    app.try_state::<AppState>()
++        .is_none_or(|s| s.settings.get(LOCK_BUTTONS_KEY).as_deref() != Some("false"))
++}
++
+ /// The overlay is locked and "Lock all meter windows" is on.
+ static ALL_WINDOWS_LOCKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+ 
+@@ -378,11 +389,13 @@ pub fn sync_other_windows(app: &tauri::AppHandle) {
+     let edge = app
+         .try_state::<AppState>()
+         .is_none_or(|s| s.settings.get(LOCK_SCROLL_EDGE_KEY).as_deref() != Some("false"));
++    let buttons = lock_buttons_on(app);
+     for (label, window) in app.webview_windows() {
+         let Some(ignore) = other_window_ignores(&label, screenshot, locked) else { continue };
+         // Locked, not while a screenshot tool is in front (its selection is
+         // dragged across them).
+         platform::window::set_scroll_edge(&window, edge && locked && !screenshot && label != "settings");
++        platform::window::set_locked_buttons_active(&window, buttons && locked && !screenshot && label != "settings");
+         if !platform::window::click_through_except(&window, ignore, None) && !cfg!(target_os = "linux") {
+             let _ = window.set_ignore_cursor_events(ignore);
+         }
+@@ -405,6 +418,10 @@ fn sync_click_through(app: &tauri::AppHandle, lock: &OverlayLock, over_button: b
+         || click_through(lock.locked.load(Ordering::SeqCst), over_button, lock.card_open.load(Ordering::SeqCst));
+     // The region follows the button, so it is set again even unchanged.
+     if let Some(main) = app.get_webview_window("main") {
++        // Locked, its other buttons stay clickable too ("Locked: buttons stay
++        // clickable"), not while a screenshot tool is in front.
++        let keep_buttons = lock.locked.load(Ordering::SeqCst) && !screenshot_tool_in_front() && lock_buttons_on(app);
++        platform::window::set_locked_buttons_active(&main, keep_buttons);
+         if platform::window::click_through_except(&main, ignore, *lock.button.lock()) {
+             *applied = Some(ignore);
+             return;
+@@ -1121,9 +1138,15 @@ fn update_settings(
+         if HOTKEY_KEYS.contains(&key.as_str()) {
+             restart_global_hotkeys(&app);
+         }
+-        if key == LOCK_ALL_WINDOWS_KEY || key == LOCK_SCROLL_EDGE_KEY {
++        if key == LOCK_ALL_WINDOWS_KEY || key == LOCK_SCROLL_EDGE_KEY || key == LOCK_BUTTONS_KEY {
+             sync_other_windows(&app);
+         }
++        if key == LOCK_BUTTONS_KEY {
++            if let Some(state) = app.try_state::<AppState>() {
++                let lock = state.overlay_lock.clone();
++                sync_click_through(&app, &lock, false);
++            }
++        }
+         let _ = app.emit("setting-changed", serde_json::json!({ "key": key, "value": value }));
+         #[cfg(feature = "online")]
+         if key.starts_with(crate::stream_overlay::ENABLED_KEY) {
+@@ -1412,6 +1435,20 @@ fn set_overlay_card_open(app: tauri::AppHandle, open: bool) {
+     sync_click_through(&app, &lock, false);
+ }
+ 
++/// Where the calling window's buttons are (CSS px, and the page's scale), so
++/// they stay clickable while it is locked (`LOCK_BUTTONS_KEY`).
++#[tauri::command]
++fn set_locked_buttons(window: tauri::WebviewWindow, rects: Vec<[f64; 4]>, scale: f64) {
++    let scale = if scale.is_finite() && scale > 0.0 { scale } else { 1.0 };
++    let rects = rects
++        .into_iter()
++        .filter(|r| r.iter().all(|v| v.is_finite()) && r[2] > 0.0 && r[3] > 0.0)
++        .take(64)
++        .map(|[x, y, w, h]| (x, y, w, h))
++        .collect();
++    platform::window::set_locked_buttons(&window, rects, scale);
++}
++
+ /// Whether the meter's windows are locked with the overlay ("Lock all meter
+ /// windows"): a tool window then offers no resize at its edges.
+ #[tauri::command]
+@@ -4017,6 +4054,7 @@ pub fn run() {
+             set_overlay_card_open,
+             is_overlay_locked,
+             meter_windows_locked,
++            set_locked_buttons,
+             set_lock_button_rect,
+             is_capture_suspended,
+             resize_window,
+diff --git a/src-tauri/src/platform/linux/window.rs b/src-tauri/src/platform/linux/window.rs
+index 21ed7d9..d380cc5 100644
+--- a/src-tauri/src/platform/linux/window.rs
++++ b/src-tauri/src/platform/linux/window.rs
+@@ -213,7 +213,8 @@ fn input_region(window: &tauri::WebviewWindow, ignore: bool, keep: Option<Keep>)
+         if edge {
+             follow_size(&gtk_window, &label);
+         }
+-        apply_input_region(&gtk_window, ignore, keep, edge);
++        let buttons = if hidden { None } else { active_buttons(&label) };
++        apply_input_region(&gtk_window, ignore, keep, edge, buttons);
+         Some(())
+     })
+     .flatten()
+@@ -278,23 +279,87 @@ fn follow_size(gtk_window: &gtk::ApplicationWindow, label: &str) {
+         {
+             return;
+         }
+-        apply_input_region(w, true, keep, true);
++        apply_input_region(w, true, keep, true, active_buttons(&label));
+     });
+ }
+ 
+-fn apply_input_region(gtk_window: &gtk::ApplicationWindow, ignore: bool, keep: Option<Keep>, edge: bool) {
++/// Where each page's buttons are (`set_locked_buttons`), by label.
++fn locked_buttons() -> &'static std::sync::Mutex<std::collections::HashMap<String, Keep>> {
++    static BUTTONS: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, Keep>>> = std::sync::OnceLock::new();
++    BUTTONS.get_or_init(Default::default)
++}
++
++/// The windows whose buttons stay clickable while they let clicks through.
++fn buttons_kept() -> &'static std::sync::Mutex<std::collections::HashSet<String>> {
++    static KEPT: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> = std::sync::OnceLock::new();
++    KEPT.get_or_init(Default::default)
++}
++
++/// The buttons a window keeps clickable right now, if it does.
++fn active_buttons(label: &str) -> Option<Keep> {
++    if !buttons_kept().lock().unwrap_or_else(|p| p.into_inner()).contains(label) {
++        return None;
++    }
++    locked_buttons().lock().unwrap_or_else(|p| p.into_inner()).get(label).cloned()
++}
++
++/// Whether a window, while it lets clicks through, keeps its buttons
++/// clickable (the rectangles its page reports). Applies with the next
++/// `click_through_except`.
++pub fn set_locked_buttons_active(window: &tauri::WebviewWindow, on: bool) {
++    let mut kept = buttons_kept().lock().unwrap_or_else(|p| p.into_inner());
++    if on {
++        kept.insert(window.label().to_string());
++    } else {
++        kept.remove(window.label());
++    }
++}
++
++/// Where a window's buttons are, from its page (CSS px and the page's scale).
++/// If the window lets clicks through right now and keeps its buttons, its
++/// region is set again at once, so they follow a menu opening or the meter
++/// growing.
++pub fn set_locked_buttons(window: &tauri::WebviewWindow, rects: Vec<(f64, f64, f64, f64)>, scale: f64) {
++    let label = window.label().to_string();
++    let changed = {
++        let mut buttons = locked_buttons().lock().unwrap_or_else(|p| p.into_inner());
++        let keep = (rects, scale);
++        let changed = buttons.get(&label) != Some(&keep);
++        buttons.insert(label.clone(), keep);
++        changed
++    };
++    if !changed || !buttons_kept().lock().unwrap_or_else(|p| p.into_inner()).contains(&label) {
++        return;
++    }
++    let wanted = wanted_regions().lock().unwrap_or_else(|p| p.into_inner()).get(&label).cloned();
++    if let Some((true, keep)) = wanted {
++        let _ = input_region(window, true, keep);
++    }
++}
++
++/// `keep`'s rectangles in GDK pixels (left, top, width, height): CSS pixels
++/// times the page's scale over GDK's own, grown outward to whole pixels.
++fn gdk_rects((rects, page_scale): &Keep, gdk_scale: i32) -> Vec<(i32, i32, i32, i32)> {
++    let k = page_scale / f64::from(gdk_scale.max(1));
++    rects
++        .iter()
++        .filter_map(|&(x, y, w, h)| {
++            let (left, top) = ((x * k).floor() as i32, (y * k).floor() as i32);
++            let (right, bottom) = (((x + w) * k).ceil() as i32, ((y + h) * k).ceil() as i32);
++            (right > left && bottom > top).then_some((left, top, right - left, bottom - top))
++        })
++        .collect()
++}
++
++fn apply_input_region(gtk_window: &gtk::ApplicationWindow, ignore: bool, keep: Option<Keep>, edge: bool, buttons: Option<Keep>) {
+     use gtk::{cairo, prelude::*};
+     if ignore {
+         let region = cairo::Region::create();
+-        if let Some((rects, page_scale)) = keep {
+-            // CSS pixels to GDK's: the page's scale over GDK's own.
+-            let k = page_scale / f64::from(gtk_window.scale_factor().max(1));
+-            for (x, y, w, h) in rects {
+-                let (left, top) = ((x * k).floor() as i32, (y * k).floor() as i32);
+-                let (right, bottom) = (((x + w) * k).ceil() as i32, ((y + h) * k).ceil() as i32);
+-                if right > left && bottom > top {
+-                    let _ = region.union_rectangle(&cairo::RectangleInt::new(left, top, right - left, bottom - top));
+-                }
++        // What the caller keeps (the lock button, a widget's parts), and the
++        // page's buttons while they stay clickable (`set_locked_buttons`).
++        for kept in keep.iter().chain(buttons.iter()) {
++            for (left, top, width, height) in gdk_rects(kept, gtk_window.scale_factor()) {
++                let _ = region.union_rectangle(&cairo::RectangleInt::new(left, top, width, height));
+             }
+         }
+         // The strip at the right edge of the page (the window's child).
+@@ -428,7 +493,7 @@ pub fn hide_in_place(window: &tauri::WebviewWindow) {
+     let target = window.clone();
+     super::dialog::on_gtk_thread(move || {
+         if let Ok(gtk_window) = target.gtk_window() {
+-            apply_input_region(&gtk_window, true, None, false);
++            apply_input_region(&gtk_window, true, None, false, None);
+         }
+     });
+     let _ = window.set_skip_taskbar(true);
+@@ -571,3 +636,21 @@ pub fn tray_supported() -> bool {
+         // tray's own loading would.
+         .any(|name| unsafe { libloading::Library::new(name) }.is_ok())
+ }
++
++#[cfg(test)]
++mod tests {
++    use super::gdk_rects;
++
++    #[test]
++    fn button_rects_scale_from_css_to_gdk_pixels() {
++        // A page zoomed to 1.25 on a GDK scale of 1: CSS px times 1.25.
++        let keep = (vec![(10.0, 4.0, 20.0, 20.0)], 1.25);
++        assert_eq!(gdk_rects(&keep, 1), vec![(12, 5, 26, 25)]);
++        // devicePixelRatio 2 on a HiDPI GDK scale of 2: unchanged.
++        let keep = (vec![(10.5, 4.0, 20.0, 20.0)], 2.0);
++        assert_eq!(gdk_rects(&keep, 2), vec![(10, 4, 21, 20)]);
++        // Empty ones are dropped.
++        let keep = (vec![(5.0, 5.0, 0.0, 10.0), (1.0, 1.0, 2.0, 2.0)], 1.0);
++        assert_eq!(gdk_rects(&keep, 1), vec![(1, 1, 2, 2)]);
++    }
++}
+diff --git a/src-tauri/src/platform/unsupported/window.rs b/src-tauri/src/platform/unsupported/window.rs
+index 90377f9..55e32bd 100644
+--- a/src-tauri/src/platform/unsupported/window.rs
++++ b/src-tauri/src/platform/unsupported/window.rs
+@@ -59,6 +59,11 @@ pub fn click_through_except(_window: &tauri::WebviewWindow, _ignore: bool, _keep
+ /// Linux only (see the Linux version).
+ pub fn set_scroll_edge(_window: &tauri::WebviewWindow, _on: bool) {}
+ 
++/// Buttons kept clickable while locked: an input region, Linux only.
++pub fn set_locked_buttons_active(_window: &tauri::WebviewWindow, _on: bool) {}
++
++pub fn set_locked_buttons(_window: &tauri::WebviewWindow, _rects: Vec<(f64, f64, f64, f64)>, _scale: f64) {}
++
+ /// Hide a plugin window so it comes back where it was. Here a hidden window
+ /// keeps its place, so it is simply hidden (Linux keeps it mapped instead).
+ pub fn hide_in_place(window: &tauri::WebviewWindow) {
+diff --git a/src-tauri/src/platform/win32/window.rs b/src-tauri/src/platform/win32/window.rs
+index 6258213..610ce00 100644
+--- a/src-tauri/src/platform/win32/window.rs
++++ b/src-tauri/src/platform/win32/window.rs
+@@ -291,6 +291,11 @@ fn watch_widgets() {
+ /// Linux only (see the Linux version).
+ pub fn set_scroll_edge(_window: &tauri::WebviewWindow, _on: bool) {}
+ 
++/// Buttons kept clickable while locked: an input region, Linux only.
++pub fn set_locked_buttons_active(_window: &tauri::WebviewWindow, _on: bool) {}
++
++pub fn set_locked_buttons(_window: &tauri::WebviewWindow, _rects: Vec<(f64, f64, f64, f64)>, _scale: f64) {}
++
+ /// Hide a plugin window so it comes back where it was. Here a hidden window
+ /// keeps its place, so it is simply hidden (Linux keeps it mapped instead).
+ pub fn hide_in_place(window: &tauri::WebviewWindow) {
+diff --git a/src/data/i18n/ui/de.json b/src/data/i18n/ui/de.json
+index 330db52..62cd8ff 100644
+--- a/src/data/i18n/ui/de.json
++++ b/src/data/i18n/ui/de.json
+@@ -314,6 +314,7 @@
+     "showLockBtn": "Taste für Durchklick-Sperre anzeigen",
+     "lockAllWindows": "Alle Meter-Fenster sperren",
+     "lockScrollEdge": "Gesperrt: am rechten Rand scrollen",
++    "lockButtons": "Gesperrt: Knöpfe bleiben klickbar",
+     "playerLimit": {
+       "label": "Max. angezeigte Spieler"
+     },
+@@ -564,6 +565,7 @@
+       "showLockBtn": "Eine Taste, mit der das Meter die Maus ignoriert, sodass Klicks im Spiel ankommen.",
+       "lockAllWindows": "Solange das Meter gesperrt ist, lassen auch Details, Kampfverlauf und Plugin-Fenster Klicks durch. Entsperren mit der Sperr-Taste oder ihrem Tastenkürzel.",
+       "lockScrollEdge": "Solange gesperrt ist, nehmen Details, Kampfverlauf und Plugin-Fenster die Maus noch in einem schmalen Streifen an ihrem rechten Rand an, wo die Bildlaufleiste ist: Dort scrollt das Mausrad sie.",
++      "lockButtons": "Solange gesperrt ist, bleiben die Knöpfe der Fenster klickbar: Kopf- und Fußleiste des Meters (außer Zurücksetzen und Aufzeichnung), die Köpfe von Details und Kampfverlauf, die Tabs des Plugin-Docks und die Leisten der Plugins. Überall sonst gehen Klicks ins Spiel.",
+       "windowOpacity": "Wie durchsichtig der Hintergrund des Meters ist. Balken und Text bleiben, wie sie sind.",
+       "titleOpacity": "Wie durchsichtig die Titelleiste des Meters ist, getrennt vom Hintergrund darunter. Bis du ihn bewegst, folgt er dem Hintergrund.",
+       "meterOpacity": "Wie deckend die farbigen Schadensbalken sind.",
+diff --git a/src/data/i18n/ui/en.json b/src/data/i18n/ui/en.json
+index 2cd4f2d..46bccad 100644
+--- a/src/data/i18n/ui/en.json
++++ b/src/data/i18n/ui/en.json
+@@ -324,6 +324,7 @@
+     "showLockBtn": "Show click-through lock button",
+     "lockAllWindows": "Lock all meter windows",
+     "lockScrollEdge": "Locked: scroll at the right edge",
++    "lockButtons": "Locked: buttons stay clickable",
+     "playerLimit": {
+       "label": "Max players shown"
+     },
+@@ -576,6 +577,7 @@
+       "showLockBtn": "A button that makes the meter ignore the mouse, so clicks go through to the game.",
+       "lockAllWindows": "While the meter is locked, Details, Battle History and plugin windows let clicks through too. Unlock with the lock button or its keybind.",
+       "lockScrollEdge": "While locked, Details, Battle History and plugin windows still take the mouse in a thin strip at their right edge, where the scrollbar is, so the wheel there scrolls them.",
++      "lockButtons": "While locked, the windows' buttons stay clickable: the meter's header and footer buttons (not reset and capture), Details' and Battle History's headers, the plugin dock's tabs and plugins' bars. Everywhere else clicks go to the game.",
+       "windowOpacity": "How see-through the meter's background is. Bars and text stay as they are.",
+       "titleOpacity": "How see-through the meter's title bar is, apart from the background under it. Until you move it, it follows the background.",
+       "meterOpacity": "How solid the coloured damage bars are.",
+diff --git a/src/data/i18n/ui/es.json b/src/data/i18n/ui/es.json
+index 9252d73..238ffb7 100644
+--- a/src/data/i18n/ui/es.json
++++ b/src/data/i18n/ui/es.json
+@@ -314,6 +314,7 @@
+     "showLockBtn": "Mostrar botón de bloqueo (clic a través)",
+     "lockAllWindows": "Bloquear todas las ventanas del medidor",
+     "lockScrollEdge": "Bloqueado: desplazar en el borde derecho",
++    "lockButtons": "Bloqueado: los botones siguen siendo clicables",
+     "playerLimit": {
+       "label": "Máx. jugadores mostrados"
+     },
+@@ -564,6 +565,7 @@
+       "showLockBtn": "Un botón que hace que el medidor ignore el ratón, para que los clics lleguen al juego.",
+       "lockAllWindows": "Mientras el medidor está bloqueado, Detalles, el historial de combates y las ventanas de plugins también dejan pasar los clics. Desbloquea con el botón de bloqueo o su atajo.",
+       "lockScrollEdge": "Mientras está bloqueado, Detalles, el historial de combates y las ventanas de plugins siguen recibiendo el ratón en una franja estrecha de su borde derecho, donde está la barra de desplazamiento: ahí la rueda las desplaza.",
++      "lockButtons": "Mientras está bloqueado, los botones de las ventanas siguen siendo clicables: los de la cabecera y el pie del medidor (salvo reiniciar y captura), las cabeceras de Detalles y del historial de combates, las pestañas del dock de plugins y las barras de los plugins. En el resto, los clics van al juego.",
+       "windowOpacity": "Cuán transparente es el fondo del medidor. Las barras y el texto no cambian.",
+       "titleOpacity": "Qué tan transparente es la barra de título del medidor, aparte del fondo de debajo. Hasta que lo muevas, sigue al fondo.",
+       "meterOpacity": "Cuán sólidas son las barras de daño de color.",
+diff --git a/src/data/i18n/ui/fr.json b/src/data/i18n/ui/fr.json
+index 04d44e0..e081218 100644
+--- a/src/data/i18n/ui/fr.json
++++ b/src/data/i18n/ui/fr.json
+@@ -314,6 +314,7 @@
+     "showLockBtn": "Afficher le bouton de verrouillage (clic au travers)",
+     "lockAllWindows": "Verrouiller toutes les fenêtres du compteur",
+     "lockScrollEdge": "Verrouillé : défiler sur le bord droit",
++    "lockButtons": "Verrouillé : les boutons restent cliquables",
+     "playerLimit": {
+       "label": "Joueurs affichés max."
+     },
+@@ -564,6 +565,7 @@
+       "showLockBtn": "Un bouton qui fait ignorer la souris au compteur, pour que les clics passent au jeu.",
+       "lockAllWindows": "Tant que le compteur est verrouillé, Détails, l'historique des combats et les fenêtres des plugins laissent aussi passer les clics. Déverrouillez avec le bouton de verrouillage ou son raccourci.",
+       "lockScrollEdge": "Tant que c'est verrouillé, Détails, l'historique des combats et les fenêtres des plugins prennent encore la souris dans une fine bande sur leur bord droit, là où est la barre de défilement : la molette les y fait défiler.",
++      "lockButtons": "Tant que c'est verrouillé, les boutons des fenêtres restent cliquables : ceux de l'en-tête et du pied du compteur (sauf réinitialiser et capture), les en-têtes de Détails et de l'historique des combats, les onglets du dock des plugins et les barres des plugins. Partout ailleurs, les clics vont au jeu.",
+       "windowOpacity": "La transparence du fond du compteur. Les barres et le texte ne changent pas.",
+       "titleOpacity": "La transparence de la barre de titre du meter, à part du fond en dessous. Tant que vous ne le bougez pas, il suit le fond.",
+       "meterOpacity": "L'opacité des barres de dégâts colorées.",
+diff --git a/src/data/i18n/ui/ja.json b/src/data/i18n/ui/ja.json
+index 1212932..9299565 100644
+--- a/src/data/i18n/ui/ja.json
++++ b/src/data/i18n/ui/ja.json
+@@ -314,6 +314,7 @@
+     "showLockBtn": "クリック透過ロックボタンを表示",
+     "lockAllWindows": "メーターの全ウィンドウをロック",
+     "lockScrollEdge": "ロック中：右端でスクロール",
++    "lockButtons": "ロック中：ボタンはクリック可能",
+     "playerLimit": {
+       "label": "表示する最大プレイヤー数"
+     },
+@@ -564,6 +565,7 @@
+       "showLockBtn": "メーターがマウスを無視し、クリックがゲームに届くようにするボタンです。",
+       "lockAllWindows": "メーターのロック中は、詳細・戦闘履歴・プラグインのウィンドウもクリックを透過します。ロックボタンかそのショートカットで解除します。",
+       "lockScrollEdge": "ロック中も、詳細・戦闘履歴・プラグインのウィンドウは右端の細い帯（スクロールバーの位置）だけマウスを受け付け、そこでホイールを回すとスクロールできます。",
++      "lockButtons": "ロック中も、ウィンドウのボタンはクリックできます：メーターのヘッダーとフッターのボタン（リセットとキャプチャを除く）、詳細と戦闘履歴のヘッダー、プラグインドックのタブ、プラグインのバー。それ以外のクリックはゲームに届きます。",
+       "windowOpacity": "メーター背景の透け具合です。バーと文字はそのままです。",
+       "titleOpacity": "メーターのタイトルバーの透け具合を、下の背景とは別に設定します。動かすまでは背景の不透明度に合わせます。",
+       "meterOpacity": "色付きのダメージバーの不透明度です。",
+diff --git a/src/data/i18n/ui/ko.json b/src/data/i18n/ui/ko.json
+index 819b4f5..347802e 100644
+--- a/src/data/i18n/ui/ko.json
++++ b/src/data/i18n/ui/ko.json
+@@ -319,6 +319,7 @@
+     "showLockBtn": "클릭 통과 잠금 버튼 표시",
+     "lockAllWindows": "미터의 모든 창 잠금",
+     "lockScrollEdge": "잠금 중: 오른쪽 가장자리에서 스크롤",
++    "lockButtons": "잠금 중: 버튼은 클릭 가능",
+     "playerLimit": {
+       "label": "최대 표시 인원"
+     },
+@@ -571,6 +572,7 @@
+       "showLockBtn": "미터가 마우스를 무시하게 하여 클릭이 게임으로 전달되도록 하는 버튼입니다.",
+       "lockAllWindows": "미터가 잠겨 있는 동안 상세 정보, 전투 기록, 플러그인 창도 클릭을 통과시킵니다. 잠금 버튼이나 단축키로 해제하세요.",
+       "lockScrollEdge": "잠겨 있는 동안에도 상세 정보, 전투 기록, 플러그인 창은 스크롤바가 있는 오른쪽 가장자리의 좁은 띠에서 마우스를 받으므로, 그곳에서 휠로 스크롤할 수 있습니다.",
++      "lockButtons": "잠겨 있는 동안에도 창의 버튼은 클릭할 수 있습니다: 미터의 머리글과 바닥글 버튼(초기화와 캡처 제외), 상세 정보와 전투 기록의 머리글, 플러그인 도크의 탭, 플러그인의 막대. 그 밖의 클릭은 게임으로 전달됩니다.",
+       "windowOpacity": "미터 배경의 투명도입니다. 막대와 글자는 그대로입니다.",
+       "titleOpacity": "미터 제목 표시줄의 투명도를 아래 배경과 따로 정합니다. 움직이기 전까지는 배경 불투명도를 따릅니다.",
+       "meterOpacity": "색이 있는 피해량 막대의 불투명도입니다.",
+diff --git a/src/data/i18n/ui/pt.json b/src/data/i18n/ui/pt.json
+index 85b4b41..d3d1ffe 100644
+--- a/src/data/i18n/ui/pt.json
++++ b/src/data/i18n/ui/pt.json
+@@ -314,6 +314,7 @@
+     "showLockBtn": "Mostrar botão de bloqueio (clique através)",
+     "lockAllWindows": "Bloquear todas as janelas do medidor",
+     "lockScrollEdge": "Bloqueado: rolar na borda direita",
++    "lockButtons": "Bloqueado: os botões continuam clicáveis",
+     "playerLimit": {
+       "label": "Máx. de jogadores exibidos"
+     },
+@@ -564,6 +565,7 @@
+       "showLockBtn": "Um botão que faz o medidor ignorar o mouse, para os cliques irem ao jogo.",
+       "lockAllWindows": "Enquanto o medidor está bloqueado, Detalhes, o histórico de batalhas e as janelas de plugins também deixam os cliques passar. Desbloqueie com o botão de bloqueio ou o seu atalho.",
+       "lockScrollEdge": "Enquanto bloqueado, Detalhes, o histórico de combates e as janelas de plugins ainda recebem o mouse numa faixa estreita da borda direita, onde fica a barra de rolagem: ali a roda as rola.",
++      "lockButtons": "Enquanto bloqueado, os botões das janelas continuam clicáveis: os do cabeçalho e do rodapé do medidor (exceto reiniciar e captura), os cabeçalhos de Detalhes e do histórico de combates, as abas do dock de plugins e as barras dos plugins. Em todo o resto, os cliques vão para o jogo.",
+       "windowOpacity": "Quão transparente é o fundo do medidor. Barras e texto não mudam.",
+       "titleOpacity": "O quanto a barra de título do medidor é transparente, separada do fundo abaixo. Até você mexer, ela segue o fundo.",
+       "meterOpacity": "Quão sólidas são as barras coloridas de dano.",
+diff --git a/src/data/i18n/ui/ru.json b/src/data/i18n/ui/ru.json
+index a4c97c4..f4d2be9 100644
+--- a/src/data/i18n/ui/ru.json
++++ b/src/data/i18n/ui/ru.json
+@@ -319,6 +319,7 @@
+     "showLockBtn": "Показывать кнопку блокировки (сквозной клик)",
+     "lockAllWindows": "Блокировать все окна метра",
+     "lockScrollEdge": "Заблокировано: прокрутка у правого края",
++    "lockButtons": "Заблокировано: кнопки остаются нажимаемыми",
+     "playerLimit": {
+       "label": "Макс. игроков на экране"
+     },
+@@ -569,6 +570,7 @@
+       "showLockBtn": "Кнопка, после которой счётчик игнорирует мышь и клики проходят в игру.",
+       "lockAllWindows": "Пока метр заблокирован, окна «Подробности», истории боёв и плагинов тоже пропускают клики. Разблокировать — кнопкой блокировки или её сочетанием клавиш.",
+       "lockScrollEdge": "Пока окна заблокированы, «Подробности», история боёв и окна плагинов всё ещё принимают мышь в узкой полосе у правого края, где полоса прокрутки: там их можно прокручивать колесом.",
++      "lockButtons": "Пока окна заблокированы, их кнопки остаются нажимаемыми: кнопки в шапке и подвале счётчика (кроме сброса и захвата), шапки «Подробностей» и истории боёв, вкладки дока плагинов и панели плагинов. Все остальные клики уходят в игру.",
+       "windowOpacity": "Насколько прозрачен фон счётчика. Полосы и текст не меняются.",
+       "titleOpacity": "Насколько прозрачна строка заголовка метра, отдельно от фона под ней. Пока вы его не сдвинете, он следует за фоном.",
+       "meterOpacity": "Насколько плотные цветные полосы урона.",
+diff --git a/src/data/i18n/ui/zh-Hans.json b/src/data/i18n/ui/zh-Hans.json
+index 9327b58..ced35fd 100644
+--- a/src/data/i18n/ui/zh-Hans.json
++++ b/src/data/i18n/ui/zh-Hans.json
+@@ -319,6 +319,7 @@
+     "showLockBtn": "显示点击穿透锁定按钮",
+     "lockAllWindows": "锁定所有统计窗口",
+     "lockScrollEdge": "锁定时：在右边缘滚动",
++    "lockButtons": "锁定时：按钮仍可点击",
+     "playerLimit": {
+       "label": "最大显示人数"
+     },
+@@ -571,6 +572,7 @@
+       "showLockBtn": "让计量器忽略鼠标、点击直接作用于游戏的按钮。",
+       "lockAllWindows": "统计锁定期间，详情、战斗记录和插件窗口也会让点击穿透。用锁定按钮或其快捷键解锁。",
+       "lockScrollEdge": "锁定时，详情、战斗记录和插件窗口仍在右边缘（滚动条所在处）的一条细带内响应鼠标，在那里滚动滚轮即可滚动它们。",
++      "lockButtons": "锁定时，窗口的按钮仍可点击：计量器顶栏和底栏的按钮（重置和捕获除外）、详情和战斗记录的顶栏、插件停靠栏的标签页以及插件的工具栏。其他地方的点击都会传到游戏。",
+       "windowOpacity": "计量器背景的透明程度。条形和文字不受影响。",
+       "titleOpacity": "统计窗口标题栏的透明程度，与下方背景分开设置。移动它之前，它跟随背景不透明度。",
+       "meterOpacity": "彩色伤害条的不透明程度。",
+diff --git a/src/data/i18n/ui/zh-Hant.json b/src/data/i18n/ui/zh-Hant.json
+index e50adb7..62f4d90 100644
+--- a/src/data/i18n/ui/zh-Hant.json
++++ b/src/data/i18n/ui/zh-Hant.json
+@@ -319,6 +319,7 @@
+     "showLockBtn": "顯示點擊穿透鎖定按鈕",
+     "lockAllWindows": "鎖定所有統計視窗",
+     "lockScrollEdge": "鎖定時：在右邊緣捲動",
++    "lockButtons": "鎖定時：按鈕仍可點擊",
+     "playerLimit": {
+       "label": "最大顯示人數"
+     },
+@@ -571,6 +572,7 @@
+       "showLockBtn": "讓計量器忽略滑鼠、點擊直接作用於遊戲的按鈕。",
+       "lockAllWindows": "統計鎖定期間，詳情、戰鬥紀錄與外掛視窗也會讓點擊穿透。以鎖定按鈕或其快捷鍵解鎖。",
+       "lockScrollEdge": "鎖定時，詳細資料、戰鬥紀錄和外掛視窗仍在右邊緣（捲軸所在處）的一條細帶內回應滑鼠，在那裡轉動滾輪即可捲動它們。",
++      "lockButtons": "鎖定時，視窗的按鈕仍可點擊：計量器頂欄和底欄的按鈕（重設和擷取除外）、詳細資料和戰鬥紀錄的頂欄、外掛停靠欄的分頁以及外掛的工具列。其他地方的點擊都會傳到遊戲。",
+       "windowOpacity": "計量器背景的透明程度。條形和文字不受影響。",
+       "titleOpacity": "統計視窗標題列的透明程度，與下方背景分開設定。移動它之前，它跟隨背景不透明度。",
+       "meterOpacity": "彩色傷害條的不透明程度。",
+diff --git a/tests/locked-buttons.test.mjs b/tests/locked-buttons.test.mjs
+new file mode 100644
+index 0000000..cbcf3ac
+--- /dev/null
++++ b/tests/locked-buttons.test.mjs
+@@ -0,0 +1,106 @@
++// Clicktrough: lockedButtons.js reports where a window's buttons are, so they
++// stay clickable while the window is locked (platform/linux/window.rs).
++import assert from "node:assert/strict";
++import { readFileSync } from "node:fs";
++import test from "node:test";
++import vm from "node:vm";
++
++const source = readFileSync(new URL("../public/src/js/lockedButtons.js", import.meta.url), "utf8");
++const tick = () => new Promise((resolve) => setImmediate(resolve));
++
++function element({ left = 0, top = 0, width = 20, height = 20, style = {}, displayed = true } = {}) {
++  return {
++    rect: { left, top, width, height, right: left + width, bottom: top + height },
++    style: { visibility: "visible", pointerEvents: "auto", opacity: "1", ...style },
++    displayed,
++    getClientRects() { return this.displayed ? [this.rect] : []; },
++    getBoundingClientRect() { return this.rect; },
++  };
++}
++
++function setup({ view = "main", path = "/index.html", userAgent = "Mozilla/5.0 (X11; Linux x86_64)", elements = [], scale = 1 } = {}) {
++  const calls = [];
++  const selectors = [];
++  const listeners = new Map();
++  const document = {
++    readyState: "complete",
++    body: {},
++    querySelector: () => null,
++    querySelectorAll: (selector) => { selectors.push(selector); return elements; },
++    addEventListener: (name, handler) => listeners.set(name, handler),
++  };
++  const window = {
++    A2_VIEW: view, innerWidth: 400, innerHeight: 300, devicePixelRatio: scale,
++    location: { pathname: path },
++    addEventListener() {},
++    requestAnimationFrame: (callback) => setImmediate(callback),
++    __TAURI__: { core: { invoke: (command, args) => { calls.push({ command, args }); return Promise.resolve(); } } },
++  };
++  const context = vm.createContext({
++    window, document, navigator: { userAgent }, setTimeout, setImmediate, JSON, Math, Number, String, Promise,
++    getComputedStyle: (el) => el.style,
++  });
++  vm.runInContext(source, context);
++  return { calls, selectors, window, elements };
++}
++
++test("reports the shown buttons, padded and cut to the window", async () => {
++  const app = setup({
++    elements: [
++      element({ left: 10, top: 5, width: 20, height: 20 }),
++      element({ left: 390, top: 290, width: 30, height: 30 }), // reaches past the corner
++      element({ displayed: false }), // display: none (a closed menu)
++      element({ style: { visibility: "hidden" } }),
++      element({ style: { pointerEvents: "none" } }),
++      element({ style: { opacity: "0" } }),
++    ],
++    scale: 1.25,
++  });
++  await tick();
++  assert.equal(app.calls.length, 1);
++  assert.equal(app.calls[0].command, "set_locked_buttons");
++  assert.deepEqual(JSON.parse(JSON.stringify(app.calls[0].args)), {
++    rects: [[8, 3, 24, 24], [388, 288, 12, 12]],
++    scale: 1.25,
++  });
++});
++
++test("an unchanged layout is not sent again; a moved button is", async () => {
++  const app = setup({ elements: [element({ left: 10, top: 5 })] });
++  await tick();
++  app.window.__a2LockedButtons.report();
++  assert.equal(app.calls.length, 1);
++  app.elements[0].rect = { left: 50, top: 5, width: 20, height: 20, right: 70, bottom: 25 };
++  app.window.__a2LockedButtons.report();
++  assert.equal(app.calls.length, 2);
++  assert.deepEqual(JSON.parse(JSON.stringify(app.calls[1].args.rects)), [[48, 3, 24, 24]]);
++});
++
++test("each window keeps its own buttons; the meter not its reset and capture switch", async () => {
++  const expected = {
++    main: [".headerBtns .headerBtn:not(.resetBtn):not(.suspendBtn)", ".footerBtns .footerBtn"],
++    details: [".detailsHeader button", ".detailsSettingsMenu"],
++    history: [".historyHeader button", ".historyFilters select", ".historyClassDropdownMenu"],
++  };
++  for (const [view, parts] of Object.entries(expected)) {
++    const app = setup({ view });
++    await tick();
++    for (const part of parts) assert.ok(app.selectors[0].includes(part), `${view}: ${part}`);
++  }
++  const dock = setup({ view: undefined, path: "/plugin-dock.html" });
++  await tick();
++  assert.equal(dock.window.__a2LockedButtons.view, "dock");
++  assert.ok(dock.selectors[0].includes(".dockBar button"));
++  const plugin = setup({ view: undefined, path: "/plugin-host.html" });
++  await tick();
++  assert.equal(plugin.window.__a2LockedButtons.view, "plugin");
++  assert.ok(plugin.selectors[0].includes(".pluginBar button"));
++});
++
++test("Settings and Windows report nothing", async () => {
++  const settings = setup({ view: "settings", elements: [element()] });
++  const windows = setup({ userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64)", elements: [element()] });
++  await tick();
++  assert.equal(settings.calls.length, 0);
++  assert.equal(windows.calls.length, 0);
++});
+-- 
+2.43.0
+

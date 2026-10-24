@@ -1,0 +1,147 @@
+From 3941e0048532e81be3d28873574d62708c2f884d Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Sat, 24 Oct 2026 10:13:55 +0000
+Subject: [PATCH 6/7] Settings: no donation links
+
+The "Support Me" button in Settings' footer and the dialog it opened
+(QR codes, Ko-fi, Afdian, Patreon, WeChat, PayPal and crypto addresses)
+are gone from this build. The script that drives them finds nothing to
+bind to and does nothing; Discord and A2Tools.app stay in the footer.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01RBQati3x8VviBbpY9juEWf
+---
+ index.html | 110 -----------------------------------------------------
+ 1 file changed, 110 deletions(-)
+
+diff --git a/index.html b/index.html
+index b4c4a18..deda02c 100644
+--- a/index.html
++++ b/index.html
+@@ -1330,17 +1330,6 @@
+                   onclick="window.javaBridge?.openBrowser?.('https://A2Tools.app')">
+                   A2Tools.app
+                 </button>
+-                <button class="supportButton" type="button">
+-                  <span class="supportIcon" aria-hidden="true">
+-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+-                      <path d="M10 2v2"/>
+-                      <path d="M14 2v2"/>
+-                      <path d="M16 8a1 1 0 0 1 1 1v8a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4V9a1 1 0 0 1 1-1h14a4 4 0 1 1 0 8h-1"/>
+-                      <path d="M6 2v2"/>
+-                    </svg>
+-                  </span>
+-                  <span data-i18n="support.button">Support Me</span>
+-                </button>
+               </div>
+               <button class="quitButton" type="button" data-i18n="settings.quit">Quit</button>
+             </div>
+@@ -1546,105 +1535,6 @@
+         </div>
+       </div>
+     </div>
+-    <div class="supportModal" id="supportModal" aria-hidden="true">
+-      <div
+-        class="supportModalCard"
+-        role="dialog"
+-        aria-modal="true"
+-        aria-labelledby="supportModalTitle">
+-        <button
+-          class="supportModalClose"
+-          type="button"
+-          data-i18n-aria-label="support.aria.close"
+-          aria-label="Close">
+-          ×
+-        </button>
+-        <div class="supportModalTitle" id="supportModalTitle" data-i18n="support.title">
+-          在爱发电支持作者
+-        </div>
+-        <div class="supportQrContainer">
+-          <img
+-            class="supportQrImage"
+-            src="/src/assets/afdian.png"
+-            alt="Afdian QR code" />
+-        </div>
+-        <p class="supportPerks" data-i18n="support.perks">Every $5 gives you 12 months of supporter perks, up to 2 years per payment. Use the code from your A2 Tools account page in your Ko-fi message, or the same email on Patreon.</p>
+-        <p class="supportLinksHint" data-i18n="support.linksHint">Ko-fi, Patreon, Afdian and PayPal open their site in your browser. The crypto buttons copy an address.</p>
+-        <div class="supportActions">
+-          <button
+-            class="supportIconButton supportPrimaryButton"
+-            type="button"
+-            data-support="afdian"
+-            data-url="https://afdian.com/a/hiddencube"
+-            data-i18n-aria-label="support.aria.afdian"
+-            aria-label="Afdian">
+-            <span class="supportLabel">爱发电</span>
+-            <span class="supportIcon"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M13.5 2 5 13h5l-1.5 9L19 10h-5.5L13.5 2z" fill="currentColor"/></svg></span>
+-          </button>
+-          <button
+-            class="supportIconButton"
+-            type="button"
+-            data-support="patreon"
+-            data-url="https://www.patreon.com/hiddencube"
+-            data-i18n-aria-label="support.aria.patreon"
+-            aria-label="Patreon">
+-            <span class="supportLabel">Patreon</span>
+-            <span class="supportIcon"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="14.5" cy="9.5" r="6.5" fill="currentColor"/><rect x="3" y="3" width="3.2" height="18" rx="0.6" fill="currentColor"/></svg></span>
+-          </button>
+-          <button
+-            class="supportIconButton"
+-            type="button"
+-            data-support="wechat"
+-            data-qr="wechat"
+-            data-i18n-aria-label="support.aria.wechat"
+-            aria-label="WeChat">
+-            <span class="supportLabel" data-i18n="support.label.wechat">微信</span>
+-            <span class="supportIcon"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 4c-3.87 0-7 2.69-7 6 0 1.9 1.03 3.59 2.62 4.69L4 19l3.66-1.85A8.4 8.4 0 0 0 9 17c3.87 0 7-2.69 7-6s-3.13-7-7-7z" fill="currentColor"/><path d="M16.5 10.5c3.04 0 5.5 2.01 5.5 4.5 0 1.42-.79 2.69-2.02 3.52L20.5 22l-2.79-1.41c-.39.08-.79.12-1.21.12-3.04 0-5.5-2.01-5.5-4.5s2.46-4.5 5.5-4.5z" fill="currentColor" opacity="0.78"/></svg></span>
+-          </button>
+-          <button
+-            class="supportIconButton"
+-            type="button"
+-            data-support="paypal"
+-            data-url="https://www.paypal.me/taengoo"
+-            data-i18n-aria-label="support.aria.paypal"
+-            aria-label="PayPal">
+-            <span class="supportLabel">PayPal</span>
+-            <span class="supportIcon"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7.2 3.2h7.2c3.2 0 5.3 1.9 4.9 4.7-.42 2.85-2.8 4.58-6.1 4.58h-2.4l-.75 4.35H5.9L7.2 3.2z" fill="currentColor"/><path d="M9.3 5.6h4.05c1.3 0 2.05.74 1.83 1.82-.22 1.13-1.2 1.84-2.49 1.84H8.55L9.3 5.6z" fill="currentColor" opacity="0.55"/><path d="M10.55 9.05h2.52c1.95 0 3.2 1.14 2.93 2.86-.3 1.92-1.95 3.12-4.19 3.12h-2.38l.56-3.18h2.2c.75 0 1.23-.4 1.33-1 .1-.56-.3-.93-1.02-.93h-2.15l.2-.87z" fill="#0b2f63" opacity="0.45"/></svg></span>
+-          </button>
+-          <button
+-            class="supportIconButton"
+-            type="button"
+-            data-support="btc"
+-            data-copy="1GexKhgVZPYRqpfCKydXLoNUXRRRUoAUwT"
+-            data-i18n-aria-label="support.aria.btc"
+-            aria-label="BTC">
+-            <span class="supportLabel">BTC</span>
+-            <span class="supportIcon">₿</span>
+-          </button>
+-          <button
+-            class="supportIconButton"
+-            type="button"
+-            data-support="eth"
+-            data-copy="0x38F0bc371A563A24eCa6034cFf77eB6173c7e3e7"
+-            data-i18n-aria-label="support.aria.eth"
+-            aria-label="ETH">
+-            <span class="supportLabel">ETH</span>
+-            <span class="supportIcon">Ξ</span>
+-          </button>
+-          <button
+-            class="supportIconButton"
+-            type="button"
+-            data-support="usdc"
+-            data-copy="0xA9571Fc95666350f6DFFB8Fb80ee27eE7db46b56"
+-            data-i18n-aria-label="support.aria.usdc"
+-            aria-label="USDC">
+-            <span class="supportLabel">USDC</span>
+-            <span class="supportIcon">＄</span>
+-          </button>
+-        </div>
+-        <div class="supportCopyStatus" role="status" aria-live="polite"></div>
+-      </div>
+-    </div>
+     <script src="/src/js/tauriBridge.js?v=202b2"></script>
+     <script src="/src/js/battleTime.js"></script>
+     <script src="/src/js/ttk.js"></script>
+-- 
+2.43.0
+

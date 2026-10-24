@@ -18,12 +18,16 @@ veröffentlicht sie als Arch-Paket.
   Plugin-Fenster und das Plugin-Dock Klicks ins Spiel durch. (Das Original kann
   seit 2.0.77 das Schloss für das Meter-Fenster unter Wayland selbst; hier gilt
   es für alle Fenster.)
+- **Gesperrt bleiben die Knöpfe klickbar**: Kampfverlauf, Einstellungen,
+  BOSS/DPS am Meter, die Köpfe von Details und Kampfverlauf, die Tabs des
+  Plugin-Docks. Überall sonst gehen Klicks ins Spiel.
 - **Gesperrt am rechten Rand scrollen**: Gesperrte Fenster nehmen das Mausrad in
-  einem schmalen Streifen an ihrem rechten Rand an, überall sonst gehen Klicks
-  ins Spiel.
+  einem 24 px breiten Streifen an ihrem rechten Rand an; gesperrt gibt es dort
+  keinen Resize-Rand.
 - **Das Meter bleibt an seinem Platz**, wenn es wächst oder schrumpft (KDE).
 - **Event Timers zeigt eingeklappt auch die Bosse**, die laufen oder bald
   beginnen, und immer die nächste Artefakt-Belagerung.
+- **Keine Spendenlinks** in den Einstellungen.
 - **Updates kommen aus diesem Repo**, damit ein offizielles Update die
   Anpassungen nicht wieder ersetzt.
 

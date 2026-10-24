@@ -1,14 +1,14 @@
-From 1d8a43d19e794883b58ea2feaeb0a667898f876c Mon Sep 17 00:00:00 2001
+From 73bde515c64b635084c542127d3199a821e0550f Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Fri, 23 Oct 2026 14:00:52 +0000
-Subject: [PATCH 5/5] Locked windows scroll at their right edge
+Subject: [PATCH 5/7] Locked windows scroll at their right edge
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
 
 Locked, every window let all of the mouse through, so a long Battle
 History, Details or a plugin's list could not be scrolled. Details,
-Battle History, plugins' windows and the dock now keep a strip 14 px wide
+Battle History, plugins' windows and the dock now keep a strip 24 px wide
 at their right edge, where their scrollbar is, as their input region
 (following the window as it is resized), so the wheel there scrolls
 them; the rest still lets clicks through. A wheel at the edge of Details
@@ -17,14 +17,18 @@ under the window's middle. Settings → Meter Settings → "Locked: scroll
 at the right edge", on unless turned off. Not while a screenshot tool is
 in front.
 
+Locked, a tool window offers no resize at its edges (the backend tells
+the pages, meter-windows-locked): the 6 px resize edge took a press in
+the strip for a resize and left less of it to scroll.
+
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01TUNxq4V2zBL7bJg3yPJ3oC
+Claude-Session: https://claude.ai/code/session_01RBQati3x8VviBbpY9juEWf
 ---
  index.html                                   |  7 ++
  public/src/js/core.js                        | 10 +++
- public/src/js/tauriBridge.js                 | 26 +++++++
- src-tauri/src/app.rs                         | 13 +++-
- src-tauri/src/platform/linux/window.rs       | 71 +++++++++++++++++++-
+ public/src/js/tauriBridge.js                 | 37 ++++++++++
+ src-tauri/src/app.rs                         | 24 ++++++-
+ src-tauri/src/platform/linux/window.rs       | 72 +++++++++++++++++++-
  src-tauri/src/platform/unsupported/window.rs |  3 +
  src-tauri/src/platform/win32/window.rs       |  3 +
  src/data/i18n/ui/de.json                     |  2 +
@@ -37,7 +41,8 @@ Claude-Session: https://claude.ai/code/session_01TUNxq4V2zBL7bJg3yPJ3oC
  src/data/i18n/ui/ru.json                     |  2 +
  src/data/i18n/ui/zh-Hans.json                |  2 +
  src/data/i18n/ui/zh-Hant.json                |  2 +
- 17 files changed, 149 insertions(+), 4 deletions(-)
+ tests/linux-resize.test.mjs                  | 18 ++++-
+ 18 files changed, 189 insertions(+), 5 deletions(-)
 
 diff --git a/index.html b/index.html
 index 7e777d8..b4c4a18 100644
@@ -100,10 +105,36 @@ index f0908f5..2a49919 100644
          this._applyLockBtnVisibility(show);
          window.addEventListener("resize", () => this._sendLockBtnRect());
 diff --git a/public/src/js/tauriBridge.js b/public/src/js/tauriBridge.js
-index 2ab70f4..0f2caf4 100644
+index 2ab70f4..2383ddb 100644
 --- a/public/src/js/tauriBridge.js
 +++ b/public/src/js/tauriBridge.js
-@@ -1557,5 +1557,31 @@
+@@ -1446,7 +1446,12 @@
+     ].map(([edge, cur]) => `html.toolEdge-${edge}, html.toolEdge-${edge} * { cursor: ${cur}-resize !important; }`).join("\n");
+     document.head.appendChild(style);
+ 
++    // Locked with the overlay ("Lock all meter windows"), the window is not
++    // resized from its edges: its right edge is the strip that scrolls it
++    // (dpsMeter.lockScrollEdge), and a press there is meant for the scrollbar.
++    let windowsLocked = false;
+     const edgeAt = (e) => {
++      if (windowsLocked) return "";
+       let edge = "";
+       if (e.clientY < EDGE) edge += "n";
+       else if (e.clientY >= window.innerHeight - EDGE) edge += "s";
+@@ -1462,6 +1467,12 @@
+       shownEdge = edge;
+     };
+ 
++    invoke("meter_windows_locked").then((locked) => { windowsLocked = locked === true; }).catch(() => {});
++    listen("meter-windows-locked", (event) => {
++      windowsLocked = event?.payload === true;
++      if (windowsLocked) showEdge("");
++    });
++
+     const DIRECTION = {
+       n: "North", s: "South", e: "East", w: "West",
+       ne: "NorthEast", nw: "NorthWest", se: "SouthEast", sw: "SouthWest",
+@@ -1557,5 +1568,31 @@
      }
    }).catch((e) => console.error("[A2Tools] debug_status failed:", e));
  
@@ -122,7 +153,7 @@ index 2ab70f4..0f2caf4 100644
 +      return null;
 +    };
 +    document.addEventListener("wheel", (e) => {
-+      if (e.defaultPrevented || !e.deltaY || e.clientX < window.innerWidth - 24) return;
++      if (e.defaultPrevented || !e.deltaY || e.clientX < window.innerWidth - 48) return;
 +      const down = e.deltaY > 0;
 +      if (scrolls(e.target, down)) return;
 +      const target = scrolls(document.elementFromPoint(window.innerWidth / 2, e.clientY), down);
@@ -136,7 +167,7 @@ index 2ab70f4..0f2caf4 100644
    console.log("[A2Tools] Tauri bridge adapter loaded (javaBridge + dpsData)");
  })();
 diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
-index 8e3f8bc..fdf7a7a 100644
+index 8e3f8bc..3ece757 100644
 --- a/src-tauri/src/app.rs
 +++ b/src-tauri/src/app.rs
 @@ -339,6 +339,11 @@ fn screenshot_tool(app: &tauri::AppHandle, in_front: bool) {
@@ -151,9 +182,13 @@ index 8e3f8bc..fdf7a7a 100644
  /// The overlay is locked and "Lock all meter windows" is on.
  static ALL_WINDOWS_LOCKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
  
-@@ -367,8 +372,14 @@ pub fn sync_other_windows(app: &tauri::AppHandle) {
+@@ -366,9 +371,18 @@ pub fn sync_other_windows(app: &tauri::AppHandle) {
+             && s.settings.get(LOCK_ALL_WINDOWS_KEY).as_deref() == Some("true")
      });
      ALL_WINDOWS_LOCKED.store(locked, Ordering::Relaxed);
++    // The pages stop offering their resize edges while locked: the right
++    // one is the strip that scrolls them (tauriBridge.js).
++    let _ = app.emit("meter-windows-locked", locked);
      let screenshot = screenshot_tool_in_front();
 +    let edge = app
 +        .try_state::<AppState>()
@@ -166,7 +201,7 @@ index 8e3f8bc..fdf7a7a 100644
          if !platform::window::click_through_except(&window, ignore, None) && !cfg!(target_os = "linux") {
              let _ = window.set_ignore_cursor_events(ignore);
          }
-@@ -1107,7 +1118,7 @@ fn update_settings(
+@@ -1107,7 +1121,7 @@ fn update_settings(
          if HOTKEY_KEYS.contains(&key.as_str()) {
              restart_global_hotkeys(&app);
          }
@@ -175,8 +210,30 @@ index 8e3f8bc..fdf7a7a 100644
              sync_other_windows(&app);
          }
          let _ = app.emit("setting-changed", serde_json::json!({ "key": key, "value": value }));
+@@ -1398,6 +1412,13 @@ fn set_overlay_card_open(app: tauri::AppHandle, open: bool) {
+     sync_click_through(&app, &lock, false);
+ }
+ 
++/// Whether the meter's windows are locked with the overlay ("Lock all meter
++/// windows"): a tool window then offers no resize at its edges.
++#[tauri::command]
++fn meter_windows_locked() -> bool {
++    all_windows_locked()
++}
++
+ #[tauri::command]
+ fn is_overlay_locked(state: tauri::State<'_, AppState>) -> bool {
+     state.overlay_lock.locked.load(std::sync::atomic::Ordering::SeqCst)
+@@ -3995,6 +4016,7 @@ pub fn run() {
+             set_overlay_locked,
+             set_overlay_card_open,
+             is_overlay_locked,
++            meter_windows_locked,
+             set_lock_button_rect,
+             is_capture_suspended,
+             resize_window,
 diff --git a/src-tauri/src/platform/linux/window.rs b/src-tauri/src/platform/linux/window.rs
-index 7868bc1..b245fdc 100644
+index 7868bc1..21ed7d9 100644
 --- a/src-tauri/src/platform/linux/window.rs
 +++ b/src-tauri/src/platform/linux/window.rs
 @@ -209,7 +209,11 @@ fn input_region(window: &tauri::WebviewWindow, ignore: bool, keep: Option<Keep>)
@@ -192,15 +249,16 @@ index 7868bc1..b245fdc 100644
          Some(())
      })
      .flatten()
-@@ -225,7 +229,59 @@ fn wanted_regions() -> &'static std::sync::Mutex<std::collections::HashMap<Strin
+@@ -225,7 +229,60 @@ fn wanted_regions() -> &'static std::sync::Mutex<std::collections::HashMap<Strin
      WANTED.get_or_init(Default::default)
  }
  
 -fn apply_input_region(gtk_window: &gtk::ApplicationWindow, ignore: bool, keep: Option<Keep>) {
 +/// How wide the strip at a locked window's right edge is that still takes
 +/// the mouse (`set_scroll_edge`): where its scrollbar is, so the wheel there
-+/// scrolls it.
-+pub const SCROLL_EDGE_PX: i32 = 14;
++/// scrolls it. Locked, the page offers no resize at that edge
++/// (`meter-windows-locked`), so all of it scrolls.
++pub const SCROLL_EDGE_PX: i32 = 24;
 +
 +/// The windows that keep their scroll edge while they let clicks through.
 +fn scroll_edges() -> &'static std::sync::Mutex<std::collections::HashSet<String>> {
@@ -253,7 +311,7 @@ index 7868bc1..b245fdc 100644
      use gtk::{cairo, prelude::*};
      if ignore {
          let region = cairo::Region::create();
-@@ -240,6 +296,15 @@ fn apply_input_region(gtk_window: &gtk::ApplicationWindow, ignore: bool, keep: O
+@@ -240,6 +297,15 @@ fn apply_input_region(gtk_window: &gtk::ApplicationWindow, ignore: bool, keep: O
                  }
              }
          }
@@ -269,7 +327,7 @@ index 7868bc1..b245fdc 100644
          if region.is_empty() {
              let _ = region.union_rectangle(&cairo::RectangleInt::new(0, 0, 1, 1));
          }
-@@ -362,7 +427,7 @@ pub fn hide_in_place(window: &tauri::WebviewWindow) {
+@@ -362,7 +428,7 @@ pub fn hide_in_place(window: &tauri::WebviewWindow) {
      let target = window.clone();
      super::dialog::on_gtk_thread(move || {
          if let Ok(gtk_window) = target.gtk_window() {
@@ -506,6 +564,49 @@ index abfd36e..e50adb7 100644
        "windowOpacity": "計量器背景的透明程度。條形和文字不受影響。",
        "titleOpacity": "統計視窗標題列的透明程度，與下方背景分開設定。移動它之前，它跟隨背景不透明度。",
        "meterOpacity": "彩色傷害條的不透明程度。",
+diff --git a/tests/linux-resize.test.mjs b/tests/linux-resize.test.mjs
+index 8148636..1f96c69 100644
+--- a/tests/linux-resize.test.mjs
++++ b/tests/linux-resize.test.mjs
+@@ -9,7 +9,7 @@ const overlay = source.slice(source.indexOf("  // ===== Overlay resize handle"),
+ const tool = source.slice(source.indexOf("  // ===== Tool windows: drag by the header"), source.indexOf("  // Pre-fetch device list"));
+ const tick = () => new Promise((resolve) => setImmediate(resolve));
+ 
+-function setup({ userAgent = "Linux", supported = false, view = "main", detect } = {}) {
++function setup({ userAgent = "Linux", supported = false, view = "main", detect, locked = false } = {}) {
+   const calls = [];
+   const nativeResizes = [];
+   const events = new Map();
+@@ -32,6 +32,8 @@ function setup({ userAgent = "Linux", supported = false, view = "main", detect }
+       core: { invoke: (command, args) => {
+         // Every page asks which optional parts the build has; not a window call.
+         if (command === "build_features") return Promise.resolve({ online: true });
++        // Clicktrough: whether the meter's windows are locked with the overlay.
++        if (command === "meter_windows_locked") return Promise.resolve(locked);
+         calls.push({ command, args });
+         return command === "compositor_resize_supported" && detect
+           ? detect : Promise.resolve(command === "compositor_resize_supported" ? supported : null);
+@@ -124,6 +126,20 @@ test("other Linux desktops keep the begin_tool_resize edge path", async () => {
+   assert.equal(app.nativeResizes.length, 0);
+ });
+ 
++test("a tool window locked with the overlay offers no resize at its edges", async () => {
++  for (const supported of [false, true]) {
++    const app = setup({ supported, view: "details", locked: true });
++    await tick();
++    const press = { ...pressHandle(), clientX: 799, clientY: 300, target: { closest: () => false } };
++    vm.runInContext("window.innerWidth = 800; window.innerHeight = 600;", app.context);
++    app.emit("mousedown", press);
++    await tick();
++    assert.equal(press.stopped, undefined, "the press goes to the page (its scrollbar)");
++    assert.equal(app.calls.some((call) => call.command === "begin_tool_resize" || call.command === "startResizeDragging"), false);
++    assert.equal(app.nativeResizes.length, 0);
++  }
++});
++
+ test("GNOME uses compositor resizing for the overlay and tool edges", async () => {
+   const overlayApp = setup({ supported: true });
+   await tick();
 -- 
 2.43.0
 
