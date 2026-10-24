@@ -27,7 +27,7 @@ veröffentlicht sie als Arch-Paket.
 - **Das Meter bleibt an seinem Platz**, wenn es wächst oder schrumpft (KDE).
 - **Event Timers zeigt eingeklappt auch die Bosse**, die laufen oder bald
   beginnen, und immer die nächste Artefakt-Belagerung.
-- **Keine Spendenlinks** in den Einstellungen.
+- **Keine Supporter-Funktionen und keine Links zum Autor** in der App.
 - **Updates kommen aus diesem Repo**, damit ein offizielles Update die
   Anpassungen nicht wieder ersetzt.
 

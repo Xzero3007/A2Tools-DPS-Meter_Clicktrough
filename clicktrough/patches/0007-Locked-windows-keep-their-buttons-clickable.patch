@@ -1,4 +1,4 @@
-From 2631da1c570523c322f66d6f2c8a4d9bc7da4aa0 Mon Sep 17 00:00:00 2001
+From 2558b1a234f73cc7293b48cca650eb16f943f2d7 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Sat, 24 Oct 2026 10:31:21 +0000
 Subject: [PATCH 7/7] Locked windows keep their buttons clickable
@@ -51,10 +51,10 @@ Claude-Session: https://claude.ai/code/session_01RBQati3x8VviBbpY9juEWf
  create mode 100644 tests/locked-buttons.test.mjs
 
 diff --git a/index.html b/index.html
-index deda02c..cc456b4 100644
+index 912f902..eb55342 100644
 --- a/index.html
 +++ b/index.html
-@@ -765,6 +765,13 @@
+@@ -758,6 +758,13 @@
                        <span class="settingsToggleTrack" aria-hidden="true"></span>
                      </span>
                    </label>
@@ -68,7 +68,7 @@ index deda02c..cc456b4 100644
                  </div>
                </section>
                <section class="settingsSection" id="settingsSection-appearance" role="tabpanel" aria-labelledby="settingsTab-appearance" data-section="appearance" hidden>
-@@ -1551,6 +1558,7 @@
+@@ -1469,6 +1476,7 @@
  
      <script src="/src/js/i18n.js"></script>
      <script src="/src/js/core.js?v=2076a"></script>
@@ -99,7 +99,7 @@ index 529b6a7..05a4b87 100644
    </body>
  </html>
 diff --git a/public/src/js/core.js b/public/src/js/core.js
-index 2a49919..093fbc0 100644
+index dea456f..070f918 100644
 --- a/public/src/js/core.js
 +++ b/public/src/js/core.js
 @@ -57,6 +57,7 @@ const REMOTE_APPLIED_SETTING_CONTROLS = {
@@ -110,7 +110,7 @@ index 2a49919..093fbc0 100644
    // Set from the main window by the account offer.
    "dpsMeter.autoUpload": ".autoUploadCheckbox",
  };
-@@ -150,6 +151,7 @@ class DpsApp {
+@@ -151,6 +152,7 @@ class DpsApp {
        showLockBtn: "dpsMeter.showLockBtn",
        lockAllWindows: "dpsMeter.lockAllWindows",
        lockScrollEdge: "dpsMeter.lockScrollEdge",
@@ -118,7 +118,7 @@ index 2a49919..093fbc0 100644
        overlayLocked: "dpsMeter.overlayLocked",
      };
  
-@@ -6805,6 +6807,7 @@ class DpsApp {
+@@ -6802,6 +6804,7 @@ class DpsApp {
      this.showLockBtnCheckbox = document.querySelector(".showLockBtnCheckbox");
      this.lockAllWindowsCheckbox = document.querySelector(".lockAllWindowsCheckbox");
      this.lockScrollEdgeCheckbox = document.querySelector(".lockScrollEdgeCheckbox");
@@ -126,7 +126,7 @@ index 2a49919..093fbc0 100644
      const isOverlay = window.A2_VIEW === "main";
      Promise.resolve(window.javaBridge?.overlayLockSupported?.())
        .then((supported) => {
-@@ -6835,6 +6838,13 @@ class DpsApp {
+@@ -6832,6 +6835,13 @@ class DpsApp {
              this.safeSetSetting(this.storageKeys.lockScrollEdge, String(!!event.target?.checked));
            });
          }
@@ -255,7 +255,7 @@ index 0000000..b64d7b2
 +  window.__a2LockedButtons = { measure, report, view, selector };
 +})();
 diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
-index 3ece757..13f5248 100644
+index 14647dc..96a666d 100644
 --- a/src-tauri/src/app.rs
 +++ b/src-tauri/src/app.rs
 @@ -344,6 +344,17 @@ pub const LOCK_ALL_WINDOWS_KEY: &str = "dpsMeter.lockAllWindows";
@@ -339,7 +339,7 @@ index 3ece757..13f5248 100644
  /// Whether the meter's windows are locked with the overlay ("Lock all meter
  /// windows"): a tool window then offers no resize at its edges.
  #[tauri::command]
-@@ -4017,6 +4054,7 @@ pub fn run() {
+@@ -4021,6 +4058,7 @@ pub fn run() {
              set_overlay_card_open,
              is_overlay_locked,
              meter_windows_locked,
