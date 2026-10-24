@@ -9,7 +9,7 @@ button { background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.
 button:hover { background: rgba(255,255,255,.16); }
 input[type=search] { background: rgba(0,0,0,.35); border: 1px solid rgba(255,255,255,.18);
   border-radius: 5px; padding: 5px 8px; }
-input[type=checkbox] { accent-color: #6aa9ff; margin: 0; }
+input[type=checkbox] { accent-color: #c8ccd2; margin: 0; }
 .muted { color: rgba(255,255,255,.55); font-size: 12px; }
 .who { color: rgba(255,255,255,.85); font-weight: 600; }
 .totals { font-weight: 600; margin-top: 2px; }
@@ -18,7 +18,7 @@ input[type=checkbox] { accent-color: #6aa9ff; margin: 0; }
 #tabs { display: flex; gap: 4px; margin-bottom: 8px; }
 .tab { flex: 1; background: none; border: 0; border-bottom: 2px solid transparent; border-radius: 0;
   padding: 5px 2px; color: rgba(255,255,255,.55); }
-.tab.on { color: #fff; border-bottom-color: #6aa9ff; }
+.tab.on { color: #fff; border-bottom-color: rgba(255,255,255,.85); }
 .tab:hover { background: none; color: #fff; }
 
 .controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
@@ -28,15 +28,15 @@ input[type=checkbox] { accent-color: #6aa9ff; margin: 0; }
 .seg { border-radius: 0; padding: 1px 7px; font-size: 12px; margin-left: -1px; }
 .seg:first-of-type { border-radius: 4px 0 0 4px; }
 .seg:last-of-type { border-radius: 0 4px 4px 0; }
-.seg.on { background: rgba(106,169,255,.28); border-color: rgba(106,169,255,.7); color: #fff; }
+.seg.on { background: rgba(255,255,255,.14); border-color: rgba(255,255,255,.45); color: #fff; }
 .small { padding: 1px 8px; font-size: 12px; }
 .empty { color: rgba(255,255,255,.55); font-size: 12px; margin: 10px 2px; }
 
 .searchBox input[type=search] { width: 100%; box-sizing: border-box; margin-bottom: 6px; }
-.searchBox input[type=search]:focus { outline: none; border-color: #6aa9ff; }
+.searchBox input[type=search]:focus { outline: none; border-color: rgba(255,255,255,.45); }
 .chips { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
 .chip { border-radius: 999px; padding: 1px 10px; font-size: 12px; }
-.chip.on { background: rgba(106,169,255,.28); border-color: rgba(106,169,255,.7); }
+.chip.on { background: rgba(255,255,255,.14); border-color: rgba(255,255,255,.45); color: #fff; }
 .count { margin: 6px 0 2px; }
 .more { display: block; margin: 8px auto 0; }
 
@@ -55,8 +55,8 @@ input[type=checkbox] { accent-color: #6aa9ff; margin: 0; }
 .label { color: rgba(255,255,255,.45); }
 .window { color: rgba(255,255,255,.4); font-size: 11px; margin-top: 1px; }
 .maps { display: flex; gap: 4px; flex-wrap: wrap; }
-.mapLink { color: #9cc4ff; text-decoration: none; border: 1px solid rgba(156,196,255,.35); border-radius: 4px; padding: 0 6px; }
-.mapLink:hover { background: rgba(156,196,255,.12); }
+.mapLink { color: rgba(255,255,255,.8); text-decoration: none; border: 1px solid rgba(255,255,255,.22); border-radius: 4px; padding: 0 6px; }
+.mapLink:hover { background: rgba(255,255,255,.08); color: #fff; }
 .progress { display: grid; grid-template-columns: auto 1fr; gap: 0 8px; align-items: center; margin-top: 3px; font-size: 12px; }
 .progress:empty { display: none; }
 .rankText { color: rgba(255,255,255,.6); }
@@ -76,7 +76,7 @@ body.compact #status { display: none; }
 
 .section { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: rgba(255,255,255,.5);
   margin: 14px 0 4px; font-weight: 600; }
-.row.offer { background: rgba(106,169,255,.07); }
+.row.offer { background: rgba(255,255,255,.04); }
 .row.done { opacity: .75; }
 .price { font-weight: 700; color: #ffd666; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .bought { color: #6fcf7f; font-size: 12px; white-space: nowrap; }

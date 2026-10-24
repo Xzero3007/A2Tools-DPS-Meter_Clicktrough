@@ -29,31 +29,10 @@
       merchantUnknown: "The shop was opened {t} ago, but its offer list is in a layout Pet Finder does not know yet (it reads only the one PetTracker checked). See the README: a short packet log helps add it.",
       sideBySide: "Side by side", belowEachOther: "Below each other",
     },
-    de: {
-      nearby: "In der Nähe", search: "Suche", hideMaxed: "Maximierte ausblenden", clear: "Leeren",
-      keepFor: "Behalten", minutes: "{n} Min.", untilGone: "bis entfernt",
-      noNearby: "Noch keine Pet-Mobs gesehen. Sie erscheinen, sobald das Spiel sie dir zeigt; nach einem Kartenwechsel leert sich die Liste nach einer Weile.",
-      searchPlaceholder: "Pet, Mob, Region oder Quelle…", allFamilies: "Alle",
-      pets: "{n} Pets", more: "{n} weitere zeigen",
-      notSynced: "Sammlung noch nicht gelesen: mit laufendem Meter in deinen Charakter einloggen.",
-      synced: "Beim Login gelesen, {t}", live: "live",
-      toGo: "{n} von {all} Pets noch nicht auf Rang 3 · {souls} Seelen fehlen",
-      rank: "Rang {r}", locked: "Nicht freigeschaltet", max: "MAX", seen: "vor {t} gesehen", now: "gerade eben",
-      pin: "Anheften", unpin: "Lösen", mobs: "Seelen von", maps: "Karten", source: "Quelle",
-      pinnedNearby: "Angeheftetes Pet in der Nähe: {pet} ({mob})",
-      character: "{name}", noData: "Zu diesem Pet sind noch keine Quellen bekannt.",
-      merchant: "Händler", kina: "{n} Kina", off: "−{n} %", bought: "✓ Seelen erhalten",
-      merchantHint: "Öffne den Black Cloud Merchant im Spiel, nachdem deine Sammlung gelesen wurde: Die Pets dort, die dir noch fehlen, erscheinen hier für zwei Minuten.",
-      merchantNone: "In diesem Angebot ist nichts, was dir noch fehlt.", merchantStale: "Angebot {t}: Öffne den Laden erneut für das aktuelle Angebot.",
-      lookOut: "Darauf achten: Diese gibt es nur aus Truhen und bei Händlern", merchantToast: "Black Cloud Merchant: {n} Pet(s), die dir noch fehlen",
-      alsoFarmable: "Ebenfalls im Angebot, auch farmbar", onlyMerchant: "Nur aus Truhen und bei Händlern",
-      merchantUnknown: "Der Laden wurde vor {t} geöffnet, aber seine Angebotsliste hat ein Format, das Pet Finder noch nicht kennt (es liest nur das von PetTracker geprüfte). Siehe README: Ein kurzer Paketmitschnitt hilft, es zu ergänzen.",
-      sideBySide: "Nebeneinander", belowEachOther: "Untereinander",
-    },
   };
-  let lang = "en";
-  const t = (k, vars = {}) => (STRINGS[lang][k] ?? STRINGS.en[k] ?? k).replace(/\{(\w+)\}/g, (_, v) => vars[v] ?? "");
-  const locale = () => (lang === "de" ? "de-DE" : "en-US");
+  // English only, whatever the meter's language.
+  const t = (k, vars = {}) => (STRINGS.en[k] ?? k).replace(/\{(\w+)\}/g, (_, v) => vars[v] ?? "");
+  const locale = () => "en-US";
   const fmtNum = (n) => Number(n).toLocaleString(locale());
 
   // ---------- state ----------
@@ -154,11 +133,6 @@
     loadCharacter(character);
   }
 
-  a2.on("language", (code) => {
-    lang = String(code).startsWith("de") ? "de" : "en";
-    document.documentElement.lang = lang;
-    render();
-  });
   a2.on("compact", (on) => {
     compact = !!on;
     render();

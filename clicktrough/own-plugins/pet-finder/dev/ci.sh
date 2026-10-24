@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Clicktrough-Build: prüft Pet Finder gegen den Plugin-Decoder der Meter-Version,
-# mit der es ausgeliefert wird (src-tauri/src/plugins/decoder.rs, unverändert).
-# Ändert das Original den Decoder so, dass Pet Finder seine Frames nicht mehr
-# lesen kann, schlägt der Build fehl, statt ein stummes Plugin auszuliefern.
+# Clicktrough build: checks Pet Finder against the plugin decoder of the meter
+# version it ships with (src-tauri/src/plugins/decoder.rs, unchanged). If the
+# original changes the decoder so that Pet Finder can no longer read its
+# frames, the build fails instead of shipping a silent plugin.
 #
-#   dev/ci.sh <Quellordner des Meters>
+#   dev/ci.sh <meter source folder>
 #
-# Ohne PetTracker-Checkout laufen die Nearby/Collection- und die EU-Händler-
-# Tests; der US-Händler-Test (market_frames.py) braucht PetTracker und bleibt
-# hier aus.
+# Without a PetTracker checkout the nearby/collection and the EU merchant tests
+# run; the US merchant test (market_frames.py) needs PetTracker and is left
+# out here.
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 plugin="$(dirname "$here")"
@@ -21,8 +21,8 @@ cp "$meter/src-tauri/src/plugins/decoder.rs" "$work/decoder-check/src/decoder.rs
 cargo build -q --manifest-path "$work/decoder-check/Cargo.toml" --target-dir "$work/target"
 D="$work/target/debug/decoder-check"
 
-# Eine Kopie außerhalb des Meters: dessen package.json setzt "type": "module",
-# und Node läse logic.js dann als Modul statt als klassisches Skript.
+# A copy outside the meter: its package.json sets "type": "module", and Node
+# would then read logic.js as a module instead of a classic script.
 mkdir "$work/plugin"
 cp "$plugin"/*.js "$plugin/manifest.json" "$work/plugin/"
 cp -r "$here/tests" "$work/tests"
