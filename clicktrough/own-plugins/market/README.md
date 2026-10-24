@@ -36,7 +36,11 @@ public API (players' collected market prices, a new snapshot about every
 hour): when the window opens and every 30 minutes while it is open, through
 the meter (`a2.web.get`, Clicktrough patch 0016; the plugin's page itself has
 no network), which reads one address at most once a minute. The last prices
-are kept for the next start.
+are kept for the next start. aion2.exchange is often down for a moment
+("database unavailable"): the meter tries again once, a part of the prices
+it still can't get keeps its older prices, and the line at the top says
+what went wrong (e.g. "could not connect: ...", "no answer in time", "the
+service is down right now").
 
 ## Data
 

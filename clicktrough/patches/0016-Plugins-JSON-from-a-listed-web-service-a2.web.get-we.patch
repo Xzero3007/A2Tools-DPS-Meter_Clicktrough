@@ -1,4 +1,4 @@
-From 944d6ad2219e4784e0d230a5c4fda250bc7d2cfc Mon Sep 17 00:00:00 2001
+From 8f249d7f40af0d5e1c3ed7abc1729c038ec4a691 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Sat, 24 Oct 2026 22:44:44 +0000
 Subject: [PATCH] Plugins: JSON from a listed web service (a2.web.get,
@@ -15,15 +15,24 @@ https only, no other host, port or credentials, at most 8 MB, null for
 a 404. One address is read at most once a minute, whichever plugin
 window asks, and one host at most four times a second.
 
+A failed request says why, as the player can act on it: "could not
+connect: ... Connection refused", "no answer in time", "the service is
+down right now (it answered 503 ...)", not only reqwest's "error sending
+request for url (...)". A connection that failed is tried once more over
+IPv4 alone (an IPv6 path that leads nowhere, or drops the large packets
+of a long certificate chain, while the browser on HTTP/3 never notices;
+once that helped, IPv4 first for the session), and a 502, 503 or 504
+once more after two seconds.
+
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_01RBQati3x8VviBbpY9juEWf
 ---
- public/src/js/pluginFrame.js    |   7 +++
+ public/src/js/pluginFrame.js    |   7 ++
  public/src/js/pluginSettings.js |   3 +
  src-tauri/src/app.rs            |   1 +
- src-tauri/src/plugins/a2.js     |   6 ++
- src-tauri/src/plugins/mod.rs    | 105 ++++++++++++++++++++++++++++++--
- 5 files changed, 118 insertions(+), 4 deletions(-)
+ src-tauri/src/plugins/a2.js     |   6 +
+ src-tauri/src/plugins/mod.rs    | 203 +++++++++++++++++++++++++++++++-
+ 5 files changed, 216 insertions(+), 4 deletions(-)
 
 diff --git a/public/src/js/pluginFrame.js b/public/src/js/pluginFrame.js
 index 99e60dc..fc46c94 100644
@@ -94,7 +103,7 @@ index c4eab7e..663f7cd 100644
      // Meter 2.0.72 on: the server's Abyss siege (artifact holders, cores).
      abyssSiege: (server) => call("abyssSiege", [Number(server)]),
 diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
-index b67e933..25c20c0 100644
+index b67e933..e4c9c2d 100644
 --- a/src-tauri/src/plugins/mod.rs
 +++ b/src-tauri/src/plugins/mod.rs
 @@ -1169,9 +1169,10 @@ fn describe_permission(t: &PromptTexts, permission: &str) -> String {
@@ -111,7 +120,7 @@ index b67e933..25c20c0 100644
          },
      }
  }
-@@ -2051,6 +2052,85 @@ async fn feed_file(_app: &tauri::AppHandle, _feed: &'static str, _server: u32) -
+@@ -2051,6 +2052,169 @@ async fn feed_file(_app: &tauri::AppHandle, _feed: &'static str, _server: u32) -
      Err("this meter is built without network features".into())
  }
  
@@ -166,27 +175,111 @@ index b67e933..25c20c0 100644
 +        *next = Instant::now() + Duration::from_millis(250);
 +    }
 +    let state = app.try_state::<AppState>().ok_or("no app state")?;
-+    let res = state.http.get(url)
-+        .header("Accept", "application/json")
-+        .header("User-Agent", concat!("A2Tools-DPS-Meter/", env!("CARGO_PKG_VERSION"),
-+            " Clicktrough (+https://github.com/Xzero3007/A2Tools-DPS-Meter_Clicktrough)"))
-+        .timeout(Duration::from_secs(30))
-+        .send().await.map_err(|e| e.to_string())?;
++    // Once more when the connection failed, over IPv4 alone: an IPv6 path
++    // that leads nowhere, or drops the large packets of a long certificate
++    // chain, fails (or hangs until the timeout) where IPv4 works, while the
++    // browser, on HTTP/3, never notices. Once that helped, IPv4 first for
++    // the rest of the session. Once more after a moment, too, when the
++    // service was briefly down (502, 503, 504).
++    let mut tried = 0;
++    let mut ipv4 = WEB_OVER_IPV4.load(Ordering::Relaxed);
++    let mut first_error: Option<String> = None;
++    let res = loop {
++        let client = if ipv4 { ipv4_client() } else { &state.http };
++        let sent = client.get(url)
++            .header("Accept", "application/json")
++            .header("User-Agent", concat!("A2Tools-DPS-Meter/", env!("CARGO_PKG_VERSION"),
++                " Clicktrough (+https://github.com/Xzero3007/A2Tools-DPS-Meter_Clicktrough)"))
++            .timeout(Duration::from_secs(30))
++            .send().await;
++        tried += 1;
++        if tried < 2 {
++            match &sent {
++                Err(e) if e.is_connect() || e.is_timeout() => {
++                    first_error = Some(web_error(e));
++                    ipv4 = true;
++                    continue;
++                }
++                Ok(r) if matches!(r.status().as_u16(), 502..=504) => {
++                    tokio::time::sleep(Duration::from_secs(2)).await;
++                    continue;
++                }
++                _ => {}
++            }
++        }
++        if ipv4 && sent.is_ok() {
++            WEB_OVER_IPV4.store(true, Ordering::Relaxed);
++        }
++        // Both failed: what the usual connection said, and IPv4 if otherwise.
++        break sent.map_err(|e| match first_error.take() {
++            Some(first) if first != web_error(&e) => format!("{first}; over IPv4: {}", web_error(&e)),
++            Some(first) => first,
++            None => web_error(&e),
++        })?;
++    };
 +    let value = match res.status() {
 +        s if s == reqwest::StatusCode::NOT_FOUND => Value::Null,
 +        s if s.is_success() => {
-+            let bytes = res.bytes().await.map_err(|e| e.to_string())?;
++            let bytes = res.bytes().await.map_err(|e| web_error(&e))?;
 +            if bytes.len() > MAX_WEB_ANSWER {
 +                return Err("the answer is too large".into());
 +            }
 +            serde_json::from_slice(&bytes).map_err(|e| e.to_string())?
 +        }
++        s if s.is_server_error() => return Err(format!("the service is down right now (it answered {s})")),
 +        s => return Err(format!("the service answered {s}")),
 +    };
 +    let mut cache = cache.lock().unwrap_or_else(|p| p.into_inner());
 +    cache.retain(|_, (at, _)| at.elapsed() < Duration::from_secs(60));
 +    cache.insert(url.to_string(), (Instant::now(), value.clone()));
 +    Ok(value)
++}
++
++/// Plugins' web requests go over IPv4 alone: set once IPv4 worked where the
++/// usual connection (IPv6 first, where there is IPv6) failed.
++#[cfg(feature = "online")]
++static WEB_OVER_IPV4: AtomicBool = AtomicBool::new(false);
++
++/// The meter's client, but bound to IPv4: it connects to IPv4 addresses only.
++#[cfg(feature = "online")]
++fn ipv4_client() -> &'static reqwest::Client {
++    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
++    CLIENT.get_or_init(|| {
++        reqwest::Client::builder()
++            .user_agent(concat!("A2Tools-DPS-Meter/", env!("CARGO_PKG_VERSION")))
++            .local_address(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED))
++            .connect_timeout(Duration::from_secs(10))
++            .timeout(Duration::from_secs(30))
++            .build()
++            .unwrap_or_default()
++    })
++}
++
++/// A failed request in words the player can act on. reqwest's own ("error
++/// sending request for url (...)") hides why; its causes say it: a DNS
++/// error, a refused or timed-out connection, a certificate refused ...
++#[cfg(feature = "online")]
++fn web_error(e: &reqwest::Error) -> String {
++    let mut out = String::from(if e.is_timeout() {
++        "no answer in time"
++    } else if e.is_connect() {
++        "could not connect"
++    } else {
++        "the request failed"
++    });
++    let mut last = String::new();
++    let mut cause = std::error::Error::source(e);
++    while let Some(c) = cause {
++        let text = c.to_string();
++        // hyper and the OS often repeat the same words one level down.
++        if !text.is_empty() && !last.contains(&text) {
++            out.push_str(": ");
++            out.push_str(&text);
++            last = text;
++        }
++        cause = c.source();
++    }
++    out
 +}
 +
 +#[cfg(not(feature = "online"))]
@@ -197,7 +290,7 @@ index b67e933..25c20c0 100644
  #[tauri::command]
  pub fn plugin_storage_get(app: tauri::AppHandle, window: tauri::WebviewWindow, plugin: Option<String>, key: String) -> Result<Option<String>, String> {
      let id = window_plugin(&window, plugin.as_deref())?;
-@@ -2341,7 +2421,24 @@ fn percent_decode(s: &str) -> String {
+@@ -2341,7 +2505,38 @@ fn percent_decode(s: &str) -> String {
  
  #[cfg(test)]
  mod tests {
@@ -219,6 +312,20 @@ index b67e933..25c20c0 100644
 +        ] {
 +            assert!(web_permission(bad).is_err(), "{bad}");
 +        }
++    }
++
++    /// A failed request says why ("Connection refused"), not only reqwest's
++    /// "error sending request for url (...)".
++    #[cfg(feature = "online")]
++    #[tokio::test]
++    async fn a_failed_web_request_says_why() {
++        // A port nothing listens on: bound, then let go.
++        let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
++        let e = reqwest::Client::new().get(format!("http://127.0.0.1:{port}/")).send().await.unwrap_err();
++        let text = super::web_error(&e);
++        assert!(text.starts_with("could not connect"), "{text}");
++        assert!(text.to_lowercase().contains("refused"), "{text}");
++        assert!(!text.contains("error sending request"), "{text}");
 +    }
      use super::{read_own_file, update_prompt, updates_to_offer, within_reach, Pending, PluginAvailable, PluginInfo, LANGUAGES, SETTLE};
      use std::collections::{HashMap, HashSet};

@@ -48,6 +48,36 @@
     return out;
   }
 
+  /** aion2.exchange's servers ({ servers: [{ server_id, name,
+   *  game_server_key, region, region_name, faction, has_data }] }) ->
+   *  [{ id, game, name, region, faction, hasData }]. */
+  function readServers(res) {
+    const list = Array.isArray(res?.servers) ? res.servers : Array.isArray(res) ? res : [];
+    const out = [];
+    for (const s of list) {
+      const id = Number(s?.server_id ?? s?.id);
+      if (!s || !Number.isFinite(id) || id <= 0) continue;
+      const game = Number(s.game_server_key ?? s.game);
+      out.push({
+        id,
+        game: Number.isFinite(game) ? game : id % 10000,
+        name: String(s.name || `Server ${id}`),
+        region: String(s.region_name || s.region || "Other"),
+        faction: s.faction === "Elyos" || s.faction === "Asmodian" ? s.faction : null,
+        hasData: s.has_data !== false && s.hasData !== false,
+      });
+    }
+    return out;
+  }
+
+  /** The player's server among them: the game's number (2305 Marchutan)
+   *  is aion2.exchange's game_server_key, its id 10000 more. */
+  const serverOf = (servers, gameServerId) => {
+    const sid = Number(gameServerId);
+    if (!Number.isFinite(sid) || sid <= 0) return null;
+    return servers.find((s) => s.game === sid) || servers.find((s) => s.id - 10000 === sid) || null;
+  };
+
   const market = (prices, id) => prices.get(String(id))?.price ?? null;
   const npcPrice = (npc, id) => {
     const v = Number(npc?.[String(id)]);
@@ -171,7 +201,7 @@
   const kina = (v) => (v == null || !Number.isFinite(v) ? "—" : Math.round(v).toLocaleString("en-US"));
 
   globalThis.MarketCalc = Object.freeze({
-    name, grade, readPrices, market, unitCost, morphFrom, recipesOf, recipeSums, usesOf, morphTable,
+    name, grade, readPrices, readServers, serverOf, market, unitCost, morphFrom, recipesOf, recipeSums, usesOf, morphTable,
     energyMorphCost, neededItems, kina, kindOf: (id) => KIND.get(String(id)) || null, FACTION_RACE,
   });
 })();
