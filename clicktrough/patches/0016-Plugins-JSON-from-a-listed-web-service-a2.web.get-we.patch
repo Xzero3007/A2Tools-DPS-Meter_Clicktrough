@@ -1,0 +1,228 @@
+From 944d6ad2219e4784e0d230a5c4fda250bc7d2cfc Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Sat, 24 Oct 2026 22:44:44 +0000
+Subject: [PATCH] Plugins: JSON from a listed web service (a2.web.get,
+ web:<host>)
+
+A plugin's page has no network at all, and some data plugins want is
+only on the web: a market plugin needs the market prices players collect
+on aion2.exchange (its public API; it sends no CORS headers, so a page
+couldn't read it anyway). await a2.web.get(url) now returns the parsed
+JSON answer of a service the meter lists (plugins::WEB_HOSTS, for now
+aion2.exchange), for a plugin with the permission "web:<host>"
+(Settings words it "Read data from <host> on the internet"): GET over
+https only, no other host, port or credentials, at most 8 MB, null for
+a 404. One address is read at most once a minute, whichever plugin
+window asks, and one host at most four times a second.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01RBQati3x8VviBbpY9juEWf
+---
+ public/src/js/pluginFrame.js    |   7 +++
+ public/src/js/pluginSettings.js |   3 +
+ src-tauri/src/app.rs            |   1 +
+ src-tauri/src/plugins/a2.js     |   6 ++
+ src-tauri/src/plugins/mod.rs    | 105 ++++++++++++++++++++++++++++++--
+ 5 files changed, 118 insertions(+), 4 deletions(-)
+
+diff --git a/public/src/js/pluginFrame.js b/public/src/js/pluginFrame.js
+index 99e60dc..fc46c94 100644
+--- a/public/src/js/pluginFrame.js
++++ b/public/src/js/pluginFrame.js
+@@ -158,6 +158,13 @@
+       // Clicktrough: one of the plugin's own files as a data: URL (WebKitGTK
+       // 2.54 lets a sandboxed frame load none from the plugin scheme).
+       file: ([path]) => call("plugin_file", { path: String(path) }),
++      // Clicktrough: JSON from a web service the meter lists (plugins::WEB_HOSTS),
++      // with the permission "web:<host>" (checked by the meter).
++      "web.get": ([url]) => {
++        const host = String(url).replace(/^https:\/\//, "").split(/[/?#]/)[0];
++        if (!allowed(`web:${host}`)) throw new Error(`the plugin lacks the "web:${host}" permission`);
++        return call("plugin_web_get", { url: String(url) });
++      },
+       // Clicktrough: share a value with plugins allowed to hear it.
+       share: ([value]) => {
+         if (!allowed("share")) throw new Error('the plugin lacks the "share" permission');
+diff --git a/public/src/js/pluginSettings.js b/public/src/js/pluginSettings.js
+index 70f1f6c..b7465d4 100644
+--- a/public/src/js/pluginSettings.js
++++ b/public/src/js/pluginSettings.js
+@@ -63,6 +63,9 @@
+       if (permission === "events:shared") {
+         return t("settings.plugins.permShared", "See what other plugins share (e.g. the pets they track)");
+       }
++      if (permission.startsWith("web:")) {
++        return t("settings.plugins.permWeb", "Read data from {host} on the internet", { host: permission.slice(4) });
++      }
+       if (permission.startsWith("decoder:")) {
+         return t("settings.plugins.permDecoder", "Read your own game data: {name}", { name: permission.slice(8) });
+       }
+diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
+index ba19a38..e26e137 100644
+--- a/src-tauri/src/app.rs
++++ b/src-tauri/src/app.rs
+@@ -4030,6 +4030,7 @@ pub fn run() {
+             crate::plugins::plugin_hello,
+             crate::plugins::plugin_share,
+             crate::plugins::plugin_file,
++            crate::plugins::plugin_web_get,
+             crate::plugins::widgets::plugin_widget_file,
+             crate::plugins::widgets::plugin_widget_resize,
+             open_settings_at,
+diff --git a/src-tauri/src/plugins/a2.js b/src-tauri/src/plugins/a2.js
+index c4eab7e..663f7cd 100644
+--- a/src-tauri/src/plugins/a2.js
++++ b/src-tauri/src/plugins/a2.js
+@@ -38,6 +38,10 @@
+ //                                              (permission "share"); null withdraws it
+ //   a2.on("shared", ({ plugin, value }) => ...)  what another plugin shared (permission "events:shared"):
+ //                                              at once, and every value shared so far at start
++//   await a2.web.get("https://aion2.exchange/api/servers")  Clicktrough: the JSON answer of a web
++//                                              service the meter lists (aion2.exchange), with the
++//                                              permission "web:<host>"; null for "not found"; one
++//                                              address is read at most once a minute
+ //
+ // Keep the page's background transparent: the window paints the panel at the
+ // opacity the user picks.
+@@ -190,6 +194,8 @@
+     file: (path) => call("file", [String(path)]),
+     // Clicktrough: a value for other plugins (permission "share").
+     share: (value) => call("share", [value ?? null]),
++    // Clicktrough: JSON from a web service the meter lists.
++    web: Object.freeze({ get: (url) => call("web.get", [String(url)]) }),
+     bossTimers: (server) => call("bossTimers", [Number(server)]),
+     // Meter 2.0.72 on: the server's Abyss siege (artifact holders, cores).
+     abyssSiege: (server) => call("abyssSiege", [Number(server)]),
+diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
+index b67e933..25c20c0 100644
+--- a/src-tauri/src/plugins/mod.rs
++++ b/src-tauri/src/plugins/mod.rs
+@@ -1169,9 +1169,10 @@ fn describe_permission(t: &PromptTexts, permission: &str) -> String {
+         "events:world" => "See where you and the monsters and objects around you are (from the game data)".into(),
+         "share" => "Share what it follows with other plugins (e.g. the pets it tracks, for a map)".into(),
+         "events:shared" => "See what other plugins share (e.g. the pets they track)".into(),
+-        p => match p.strip_prefix("decoder:") {
+-            Some(name) => t.perm_decoder.replace("{name}", name),
+-            None => p.to_string(),
++        p => match (p.strip_prefix("decoder:"), p.strip_prefix("web:")) {
++            (Some(name), _) => t.perm_decoder.replace("{name}", name),
++            (_, Some(host)) => format!("Read data from {host} on the internet"),
++            _ => p.to_string(),
+         },
+     }
+ }
+@@ -2051,6 +2052,85 @@ async fn feed_file(_app: &tauri::AppHandle, _feed: &'static str, _server: u32) -
+     Err("this meter is built without network features".into())
+ }
+ 
++/// Clicktrough: the web services plugins may read from (`a2.web.get`), each
++/// behind the permission "web:<host>". Only these: a plugin cannot reach
++/// anything else (its page has no network at all).
++///   aion2.exchange  the market prices players' clients collect, by server
++///                   (its public API, /api/docs); the Market plugin
++pub const WEB_HOSTS: &[&str] = &["aion2.exchange"];
++
++/// Most bytes a web answer may have.
++const MAX_WEB_ANSWER: usize = 8 * 1024 * 1024;
++
++/// The host of a URL a plugin may read: https, one of `WEB_HOSTS`, no port,
++/// user or password. The permission it needs, "web:<host>".
++fn web_permission(url: &str) -> Result<String, String> {
++    let rest = url.strip_prefix("https://").ok_or("only https:// addresses")?;
++    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
++    if authority.contains(['@', ':']) || !WEB_HOSTS.contains(&authority) {
++        return Err(format!("{authority:?} is not a web service plugins may read"));
++    }
++    Ok(format!("web:{authority}"))
++}
++
++/// Clicktrough: `a2.web.get(url)`: a JSON answer from one of `WEB_HOSTS`
++/// (permission "web:<host>"), parsed; null for a 404. The same address is
++/// read at most once a minute (every plugin window asking gets the same
++/// answer), and the meter asks one host at most four times a second.
++#[tauri::command]
++pub async fn plugin_web_get(app: tauri::AppHandle, window: tauri::WebviewWindow, plugin: Option<String>, url: String) -> Result<Value, String> {
++    let id = window_plugin(&window, plugin.as_deref())?;
++    require(&app, &id, &web_permission(&url)?)?;
++    web_get(&app, &url).await
++}
++
++#[cfg(feature = "online")]
++async fn web_get(app: &tauri::AppHandle, url: &str) -> Result<Value, String> {
++    static CACHE: std::sync::OnceLock<Mutex<HashMap<String, (Instant, Value)>>> = std::sync::OnceLock::new();
++    static NEXT: std::sync::OnceLock<tokio::sync::Mutex<Instant>> = std::sync::OnceLock::new();
++    let cache = CACHE.get_or_init(Mutex::default);
++    if let Some((at, value)) = cache.lock().unwrap_or_else(|p| p.into_inner()).get(url) {
++        if at.elapsed() < Duration::from_secs(60) {
++            return Ok(value.clone());
++        }
++    }
++    {
++        let mut next = NEXT.get_or_init(|| tokio::sync::Mutex::new(Instant::now())).lock().await;
++        let now = Instant::now();
++        if *next > now {
++            tokio::time::sleep(*next - now).await;
++        }
++        *next = Instant::now() + Duration::from_millis(250);
++    }
++    let state = app.try_state::<AppState>().ok_or("no app state")?;
++    let res = state.http.get(url)
++        .header("Accept", "application/json")
++        .header("User-Agent", concat!("A2Tools-DPS-Meter/", env!("CARGO_PKG_VERSION"),
++            " Clicktrough (+https://github.com/Xzero3007/A2Tools-DPS-Meter_Clicktrough)"))
++        .timeout(Duration::from_secs(30))
++        .send().await.map_err(|e| e.to_string())?;
++    let value = match res.status() {
++        s if s == reqwest::StatusCode::NOT_FOUND => Value::Null,
++        s if s.is_success() => {
++            let bytes = res.bytes().await.map_err(|e| e.to_string())?;
++            if bytes.len() > MAX_WEB_ANSWER {
++                return Err("the answer is too large".into());
++            }
++            serde_json::from_slice(&bytes).map_err(|e| e.to_string())?
++        }
++        s => return Err(format!("the service answered {s}")),
++    };
++    let mut cache = cache.lock().unwrap_or_else(|p| p.into_inner());
++    cache.retain(|_, (at, _)| at.elapsed() < Duration::from_secs(60));
++    cache.insert(url.to_string(), (Instant::now(), value.clone()));
++    Ok(value)
++}
++
++#[cfg(not(feature = "online"))]
++async fn web_get(_app: &tauri::AppHandle, _url: &str) -> Result<Value, String> {
++    Err("this meter is built without network features".into())
++}
++
+ #[tauri::command]
+ pub fn plugin_storage_get(app: tauri::AppHandle, window: tauri::WebviewWindow, plugin: Option<String>, key: String) -> Result<Option<String>, String> {
+     let id = window_plugin(&window, plugin.as_deref())?;
+@@ -2341,7 +2421,24 @@ fn percent_decode(s: &str) -> String {
+ 
+ #[cfg(test)]
+ mod tests {
+-    use super::{base64, content_policy, inline_page, inlined_policy, with_meter_fonts, prompt_texts, should_start, take_ready};
++    use super::{base64, content_policy, inline_page, inlined_policy, with_meter_fonts, prompt_texts, should_start, take_ready, web_permission};
++
++    #[test]
++    fn a_plugin_reads_only_the_listed_web_services_over_https() {
++        assert_eq!(web_permission("https://aion2.exchange/api/items?server=12305").as_deref(), Ok("web:aion2.exchange"));
++        assert_eq!(web_permission("https://aion2.exchange").as_deref(), Ok("web:aion2.exchange"));
++        for bad in [
++            "http://aion2.exchange/api/servers",
++            "https://aion2.exchange:8443/api/servers",
++            "https://user@aion2.exchange/api/servers",
++            "https://aion2.exchange.evil.example/api",
++            "https://evil.example/?https://aion2.exchange",
++            "file:///etc/passwd",
++            "",
++        ] {
++            assert!(web_permission(bad).is_err(), "{bad}");
++        }
++    }
+     use super::{read_own_file, update_prompt, updates_to_offer, within_reach, Pending, PluginAvailable, PluginInfo, LANGUAGES, SETTLE};
+     use std::collections::{HashMap, HashSet};
+     use std::time::{Duration, Instant};
+-- 
+2.43.0
+
