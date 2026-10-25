@@ -1,15 +1,19 @@
 // The Market plugin's window: what the gathered materials bring on your
 // server's market, what they cost made from Odyle (Substance Morph), what
 // each recipe costs and brings, and where each material goes. Prices come
-// from aion2.exchange's public API (through the meter, a2.web.get).
+// from aion2.exchange: first from the Clicktrough fork's hourly copy of
+// them on GitHub (fast; .github/workflows/market-prices.yml), else from its
+// public API itself (slow, often briefly down); both through the meter
+// (a2.web.get).
 (() => {
   const D = globalThis.MARKET_DATA;
   const C = globalThis.MarketCalc;
   const $ = (s) => document.querySelector(s);
   const API = "https://aion2.exchange/api";
+  const COPY = "https://raw.githubusercontent.com/Xzero3007/A2Tools-DPS-Meter_Clicktrough/market-data";
   const STALE_MS = 20 * 60_000; // prices older than this are fetched again on opening
   const AUTO_MS = 30 * 60_000; // and while the window stays open
-  const BATCH = 150; // item keys per request
+  const COPY_OLD_MS = 3 * 3600_000; // a copy older than this: aion2.exchange itself first
 
   let settings = {
     server: null, // aion2.exchange's server id
@@ -26,6 +30,7 @@
   let prices = new Map();
   let fetchedAt = 0;
   let snapshot = null;
+  let source = null; // "copy" or "aion2.exchange"
   let character = null;
   let busy = false;
   let error = "";
@@ -53,20 +58,38 @@
   const npc = () => ({ ...D.npcPrices, ...settings.npc });
 
   async function loadServers() {
-    try {
-      const list = C.readServers(await a2.web.get(`${API}/servers`));
-      if (list.length) {
-        servers = list;
-        error = "";
-        a2.storage.set("servers", { at: Date.now(), servers }).catch(() => {});
-      } else if (!servers.length) {
-        error = "aion2.exchange: no servers in its answer";
+    // The copy's list (null while there is none yet), else aion2.exchange's.
+    let list = [];
+    let failure = null;
+    for (const url of [`${COPY}/servers.json`, `${API}/servers`]) {
+      try {
+        list = C.readServers(await a2.web.get(url));
+        if (list.length) break;
+      } catch (e) {
+        failure = e;
       }
-    } catch (e) {
-      if (!servers.length) error = `aion2.exchange: ${e?.message || e}`;
+    }
+    if (list.length) {
+      servers = list;
+      error = "";
+      a2.storage.set("servers", { at: Date.now(), servers }).catch(() => {});
+    } else if (!servers.length) {
+      error = `aion2.exchange: ${failure ? failure.message || failure : "no servers in its answer"}`;
     }
     pickServer();
     renderBar();
+  }
+
+  /** Every item row of a server from aion2.exchange itself, page by page. */
+  async function directRows(id) {
+    const rows = [];
+    for (let page = 0; page < 10; page++) {
+      const res = await a2.web.get(`${API}/items?server=${id}&limit=1000&offset=${rows.length}`);
+      const items = Array.isArray(res?.items) ? res.items : [];
+      rows.push(...items);
+      if (!items.length || rows.length >= (Number(res?.total) || 0)) break;
+    }
+    return rows;
   }
 
   /** The player's server, once: aion2.exchange numbers it 10000 more than
@@ -88,32 +111,34 @@
     error = "";
     renderBar();
     try {
-      // In parts; a part the service fails keeps the prices it had (the
-      // site is often briefly down), the others are new.
-      const keys = C.neededItems(s.faction);
-      const rows = [];
-      let failed = 0;
-      let parts = 0;
-      let lastError = null;
-      for (let i = 0; i < keys.length; i += BATCH) {
-        const part = keys.slice(i, i + BATCH);
-        parts++;
+      // The copy first; aion2.exchange itself when the copy lacks the server
+      // or is old, and the old copy still when aion2.exchange fails.
+      let copy = null;
+      try {
+        copy = C.readCopy(await a2.web.get(`${COPY}/prices/${s.id}.json`));
+      } catch {}
+      const copyOld = !copy || Date.now() - (Date.parse(copy.copied) || 0) > COPY_OLD_MS;
+      let got = null;
+      let failure = null;
+      if (copyOld) {
         try {
-          const res = await a2.web.get(`${API}/items?server=${s.id}&limit=${BATCH + 50}&keys=${part.join(",")}`);
-          rows.push(...(Array.isArray(res?.items) ? res.items : []));
+          const rows = await directRows(s.id);
+          if (rows.length) {
+            got = { prices: C.readPrices(rows), snapshot: rows.map((r) => r.captured_at).filter(Boolean).sort().pop() || null, source: "aion2.exchange" };
+          }
         } catch (e) {
-          failed++;
-          lastError = e;
+          failure = e;
         }
       }
-      if (failed === parts) throw lastError;
-      const fresh = C.readPrices(rows);
-      prices = failed ? new Map([...prices, ...fresh]) : fresh;
+      if (!got && copy) got = { prices: copy.prices, snapshot: copy.snapshot, source: "copy" };
+      if (!got) throw failure || new Error("no prices for this server yet");
+      prices = got.prices;
+      snapshot = got.snapshot;
+      source = got.source;
       fetchedAt = Date.now();
-      snapshot = rows.map((r) => r.captured_at).filter(Boolean).sort().pop() || snapshot;
-      if (failed) error = `aion2.exchange: ${failed} of ${parts} parts kept their older prices: ${lastError?.message || lastError}`;
+      if (failure) error = `aion2.exchange: ${failure.message || failure} · showing the copy of ${when(snapshot)}`;
       const keep = [...prices].map(([id, p]) => [id, p.price, p.listings, p.sold, p.soldAvg, p.change]);
-      a2.storage.set("prices", { server: s.id, at: fetchedAt, snapshot, rows: keep }).catch(() => {});
+      a2.storage.set("prices", { server: s.id, at: fetchedAt, snapshot, source, rows: keep }).catch(() => {});
     } catch (e) {
       error = `aion2.exchange: ${e?.message || e}${prices.size ? " · showing the prices from before" : ""}`;
     } finally {
@@ -122,12 +147,15 @@
     render();
   }
 
+  const when = (iso) => (iso ? new Date(iso).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "earlier");
+
   function restoreCache(c) {
     try {
       if (c?.server !== settings.server || !Array.isArray(c.rows)) return;
       prices = new Map(c.rows.map(([id, price, listings, sold, soldAvg, change]) => [String(id), { price, listings, sold, soldAvg, change }]));
       fetchedAt = c.at || 0;
       snapshot = c.snapshot || null;
+      source = c.source || null;
     } catch {}
   }
 
@@ -157,9 +185,10 @@
     else if (!server()) st.textContent = "Pick your server for its prices.";
     else if (!fetchedAt) st.textContent = "No prices yet.";
     else {
-      const when = new Date(snapshot || fetchedAt);
       const listed = [...prices.values()].filter((p) => p.price != null).length;
-      st.textContent = `Prices of ${when.toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })} · ${listed} items listed`;
+      const from = source === "copy" ? " · Clicktrough's copy" : source ? ` · ${source}` : "";
+      st.textContent = `Prices of ${when(snapshot || new Date(fetchedAt).toISOString())} · ${listed} items listed${from}`;
+      st.title = source === "copy" ? "aion2.exchange's prices, copied every hour onto GitHub by the Clicktrough fork (fast); aion2.exchange itself only when the copy is older than 3 hours" : "";
     }
   }
 

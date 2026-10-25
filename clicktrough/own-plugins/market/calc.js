@@ -41,11 +41,31 @@
         soldMin: num(it.sold_min_price),
         soldMax: num(it.sold_max_price),
         change: num(it.change_pct),
+        last: num(it.last_price),
         at: it.captured_at || null,
         name: it.name || null,
       });
     }
     return out;
+  }
+
+  /** The Clicktrough fork's copy of a server's prices (dev/copy_prices.py:
+   *  { server, snapshot, copied, items: { id: [price, listings, sold,
+   *  soldAvg, change, last] } }) -> { prices (as readPrices), snapshot,
+   *  copied }, or null when it is none. */
+  function readCopy(doc) {
+    if (!doc || typeof doc !== "object" || !doc.items || typeof doc.items !== "object") return null;
+    const n = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+    const prices = new Map();
+    for (const [id, row] of Object.entries(doc.items)) {
+      if (!Array.isArray(row)) continue;
+      const price = n(row[0]) > 0 ? n(row[0]) : null;
+      prices.set(String(id), {
+        price, listings: price == null ? 0 : n(row[1]) ?? 0, sold: n(row[2]), soldAvg: n(row[3]),
+        change: n(row[4]), last: n(row[5]), at: doc.snapshot || null, name: null,
+      });
+    }
+    return prices.size ? { prices, snapshot: doc.snapshot || null, copied: doc.copied || null } : null;
   }
 
   /** aion2.exchange's servers ({ servers: [{ server_id, name,
@@ -65,6 +85,7 @@
         region: String(s.region_name || s.region || "Other"),
         faction: s.faction === "Elyos" || s.faction === "Asmodian" ? s.faction : null,
         hasData: s.has_data !== false && s.hasData !== false,
+        copied: s.copied === true,
       });
     }
     return out;
@@ -201,7 +222,7 @@
   const kina = (v) => (v == null || !Number.isFinite(v) ? "—" : Math.round(v).toLocaleString("en-US"));
 
   globalThis.MarketCalc = Object.freeze({
-    name, grade, readPrices, readServers, serverOf, market, unitCost, morphFrom, recipesOf, recipeSums, usesOf, morphTable,
+    name, grade, readPrices, readCopy, readServers, serverOf, market, unitCost, morphFrom, recipesOf, recipeSums, usesOf, morphTable,
     energyMorphCost, neededItems, kina, kindOf: (id) => KIND.get(String(id)) || null, FACTION_RACE,
   });
 })();

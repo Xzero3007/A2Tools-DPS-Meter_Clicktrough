@@ -31,16 +31,23 @@ goes.
   gathered materials, crafted materials, NPC tools or earlier tiers.
 
 Prices: the server is picked from yours when the meter knows your character,
-else from the list. They come from [aion2.exchange](https://aion2.exchange)'s
-public API (players' collected market prices, a new snapshot about every
-hour): when the window opens and every 30 minutes while it is open, through
-the meter (`a2.web.get`, Clicktrough patch 0016; the plugin's page itself has
-no network), which reads one address at most once a minute. The last prices
-are kept for the next start. aion2.exchange is often down for a moment
-("database unavailable"): the meter tries again once, a part of the prices
-it still can't get keeps its older prices, and the line at the top says
-what went wrong (e.g. "could not connect: ...", "no answer in time", "the
-service is down right now").
+else from the list. They are [aion2.exchange](https://aion2.exchange)'s
+(players' collected market prices, a new snapshot about every hour), read
+when the window opens and every 30 minutes while it is open, through the
+meter (`a2.web.get`, Clicktrough patch 0016; the plugin's page itself has no
+network):
+
+1. first from **Clicktrough's copy** on GitHub: aion2.exchange is slow and
+   often briefly down ("database unavailable"), so the fork's workflow
+   `market-prices.yml` asks it patiently once an hour (`dev/copy_prices.py`,
+   the European servers) and publishes a small file per server on the
+   branch `market-data`, which the plugin reads in a moment;
+2. from aion2.exchange itself when the copy lacks your server or is older
+   than 3 hours; and the old copy still when that fails.
+
+The line at the top says which ("Clicktrough's copy" or "aion2.exchange")
+and what went wrong ("could not connect: ...", "no answer in time", "the
+service is down right now"). The last prices are kept for the next start.
 
 ## Data
 

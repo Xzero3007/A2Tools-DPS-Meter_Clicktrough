@@ -1,14 +1,15 @@
 {
   "id": "market",
   "name": "Market",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "apiVersion": 2,
   "author": "Clicktrough (prices: aion2.exchange; recipes and names: the game client via SkeeveAN's Aion-DPS-Meter, MIT)",
   "description": "Your server's market prices of the gathered materials, what they cost made from Odyle (Substance Morph), what every recipe costs and brings with and without morphing, and which recipes need each material, with its cost.",
   "permissions": [
     "storage",
     "events:character",
-    "web:aion2.exchange"
+    "web:aion2.exchange",
+    "web:raw.githubusercontent.com"
   ],
   "ui": {
     "panel": {

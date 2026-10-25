@@ -1,0 +1,59 @@
+# Clicktrough: an hourly copy of aion2.exchange's market prices for the
+# Market plugin, on the branch market-data (one commit, replaced each time).
+# aion2.exchange is often briefly down and slow; this asks it patiently once
+# an hour, so the meters read a small file from GitHub instead.
+# See clicktrough/own-plugins/market/dev/copy_prices.py.
+name: Market prices
+
+on:
+  schedule:
+    # aion2.exchange takes a new snapshot about :07 each hour.
+    - cron: "19 * * * *"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/market-prices.yml"
+      - "clicktrough/own-plugins/market/dev/copy_prices.py"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: market-prices
+  cancel-in-progress: false
+
+jobs:
+  copy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      MARKET_REGIONS: EU
+      MARKET_BUDGET_S: "1800"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: src
+          sparse-checkout: clicktrough/own-plugins/market/dev
+      - name: The copy so far
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git clone -q --depth 1 --branch market-data \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" data 2>/dev/null \
+            || mkdir -p data
+          rm -rf data/.git
+      - name: Copy the prices
+        id: copy
+        run: python3 -I src/clicktrough/own-plugins/market/dev/copy_prices.py data
+      - name: Publish
+        if: steps.copy.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd data
+          git init -q -b market-data
+          git add -A
+          git -c user.name="github-actions[bot]" -c user.email="41898099+github-actions[bot]@users.noreply.github.com" \
+            commit -q -m "Market prices $(date -u +%Y-%m-%dT%H:%MZ)"
+          git push -q -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" market-data

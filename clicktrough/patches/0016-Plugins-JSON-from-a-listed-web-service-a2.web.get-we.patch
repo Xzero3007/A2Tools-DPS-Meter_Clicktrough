@@ -1,4 +1,4 @@
-From 8f249d7f40af0d5e1c3ed7abc1729c038ec4a691 Mon Sep 17 00:00:00 2001
+From f228b7f679f77a9df033009454e284e266cc4e40 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Sat, 24 Oct 2026 22:44:44 +0000
 Subject: [PATCH] Plugins: JSON from a listed web service (a2.web.get,
@@ -8,10 +8,12 @@ A plugin's page has no network at all, and some data plugins want is
 only on the web: a market plugin needs the market prices players collect
 on aion2.exchange (its public API; it sends no CORS headers, so a page
 couldn't read it anyway). await a2.web.get(url) now returns the parsed
-JSON answer of a service the meter lists (plugins::WEB_HOSTS, for now
-aion2.exchange), for a plugin with the permission "web:<host>"
+JSON answer of a service the meter lists (plugins::WEB_HOSTS:
+aion2.exchange, and on raw.githubusercontent.com only the Clicktrough
+fork's branch market-data, its hourly copy of those prices), for a
+plugin with the permission "web:<host>"
 (Settings words it "Read data from <host> on the internet"): GET over
-https only, no other host, port or credentials, at most 8 MB, null for
+https only, no other host, path, port or credentials, at most 8 MB, null for
 a 404. One address is read at most once a minute, whichever plugin
 window asks, and one host at most four times a second.
 
@@ -27,12 +29,12 @@ once more after two seconds.
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_01RBQati3x8VviBbpY9juEWf
 ---
- public/src/js/pluginFrame.js    |   7 ++
+ public/src/js/pluginFrame.js    |   7 +
  public/src/js/pluginSettings.js |   3 +
  src-tauri/src/app.rs            |   1 +
- src-tauri/src/plugins/a2.js     |   6 +
- src-tauri/src/plugins/mod.rs    | 203 +++++++++++++++++++++++++++++++-
- 5 files changed, 216 insertions(+), 4 deletions(-)
+ src-tauri/src/plugins/a2.js     |   7 +
+ src-tauri/src/plugins/mod.rs    | 226 +++++++++++++++++++++++++++++++-
+ 5 files changed, 240 insertions(+), 4 deletions(-)
 
 diff --git a/public/src/js/pluginFrame.js b/public/src/js/pluginFrame.js
 index 99e60dc..fc46c94 100644
@@ -79,21 +81,22 @@ index ba19a38..e26e137 100644
              crate::plugins::widgets::plugin_widget_resize,
              open_settings_at,
 diff --git a/src-tauri/src/plugins/a2.js b/src-tauri/src/plugins/a2.js
-index c4eab7e..663f7cd 100644
+index c4eab7e..a713314 100644
 --- a/src-tauri/src/plugins/a2.js
 +++ b/src-tauri/src/plugins/a2.js
-@@ -38,6 +38,10 @@
+@@ -38,6 +38,11 @@
  //                                              (permission "share"); null withdraws it
  //   a2.on("shared", ({ plugin, value }) => ...)  what another plugin shared (permission "events:shared"):
  //                                              at once, and every value shared so far at start
 +//   await a2.web.get("https://aion2.exchange/api/servers")  Clicktrough: the JSON answer of a web
-+//                                              service the meter lists (aion2.exchange), with the
++//                                              service the meter lists (aion2.exchange; the fork's
++//                                              price copy on raw.githubusercontent.com), with the
 +//                                              permission "web:<host>"; null for "not found"; one
 +//                                              address is read at most once a minute
  //
  // Keep the page's background transparent: the window paints the panel at the
  // opacity the user picks.
-@@ -190,6 +194,8 @@
+@@ -190,6 +195,8 @@
      file: (path) => call("file", [String(path)]),
      // Clicktrough: a value for other plugins (permission "share").
      share: (value) => call("share", [value ?? null]),
@@ -103,7 +106,7 @@ index c4eab7e..663f7cd 100644
      // Meter 2.0.72 on: the server's Abyss siege (artifact holders, cores).
      abyssSiege: (server) => call("abyssSiege", [Number(server)]),
 diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
-index b67e933..e4c9c2d 100644
+index b67e933..71a241d 100644
 --- a/src-tauri/src/plugins/mod.rs
 +++ b/src-tauri/src/plugins/mod.rs
 @@ -1169,9 +1169,10 @@ fn describe_permission(t: &PromptTexts, permission: &str) -> String {
@@ -120,27 +123,39 @@ index b67e933..e4c9c2d 100644
          },
      }
  }
-@@ -2051,6 +2052,169 @@ async fn feed_file(_app: &tauri::AppHandle, _feed: &'static str, _server: u32) -
+@@ -2051,6 +2052,181 @@ async fn feed_file(_app: &tauri::AppHandle, _feed: &'static str, _server: u32) -
      Err("this meter is built without network features".into())
  }
  
 +/// Clicktrough: the web services plugins may read from (`a2.web.get`), each
-+/// behind the permission "web:<host>". Only these: a plugin cannot reach
-+/// anything else (its page has no network at all).
++/// behind the permission "web:<host>", and there only under its path. Only
++/// these: a plugin cannot reach anything else (its page has no network at
++/// all).
 +///   aion2.exchange  the market prices players' clients collect, by server
 +///                   (its public API, /api/docs); the Market plugin
-+pub const WEB_HOSTS: &[&str] = &["aion2.exchange"];
++///   raw.githubusercontent.com, the Clicktrough fork's branch market-data
++///                   only: its hourly copy of aion2.exchange's prices
++///                   (.github/workflows/market-prices.yml), which the
++///                   Market plugin reads first
++pub const WEB_HOSTS: &[(&str, &str)] = &[
++    ("aion2.exchange", "/"),
++    ("raw.githubusercontent.com", "/Xzero3007/A2Tools-DPS-Meter_Clicktrough/market-data/"),
++];
 +
 +/// Most bytes a web answer may have.
 +const MAX_WEB_ANSWER: usize = 8 * 1024 * 1024;
 +
-+/// The host of a URL a plugin may read: https, one of `WEB_HOSTS`, no port,
-+/// user or password. The permission it needs, "web:<host>".
++/// The host of a URL a plugin may read: https, one of `WEB_HOSTS` and under
++/// its path, no port, user or password, no way out of the path ("..", or an
++/// escaped character in it). The permission it needs, "web:<host>".
 +fn web_permission(url: &str) -> Result<String, String> {
 +    let rest = url.strip_prefix("https://").ok_or("only https:// addresses")?;
 +    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
-+    if authority.contains(['@', ':']) || !WEB_HOSTS.contains(&authority) {
-+        return Err(format!("{authority:?} is not a web service plugins may read"));
++    let path = rest[authority.len()..].split(['?', '#']).next().unwrap_or("");
++    let path = if path.is_empty() { "/" } else { path };
++    let listed = WEB_HOSTS.iter().any(|(host, under)| *host == authority && path.starts_with(under));
++    if authority.contains(['@', ':']) || !listed || path.contains("..") || path.contains('%') || path.contains('\\') {
++        return Err(format!("{url:?} is not a web service plugins may read"));
 +    }
 +    Ok(format!("web:{authority}"))
 +}
@@ -290,7 +305,7 @@ index b67e933..e4c9c2d 100644
  #[tauri::command]
  pub fn plugin_storage_get(app: tauri::AppHandle, window: tauri::WebviewWindow, plugin: Option<String>, key: String) -> Result<Option<String>, String> {
      let id = window_plugin(&window, plugin.as_deref())?;
-@@ -2341,7 +2505,38 @@ fn percent_decode(s: &str) -> String {
+@@ -2341,7 +2517,49 @@ fn percent_decode(s: &str) -> String {
  
  #[cfg(test)]
  mod tests {
@@ -301,12 +316,23 @@ index b67e933..e4c9c2d 100644
 +    fn a_plugin_reads_only_the_listed_web_services_over_https() {
 +        assert_eq!(web_permission("https://aion2.exchange/api/items?server=12305").as_deref(), Ok("web:aion2.exchange"));
 +        assert_eq!(web_permission("https://aion2.exchange").as_deref(), Ok("web:aion2.exchange"));
++        // GitHub: the fork's copy of the prices, nothing else there.
++        assert_eq!(
++            web_permission("https://raw.githubusercontent.com/Xzero3007/A2Tools-DPS-Meter_Clicktrough/market-data/prices/12305.json").as_deref(),
++            Ok("web:raw.githubusercontent.com")
++        );
 +        for bad in [
 +            "http://aion2.exchange/api/servers",
 +            "https://aion2.exchange:8443/api/servers",
 +            "https://user@aion2.exchange/api/servers",
 +            "https://aion2.exchange.evil.example/api",
 +            "https://evil.example/?https://aion2.exchange",
++            "https://raw.githubusercontent.com/someone/else/main/x.json",
++            "https://raw.githubusercontent.com/Xzero3007/A2Tools-DPS-Meter_Clicktrough/main/README.md",
++            "https://raw.githubusercontent.com/Xzero3007/A2Tools-DPS-Meter_Clicktrough/market-data/../main/x",
++            "https://raw.githubusercontent.com/Xzero3007/A2Tools-DPS-Meter_Clicktrough/market-data/%2e%2e/main/x",
++            "https://raw.githubusercontent.com/Xzero3007/A2Tools-DPS-Meter_Clicktrough/market-data",
++            "https://raw.githubusercontent.com",
 +            "file:///etc/passwd",
 +            "",
 +        ] {

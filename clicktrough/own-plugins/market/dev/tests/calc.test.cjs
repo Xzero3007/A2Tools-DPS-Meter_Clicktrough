@@ -107,12 +107,33 @@ test("aion2.exchange servers as its API gives them, and the player's among them"
   ] };
   const list = C.readServers(res);
   assert.equal(list.length, 3);
-  assert.deepEqual(list[1], { id: 12101, game: 2101, name: "Israphel", region: "North America East", faction: "Asmodian", hasData: true });
+  assert.deepEqual(list[1], { id: 12101, game: 2101, name: "Israphel", region: "North America East", faction: "Asmodian", hasData: true, copied: false });
   assert.equal(list[2].hasData, false);
+  // The fork's copy says which servers it has.
+  assert.equal(C.readServers({ servers: [{ ...res.servers[0], copied: true }] })[0].copied, true);
   // Read again from the plugin's own cache: the same.
   assert.deepEqual(C.readServers({ servers: list }), list);
   assert.equal(C.serverOf(list, 2305).name, "Marchutan");
   assert.equal(C.serverOf(list, "1101").name, "Siel");
   assert.equal(C.serverOf(list, null), null);
   assert.equal(C.serverOf(list, 9999), null);
+});
+
+test("the fork's copy of a server's prices reads as aion2.exchange's rows do", () => {
+  const odyle = String(id("Odyle"));
+  const fine = String(id("Fine Odyle"));
+  const copy = C.readCopy({ v: 1, server: 12305, snapshot: "2026-10-25T02:10:02Z", copied: "2026-10-25T02:20:00Z",
+    items: { [odyle]: [2222, 135, null, 2100.5, -36.46, 2222], [fine]: [null, 0, null, null, null, 1486], bad: "x" } });
+  assert.equal(copy.snapshot, "2026-10-25T02:10:02Z");
+  assert.equal(copy.prices.get(odyle).price, 2222);
+  assert.equal(copy.prices.get(odyle).listings, 135);
+  assert.equal(copy.prices.get(odyle).change, -36.46);
+  assert.equal(copy.prices.get(fine).price, null);
+  assert.equal(copy.prices.get(fine).last, 1486);
+  assert.equal(copy.prices.size, 2);
+  assert.equal(C.readCopy(null), null);
+  assert.equal(C.readCopy({ items: {} }), null);
+  // The same sums as with the API's rows.
+  const viaRows = C.readPrices([row("Odyle", 2222)]);
+  assert.equal(C.market(copy.prices, id("Odyle")), C.market(viaRows, id("Odyle")));
 });
