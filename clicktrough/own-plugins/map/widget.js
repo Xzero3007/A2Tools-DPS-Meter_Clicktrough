@@ -18,6 +18,7 @@
     if (!state) return;
     const tracked = new Map((state.tracked || []).map(([id, mark, name]) => [String(id), { mark, name }]));
     view.setMap(state.key);
+    view.setMarkScale(state.markScale ?? 1.25);
     const built = M.build({
       key: state.key, world: state.world, tracked, heading: state.heading, layers: state.layers,
       gatherKinds: state.gatherKinds || {}, petsMode: state.petsMode, focus: state.focus, nextFor: state.nextFor,
@@ -42,9 +43,15 @@
     if (n && state.onThisMap) {
       const label = Object.assign(document.createElement("span"), { className: "label", textContent: "Next" });
       const name = Object.assign(document.createElement("span"), { textContent: ` ${n.name} ` });
-      const dist = Object.assign(document.createElement("span"), { className: "dist", textContent: `${M.arrow(n.bearing)} ${Math.round(n.metres)} m` });
+      const dist = Object.assign(document.createElement("span"), {
+        className: "dist",
+        textContent: n.via ? `teleport to ${n.via.name}, then ${Math.round(n.via.metres)} m` : `${M.arrow(n.bearing)} ${Math.round(n.metres)} m`,
+      });
       chip.replaceChildren(label, name, dist);
-      chip.title = n.focus ? `What the search shows: ${n.name}` : `${n.name}: ${M.markText(n.mark)}`;
+      chip.classList.toggle("via", !!n.via);
+      chip.title = n.via
+        ? `Teleport to Kibelisk ${n.via.name}, then ${Math.round(n.via.metres)} m (walking: ${Math.round(n.metres)} m)`
+        : n.focus ? `What the search shows: ${n.name}` : `${n.name}: ${M.markText(n.mark)}`;
     }
     // What the search (or a map link in another plugin) shows stays until it
     // is cleared: here with the ×, or in the Map window.
@@ -124,6 +131,8 @@
   });
 
   a2.on("widget", (data) => {
+    // The learnt spots come only when they changed.
+    if (data && data.learned) M.setLearned(data.learned);
     state = data;
     draw();
   });

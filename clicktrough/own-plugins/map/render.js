@@ -189,10 +189,30 @@
       for (const m of ordered) {
         const [nx, ny] = toNative(map, m.x, m.y);
         const [sx, sy] = screenOf(nx, ny);
-        const pad = (m.r || 4) + 12;
+        // The way to a place: a dashed line from where it starts (you, or the
+        // Kibelisk to teleport to), wherever its ends are.
+        if (m.kind === "route") {
+          const [fx, fy] = screenOf(...toNative(map, m.from[0], m.from[1]));
+          ctx.save();
+          ctx.lineCap = "round";
+          ctx.setLineDash([]);
+          ctx.lineWidth = 6 * markScale;
+          ctx.strokeStyle = "rgba(0,0,0,0.45)";
+          ctx.beginPath();
+          ctx.moveTo(fx, fy);
+          ctx.lineTo(sx, sy);
+          ctx.stroke();
+          ctx.setLineDash([9 * markScale, 7 * markScale]);
+          ctx.lineWidth = 3 * markScale;
+          ctx.strokeStyle = GOLD;
+          ctx.stroke();
+          ctx.restore();
+          continue;
+        }
+        const pad = (m.r || 4) * markScale + 12;
         if (sx < -pad || sy < -pad || sx > w + pad || sy > h + pad) continue;
         drawMark(m, sx, sy);
-        if (m.label) drawn.push([sx, sy, (m.r || 4) + 3, m.label]);
+        if (m.label) drawn.push([sx, sy, (m.r || 4) * markScale + 3, m.label]);
       }
     }
 
@@ -211,8 +231,10 @@
     }
 
     let shrink = 1;
+    // How large the marks are drawn (the player's setting: 1 = as designed).
+    let markScale = 1;
     function drawMark(m, sx, sy) {
-      const r = (m.r || 4) * (m.kind === "me" ? 1 : shrink);
+      const r = (m.r || 4) * (m.kind === "me" ? 1 : shrink) * markScale;
       switch (m.kind) {
         case "me": {
           // Not exact: a ring as large as the guess is uncertain (~10 m).
@@ -265,6 +287,37 @@
           ctx.fillStyle = GOLD;
           ctx.lineWidth = 2;
           ctx.strokeStyle = "#ffffff";
+          ctx.fill();
+          ctx.stroke();
+          break;
+        case "boss": {
+          // A field boss: a crown of three points on a dark disc, orange-red.
+          circle(sx, sy, r * 1.15, "rgba(30,10,8,0.85)", "#ff7a52", 2);
+          ctx.beginPath();
+          ctx.moveTo(sx - r * 0.7, sy + r * 0.45);
+          ctx.lineTo(sx - r * 0.7, sy - r * 0.35);
+          ctx.lineTo(sx - r * 0.35, sy);
+          ctx.lineTo(sx, sy - r * 0.6);
+          ctx.lineTo(sx + r * 0.35, sy);
+          ctx.lineTo(sx + r * 0.7, sy - r * 0.35);
+          ctx.lineTo(sx + r * 0.7, sy + r * 0.45);
+          ctx.closePath();
+          ctx.fillStyle = "#ffb199";
+          ctx.fill();
+          break;
+        }
+        case "teleport":
+          // The Kibelisk to teleport to on the way: its triangle, large, in a
+          // gold ring.
+          circle(sx, sy, r + 5, "rgba(10,12,16,0.75)", GOLD, 2.5);
+          ctx.beginPath();
+          ctx.moveTo(sx, sy - r * 1.1);
+          ctx.lineTo(sx + r * 0.85, sy + r * 0.65);
+          ctx.lineTo(sx - r * 0.85, sy + r * 0.65);
+          ctx.closePath();
+          ctx.fillStyle = "#9ee6d8";
+          ctx.lineWidth = 1.5;
+          ctx.strokeStyle = "rgba(0,0,0,0.7)";
           ctx.fill();
           ctx.stroke();
           break;
@@ -331,13 +384,15 @@
       }
       // What the search or another plugin asked for: a gold ring around it.
       if (m.hit) circle(sx, sy, Math.max(r + 4, 7), null, GOLD, 2.5);
-      if (m.text && zoom * map.tile >= 180) {
-        ctx.font = "11px system-ui, sans-serif";
+      // The way's Kibelisk always says its name; other names once zoomed in.
+      if (m.text && (m.kind === "teleport" || zoom * map.tile >= 180)) {
+        ctx.font = `${m.kind === "teleport" ? "600 " : ""}${Math.round(11 * Math.min(1.4, markScale))}px system-ui, sans-serif`;
         ctx.lineWidth = 3;
         ctx.strokeStyle = "rgba(0,0,0,0.8)";
         ctx.fillStyle = "#fff";
-        ctx.strokeText(m.text, sx + r + 4, sy + 4);
-        ctx.fillText(m.text, sx + r + 4, sy + 4);
+        const tx = sx + r + (m.kind === "teleport" ? 9 : 4);
+        ctx.strokeText(m.text, tx, sy + 4);
+        ctx.fillText(m.text, tx, sy + 4);
       }
     }
 
@@ -419,6 +474,11 @@
       },
       centerOn,
       setMarks(list) { marks = list; redraw(); },
+      /** How large the marks are drawn: 1 as designed, 1.25 a quarter larger. */
+      setMarkScale(f) {
+        const v = Math.max(0.6, Math.min(2.5, Number(f) || 1));
+        if (v !== markScale) { markScale = v; redraw(); }
+      },
       redraw,
       /** Screen px per world metre at this zoom, and setting it. */
       pxPerMetre: () => (map ? map.scale * 100 * zoom : 0),

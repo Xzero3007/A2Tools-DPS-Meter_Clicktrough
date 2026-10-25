@@ -44,7 +44,16 @@ follows you over the game.
   Altgard, about 200 in the Abyss).
 - **Kibelisks**: the Kibelisk camps.
 - **Places**: sealed dungeons, battlefields, outposts and villages, with
-  their names once zoomed in, and the names of the regions.
+  their names once zoomed in, the names of the regions, and the **field
+  bosses** (an orange crown).
+- **Marks 100% to 175%**: how large the marks are, on the map and the
+  overlay (125% to begin with).
+- **What your meter sees is learnt**: the data knows only the gathering
+  spots and pet spawns players' meters happened to report (Asvata: 3 in
+  Altgard). Each gathering spot, Hidden Cube and pet monster your meter sees
+  where the map has none of its kind yet (8 m for a spot, 20 m for a
+  monster) is added, kept and shown like the others ("12 spots your meter
+  saw" at the bottom); the more you play, the fuller the map.
 
 **Search** (two letters or more): gathering spots by name (Orichalcum, Aria
 ...), pets, the monsters that drop them, Kibelisk camps, **Hidden Cube**
@@ -52,9 +61,15 @@ follows you over the game.
 **Monolith**, sealed dungeons, battlefields, outposts and villages (each kind,
 or one by its name) and regions, each with the maps it is on and how often.
 Picking one shows all its places with a gold ring, the map framed around them
-(the bar above the map switches between its maps), and the nearest one as
-**Next**, which way and how far, in the overlay too. A map link in Pet Finder
-or Pet Soul Tracker does the same for that pet or monster and brings the Map
+(the bar above the map switches between its maps), and **the way there**:
+from your position, walking, or a teleport to the Kibelisk nearest the place
+(gold ring, "Teleport: <name>") and a dashed line from there, whichever is
+shorter (a teleport counts as 250 m of walking); to the cheapest of its
+places when it has several. **Next** says it, in the overlay too: "teleport
+to <Kibelisk>, then 186 m", or which way and how far. A map link in Pet
+Finder or Pet Soul Tracker does the same for that pet or monster, a world
+boss's map button in **Event Timers** for that boss, and a material's map
+button in the **Market** for where it is gathered; each brings the Map
 forward. It stays, after a restart too, until its **×** stops it: in the bar
 above the map, or at the bottom of the overlay ("Showing ...", in gold).
 
@@ -89,7 +104,13 @@ by Yihao Liu (tc-imba) (CC BY-NC 4.0: non-commercial use only, see
 `NOTICE-AION2-Interactive-Map.txt`) with
 `python3 -I dev/make_data.py <Aion-DPS-Meter checkout> . --aim <aion2-interactive-map checkout> --game-maps <its gh-pages checkout>`
 (`--no-tiles` keeps `tiles/`); `dev/provenance.json` names the revisions,
-the calibration and every file read.
+the calibration and every file read. The field bosses' places are SkeeveAN's
+(`bosses/field_bosses.json`), their world-map ids the meter's
+(`capture/field_bosses.rs`).
+
+Fuller gathering maps exist (allthings.how and The Hidden Gaming Lair show
+158 Asvata spots in Altgard), but their data is theirs, with no licence to
+reuse it here; so the plugin learns what your own meter sees instead.
 
 The world maps are the game's own map pictures as the AION2 Interactive Map
 publishes them (its `gh-pages` branch, `UI/Map/WorldMap`), the way the map

@@ -1,0 +1,45 @@
+From f237425642631f551aa7a8bbb0ea45f57004dadd Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Sun, 25 Oct 2026 01:56:56 +0000
+Subject: [PATCH] Plugins: a link whose click the plugin took doesn't open the
+ browser
+
+The page's own link handling (a2.js) opened every https link clicked in
+the browser, even one whose click the plugin had handled itself and
+prevented: Pet Soul Tracker's map links showed the monster on the Map
+plugin and opened Aion 2 Timers' map in the browser as well. A click
+whose default a handler prevented now stays with the plugin.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01RBQati3x8VviBbpY9juEWf
+---
+ src-tauri/src/plugins/a2.js | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/src-tauri/src/plugins/a2.js b/src-tauri/src/plugins/a2.js
+index a713314..b2c670f 100644
+--- a/src-tauri/src/plugins/a2.js
++++ b/src-tauri/src/plugins/a2.js
+@@ -98,7 +98,8 @@
+ //   a2.ready()                                 call once the handlers are set
+ //
+ // A link (<a href="https://...">) clicked in the page opens in the browser
+-// (meter 2.0.65 on; before, the click did nothing).
++// (meter 2.0.65 on; before, the click did nothing), unless the plugin's own
++// handler took the click (event.preventDefault(), Clicktrough).
+ (() => {
+   // The Settings colours as CSS variables, and the page's form controls
+   // styled with them: a select was the webview's own grey box. All in
+@@ -230,6 +231,9 @@
+   });
+   // The frame may not open windows or leave its page: links go to the browser.
+   document.addEventListener("click", (event) => {
++    // Clicktrough: a link whose click the plugin took itself (its handler
++    // prevented the default) stays with the plugin.
++    if (event.defaultPrevented) return;
+     const link = event.target instanceof Element ? event.target.closest("a[href]") : null;
+     if (!link || !/^https:\/\//i.test(link.href)) return;
+     event.preventDefault();
+-- 
+2.43.0
+

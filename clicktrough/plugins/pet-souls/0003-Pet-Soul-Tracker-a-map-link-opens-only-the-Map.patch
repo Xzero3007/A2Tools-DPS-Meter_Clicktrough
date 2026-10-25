@@ -1,0 +1,35 @@
+From 4760178d79a61695acd857528bf1212f12f62e3a Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Sun, 25 Oct 2026 01:56:22 +0000
+Subject: [PATCH] Pet Soul Tracker: a map link opens only the Map
+
+With the Map plugin, a monster's map link showed it on the Map and, the
+same moment, opened Aion 2 Timers' map in the browser: the plugin page's
+own link handling (a2.js) opens any https link clicked, whether the
+link's click was handled or not. The click now goes no further than the
+link.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01RBQati3x8VviBbpY9juEWf
+---
+ plugins/pet-souls/plugin.js | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/plugins/pet-souls/plugin.js b/plugins/pet-souls/plugin.js
+index d3446ac..d410113 100644
+--- a/plugins/pet-souls/plugin.js
++++ b/plugins/pet-souls/plugin.js
+@@ -664,7 +664,10 @@ function whereOf(id) {
+       if (typeof a2.share === "function") {
+         link.title = "Show its spawn points on the Map";
+         link.addEventListener("click", (e) => {
++          // Not on to the page's own link handling (a2.js), which opens a
++          // link in the browser whatever was done with its click.
+           e.preventDefault();
++          e.stopPropagation();
+           showOnMap({ npc: d.npcId, name: SOURCE_TEXT[d.npc]?.en || text(d.npc), region: regionOf(d) });
+         });
+       }
+-- 
+2.43.0
+

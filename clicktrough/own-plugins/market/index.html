@@ -8,6 +8,10 @@
     <header class="bar">
       <select class="server" title="Whose market: the server, and with it the faction's recipes"></select>
       <button type="button" class="refresh" title="Get the prices again">Update</button>
+      <span class="seg faction" role="group" aria-label="Faction" title="Whose items: the gathered materials and recipes of your side">
+        <button type="button" data-faction="Asmodian" aria-pressed="false">Asmodian</button><button type="button" data-faction="Elyos" aria-pressed="false">Elyos</button>
+      </span>
+      <button type="button" class="favFirst" aria-pressed="false" title="Your favourites (the stars) first, in every tab"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2l2.6 5.6 6.1.7-4.5 4.2 1.2 6-5.4-3.1-5.4 3.1 1.2-6-4.5-4.2 6.1-.7z"/></svg>Favorites</button>
       <span class="status muted"></span>
     </header>
     <nav class="tabs" role="tablist">
@@ -23,7 +27,7 @@
     </section>
 
     <section class="pane" data-pane="odyle">
-      <p class="note">Substance Morph turns one Odyle into one gathered material of the same grade (Odyle → base, Fine → Fine / Fresh, Pure → Pure, Radiant → Radiant), always. What it makes is <strong>bound</strong>: it goes into your own crafting (see Recipes), not onto the market.</p>
+      <p class="note">Substance Morph turns one Odyle into one gathered material of the same grade (Odyle → base, Fine → Fine / Fresh, Pure → Pure, Radiant → Radiant), always. What it makes is <strong>bound</strong>: it goes into your own crafting, not onto the market. Click a material for the recipes that need it.</p>
       <div class="energy"></div>
       <div class="odyleList"></div>
     </section>

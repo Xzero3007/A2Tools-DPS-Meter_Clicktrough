@@ -43,6 +43,16 @@ a { color: rgba(255,255,255,.8); }
 h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: rgba(255,255,255,.55); margin: 12px 0 4px; font-weight: 600; }
 table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
 th { text-align: right; font-weight: 500; font-size: 11px; color: rgba(255,255,255,.5); padding: 3px 6px; border-bottom: 1px solid rgba(255,255,255,.12); white-space: nowrap; }
+/* A list's columns the same for all its groups, its header kept at the top
+   as the page scrolls (on the panel's colour, so rows pass under it). */
+table.list { table-layout: fixed; }
+table.list > thead th { position: sticky; top: 0; z-index: 3; background: var(--a2-panel, #0e1420);
+  border-bottom: 0; box-shadow: inset 0 -1px 0 rgba(255,255,255,.14); padding-top: 6px; overflow: hidden; text-overflow: ellipsis; }
+table.list > tbody > tr > td { overflow: hidden; text-overflow: ellipsis; }
+tr.group th { text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: rgba(255,255,255,.55);
+  font-weight: 600; padding: 14px 6px 4px; border-bottom: 1px solid rgba(255,255,255,.12); }
+tbody > tr.group:first-child th { padding-top: 6px; }
+table.inner { table-layout: auto; }
 th:first-child, td:first-child { text-align: left; }
 td { text-align: right; padding: 4px 6px; border-bottom: 1px solid rgba(255,255,255,.06); white-space: nowrap; }
 td:first-child { white-space: normal; }
@@ -60,6 +70,29 @@ tr.detail table td, tr.detail table th { font-size: 12px; }
 .tag.morph { border-color: rgba(127,220,154,.5); color: #a9ebbd; }
 .tag.npc { border-color: rgba(255,214,102,.45); color: #ffe199; }
 .buyCol, .bestCol { font-weight: 600; color: rgba(255,255,255,.75); }
+
+/* The name cell: star, name, its tags, map link. */
+td.name { white-space: nowrap; }
+td.name .label { vertical-align: middle; }
+.star, .mapBtn { background: none; border: 0; padding: 0 3px; margin: 0; cursor: pointer; vertical-align: middle; line-height: 0; }
+.star svg, .mapBtn svg { width: 13px; height: 13px; fill: none; stroke: rgba(255,255,255,.35); stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
+.star { margin-left: -3px; margin-right: 2px; }
+.star:hover svg, .mapBtn:hover svg { stroke: #fff; }
+.star.on svg { fill: #ffd666; stroke: #ffd666; }
+.mapBtn { margin-left: 4px; opacity: .7; }
+tr:hover .mapBtn, .mapBtn:focus-visible { opacity: 1; }
+.mapBtn svg { stroke: rgba(255,255,255,.5); }
+.star:hover, .mapBtn:hover { background: none; }
+
+/* The bar: faction and favourites. */
+.seg { display: inline-flex; border: 1px solid rgba(255,255,255,.18); border-radius: 5px; overflow: hidden; }
+.seg button { border: 0; border-radius: 0; background: none; padding: 2px 9px; color: rgba(255,255,255,.6); }
+.seg button + button { border-left: 1px solid rgba(255,255,255,.14); }
+.seg button[aria-pressed="true"] { background: rgba(255,255,255,.16); color: #fff; }
+.favFirst { display: inline-flex; align-items: center; gap: 5px; color: rgba(255,255,255,.65); }
+.favFirst svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linejoin: round; }
+.favFirst[aria-pressed="true"] { background: rgba(255,214,102,.14); border-color: rgba(255,214,102,.55); color: #ffe199; }
+.favFirst[aria-pressed="true"] svg { fill: #ffd666; stroke: #ffd666; }
 
 .energy { border: 1px solid rgba(255,255,255,.12); border-radius: 6px; padding: 6px 10px; margin-bottom: 8px; font-size: 12px; }
 .energy strong { color: #fff; }

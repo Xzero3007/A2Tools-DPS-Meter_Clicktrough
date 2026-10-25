@@ -50,6 +50,14 @@ package.
   of them, which is fast where the site is slow), what they cost made from
   Odyle (Substance Morph), what every recipe costs and brings with and
   without morphing, and which recipes need each material, with its cost.
+- **Market, sorted your way**: Asmodian or Elyos items only, favourites
+  with a star (listed first on request), headers that stay while scrolling,
+  a click on a material for the recipes that need it, and a map button for
+  where it is gathered.
+- **The way there on the Map**: for a search, a field boss (map button in
+  Event Timers) or a material (map button in the Market), the Kibelisk to
+  teleport to and a line from it; field bosses on the map; larger marks
+  (100–175 %); and the gathering spots and pets your meter sees are added.
 - **Window sizes to switch between**: buttons 1, 2, 3 beside the text size
   of the plugin dock and of a plugin's window switch it between three sizes;
   a right-click keeps the window's size now under a button. Clickable while

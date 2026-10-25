@@ -29,10 +29,14 @@ body.locked .head { cursor: default; }
 .mapMarks { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 1; }
 .mapTip { display: none; }
 .nextChip { position: absolute; z-index: 4; top: 8px; left: 50%; transform: translateX(-50%); white-space: nowrap;
+  max-width: calc(100% - 16px); box-sizing: border-box; overflow: hidden; text-overflow: ellipsis; text-align: center;
   padding: 3px 10px; border-radius: 999px; font-size: 12px;
   background: rgba(10, 12, 16, 0.88); border: 1px solid rgba(255, 255, 255, 0.18); }
 .nextChip .label { color: rgba(255, 255, 255, 0.55); }
 .nextChip .dist { color: rgba(255, 255, 255, 0.7); }
+/* By teleport: the way on a line of its own. */
+.nextChip.via { white-space: normal; border-radius: 10px; }
+.nextChip.via .dist { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* Short of the corner on the right, so its × stays clickable. */
 .foot { margin: 6px 8px 8px; align-self: flex-start; max-width: calc(100% - 44px); box-sizing: border-box; display: flex; align-items: center; gap: 6px;
   padding: 3px 10px; border-radius: 999px; font-size: 12px; background: rgba(10, 12, 16, 0.8); border: 1px solid rgba(255, 255, 255, 0.12); }

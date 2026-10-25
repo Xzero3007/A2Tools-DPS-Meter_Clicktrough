@@ -21,6 +21,7 @@ What it takes (Client/assets/aion2/ of SkeeveAN's repo), English names only:
                                        the pets and which monsters drop them
   maps/gather.json                     gathering spots by kind
   maps/kibelisks.json                  Kibelisk camps
+  bosses/field_bosses.json             the field bosses' places, by world map
   npcs/npc_names.json                  monster names (for monsters around)
   zones/zones.json                     zone names
 
@@ -103,12 +104,30 @@ GAME_MAPS = {
     "ishalgen": ("World_D_Starter", "Ishalgen", "World/World_D/World_D_Starter", (-329748, -257999.78125, 180252, 252000.21875)),
 }
 
+GAME_KEY = {v[0]: k for k, v in GAME_MAPS.items()}  # "World_D_A" -> "altgard"
+
 maps_src = {**{k: {**v, "instance": False} for k, v in load("maps/maps.json")["maps"].items()},
             **{k: {**v, "instance": True} for k, v in load("maps/instances.json")["maps"].items()}}
 spawns_src = load("pets/spawns.json")["maps"]
 pets_src = load("pets/pets.json")
 gather_src = load("maps/gather.json")
 kib_src = load("maps/kibelisks.json")["maps"]
+bosses_src = load("bosses/field_bosses.json")["maps"]
+
+# The world-map boss id of each field boss's NPC code: the id the in-game map,
+# a2tools.app's timers and Event Timers know it by (the meter's
+# src-tauri/src/capture/field_bosses.rs, from the game's tables).
+FIELD_BOSS_IDS = {
+    2100003: 101001, 2100040: 101002, 2100050: 101003, 2100076: 101004, 2100077: 101005, 2100079: 101006,
+    2100141: 101007, 2100177: 101008, 2100178: 101009, 2100582: 101010, 2100617: 101011, 2100661: 101012,
+    2100708: 101013, 2100718: 101014, 2100876: 101015, 2100877: 101016, 2100988: 101017, 2100989: 101018,
+    2100991: 101019, 2101016: 101020, 2101074: 101021, 2101120: 101022, 2101122: 101023, 2101131: 101024,
+    2400017: 111001, 2400074: 111002, 2400140: 111003, 2400141: 111004, 2400212: 111005, 2400223: 111006,
+    2400274: 111007, 2400335: 111008, 2400353: 111009, 2400358: 111010, 2400419: 111011, 2400424: 111012,
+    2400425: 111013, 2400474: 111014, 2400504: 111015, 2400593: 111016, 2400607: 111017, 2400608: 111018,
+    2400659: 111019, 2400709: 111020, 2400800: 111021, 2400853: 111022, 2400854: 111023, 2400855: 111024,
+    2600068: 2001,
+}
 npc_src = load("npcs/npc_names.json")
 zones_src = load("zones/zones.json")["zones"]
 
@@ -390,6 +409,11 @@ data = {
         "points": gather_points,
     },
     "kibelisks": kibelisks,
+    # The field bosses of each map: [npc, name, x, y]; and the world-map id
+    # of each (Event Timers asks for a boss by it).
+    "bosses": {GAME_KEY[m["key"]]: [[b["npc"], en(b["names"]), round(b["x"]), round(b["y"])] for b in m["bosses"]]
+               for m in bosses_src if m.get("key") in GAME_KEY and GAME_KEY[m["key"]] in maps},
+    "bossIds": {str(wid): npc for npc, wid in FIELD_BOSS_IDS.items()},
     "cubes": CUBES,
     "cubeSpots": cube_spots,
     "monoliths": monoliths,

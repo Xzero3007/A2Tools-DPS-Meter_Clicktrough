@@ -137,3 +137,18 @@ test("the fork's copy of a server's prices reads as aion2.exchange's rows do", (
   const viaRows = C.readPrices([row("Odyle", 2222)]);
   assert.equal(C.market(copy.prices, id("Odyle")), C.market(viaRows, id("Odyle")));
 });
+
+test("each faction's items: its recipes' materials and products; Odyle for both", () => {
+  assert.equal(C.ofFaction(id("Asvata Log"), "Asmodian"), true);
+  assert.equal(C.ofFaction(id("Asvata Log"), "Elyos"), false);
+  assert.equal(C.ofFaction(id("Yggdrasil Log"), "Elyos"), true);
+  assert.equal(C.ofFaction(id("Yggdrasil Log"), "Asmodian"), false);
+  assert.equal(C.ofFaction(id("Orichalcum Ore"), "Asmodian"), true);
+  assert.equal(C.ofFaction(id("Orichalcum Ore"), "Elyos"), true);
+  assert.equal(C.ofFaction(id("Fine Odyle"), "Elyos"), true);
+  assert.equal(C.ofFaction(id("Asvata Log"), null), true);
+  // The morph table of a faction leaves the other side's materials out.
+  const asmo = C.morphTable(new Map(), "Asmodian").map((r) => C.name(r.item));
+  assert.ok(asmo.includes("Pure Asvata Log") && !asmo.some((n) => /Yggdrasil|^Aria$|Targena/.test(n)));
+  assert.equal(C.morphTable(new Map()).length, 42);
+});

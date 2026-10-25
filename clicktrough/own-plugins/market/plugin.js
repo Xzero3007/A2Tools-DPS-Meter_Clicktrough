@@ -25,6 +25,9 @@
     priced: true,
     kind: "all",
     search: {},
+    faction: null, // "Asmodian" or "Elyos": whose items; the server's until picked
+    fav: [], // favourite item ids (a star in every tab)
+    favFirst: false, // favourites listed first
   };
   let servers = []; // [{ id, game, name, region, faction, hasData }] (calc.js readServers)
   let prices = new Map();
@@ -54,7 +57,7 @@
 
   // ---------- the server and its prices ----------
   const server = () => servers.find((s) => s.id === settings.server) || null;
-  const faction = () => server()?.faction || null;
+  const faction = () => settings.faction || server()?.faction || null;
   const npc = () => ({ ...D.npcPrices, ...settings.npc });
 
   async function loadServers() {
@@ -195,6 +198,8 @@
   // ---------- the tabs ----------
   function render() {
     renderBar();
+    for (const b of document.querySelectorAll(".faction button")) b.setAttribute("aria-pressed", String(b.dataset.faction === faction()));
+    $(".favFirst").setAttribute("aria-pressed", String(!!settings.favFirst));
     for (const t of document.querySelectorAll(".tab")) t.setAttribute("aria-selected", String(t.dataset.tab === settings.tab));
     for (const p of document.querySelectorAll(".pane")) p.hidden = p.dataset.pane !== settings.tab;
     for (const s of document.querySelectorAll(".search")) if (document.activeElement !== s) s.value = settings.search[s.dataset.for] || "";
@@ -208,48 +213,164 @@
   const changeCell = (v) => el("td", { className: v == null ? "none" : v > 0 ? "gain" : v < 0 ? "loss" : "" },
     v == null ? "—" : `${v > 0 ? "+" : ""}${Math.round(v)}%`);
 
+  // ---------- favourites, map links, the lists that open ----------
+  const isFav = (id) => settings.fav.includes(Number(id));
+  /** Favourites first while the button in the bar is on; else as they are. */
+  const favFirst = (list, idOf) => {
+    if (!settings.favFirst) return list;
+    const fav = list.filter((x) => isFav(idOf(x)));
+    return fav.length ? [...fav, ...list.filter((x) => !isFav(idOf(x)))] : list;
+  };
+  const SVG = "http://www.w3.org/2000/svg";
+  const icon = (d, cls) => {
+    const svg = document.createElementNS(SVG, "svg");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("aria-hidden", "true");
+    if (cls) svg.setAttribute("class", cls);
+    const path = document.createElementNS(SVG, "path");
+    path.setAttribute("d", d);
+    svg.append(path);
+    return svg;
+  };
+  const STAR = "M12 3.2l2.6 5.6 6.1.7-4.5 4.2 1.2 6-5.4-3.1-5.4 3.1 1.2-6-4.5-4.2 6.1-.7z";
+  const MAP = "M9 4 3 6.5v13.5l6-2.5 6 2.5 6-2.5V4l-6 2.5L9 4Zm0 0v13.5m6-11v13.5";
+
+  /** A star: the item a favourite, in every tab. */
+  function star(id) {
+    const on = isFav(id);
+    const b = el("button", { type: "button", className: `star${on ? " on" : ""}`, title: on ? "A favourite: click to take it out" : "Make it a favourite" });
+    b.setAttribute("aria-pressed", String(on));
+    b.append(icon(STAR));
+    b.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const n = Number(id);
+      settings.fav = isFav(n) ? settings.fav.filter((x) => x !== n) : [...settings.fav, n];
+      saveLater();
+      render();
+    });
+    return b;
+  }
+
+  /** The Map plugin shows where a gathered material grows (a2.share). */
+  function showOnMap(id) {
+    a2.share({ source: "Market", focus: { gather: C.name(id), item: Number(id), at: Date.now() } }).catch(() => {});
+  }
+  function mapButton(id) {
+    if (!C.kindOf(id) || typeof a2.share !== "function") return null;
+    const b = el("button", { type: "button", className: "mapBtn", title: `Where ${C.name(id)} is gathered: on the Map` });
+    b.append(icon(MAP));
+    b.addEventListener("click", (e) => {
+      e.stopPropagation();
+      showOnMap(id);
+    });
+    return b;
+  }
+
+  /** The first cell of an item's row: star, name, what follows, map link. */
+  const nameCell = (id, ...after) => el("td", { className: "name" }, star(id), el("span", { className: "label" }, C.name(id)), ...after, mapButton(id));
+
+  /** A row that opens what it holds under it ("<kind>:<id>" in `open`). */
+  function opener(row, key, again) {
+    row.classList.add("click");
+    row.classList.toggle("open", open.has(key));
+    row.addEventListener("click", () => {
+      if (open.has(key)) open.delete(key);
+      else open.add(key);
+      again();
+    });
+    return row;
+  }
+
+  /** The recipes of the faction that need `id`: product, count, what that
+   *  many cost, what the product sells for. */
+  function usesTable(id) {
+    const n = npc();
+    const fee = Math.max(0, Math.min(50, Number(settings.fee) || 0)) / 100;
+    const us = C.usesOf(faction()).get(String(id)) || [];
+    if (!us.length) return el("p", { className: "sub" }, `No ${faction() || ""} recipe needs ${C.name(id)}.`);
+    const best = C.unitCost(prices, n, id);
+    const h = el("tr", {}, el("th", {}, "Used in"), el("th", {}, "Count"), el("th", { title: "Count × best price each" }, "Costs"),
+      el("th", { title: "The product's lowest listing, less the fee" }, "Product sells for"));
+    const rows = us.slice().sort((a, b) => b.count - a.count || C.name(a.recipe[6]).localeCompare(C.name(b.recipe[6]))).map((u) => {
+      const s = C.recipeSums(u.recipe, prices, n, { fee });
+      return el("tr", {}, el("td", {}, C.name(u.recipe[6]), el("span", { className: "sub" }, ` · ${u.recipe[2]}`)),
+        el("td", {}, `× ${u.count}`), priceCell(best.unit == null ? null : best.unit * u.count), priceCell(s.net));
+    });
+    return el("table", { className: "inner" }, el("thead", {}, h), el("tbody", {}, ...rows));
+  }
+
+  /** A table whose header stays at the top while the list scrolls, with
+   *  its columns as wide as `widths` (one layout for every group). */
+  function table(widths, headCells, body) {
+    const cols = el("colgroup", {}, ...widths.map((w) => {
+      const c = el("col");
+      if (w) c.style.width = w;
+      return c;
+    }));
+    return el("table", { className: "list" }, cols, el("thead", {}, el("tr", {}, ...headCells)), body);
+  }
+  const groupRow = (title, span) => el("tr", { className: "group" }, el("th", { colSpan: span }, title));
+
   function renderGather() {
     const q = fold(settings.search.gather || "");
-    const box = $(".gatherList");
-    box.replaceChildren();
+    const fac = faction();
     const groups = [["Odyle", [D.odyle]], ...Object.entries(D.gather)];
     const titles = { Odyle: "Odyle", Ore: "Ore", Gemstone: "Gemstones", Log: "Logs", Herb: "Herbs", Cooking: "Cooking ingredients" };
-    let any = false;
+    const wanted = (id) => C.ofFaction(id, fac) && (!q || fold(C.name(id)).includes(q));
+    const sections = [];
+    const favs = settings.favFirst ? groups.flatMap(([, lists]) => lists.flat()).filter((id) => wanted(id) && isFav(id)) : [];
+    if (favs.length) sections.push(["Favorites", favs]);
     for (const [kind, lists] of groups) {
-      const ids = lists.flat().filter((id) => !q || fold(C.name(id)).includes(q));
-      if (!ids.length) continue;
-      any = true;
-      const head = el("tr", {}, el("th", {}, "Material"), el("th", {}, "Lowest"), el("th", {}, "Listed"),
-        el("th", { title: "Sold in the last 28 days, and their average price" }, "Sold 28 d"), el("th", {}, "Avg sold"), el("th", {}, "Change"));
-      const rows = ids.map((id) => {
-        const p = prices.get(String(id)) || {};
-        return el("tr", {}, el("td", {}, C.name(id)), priceCell(p.price), el("td", {}, p.listings ? kina(p.listings) : "—"),
-          el("td", {}, p.sold != null ? kina(p.sold) : "—"), priceCell(p.soldAvg), changeCell(p.change));
-      });
-      box.append(el("h3", {}, titles[kind] || kind), el("table", {}, el("thead", {}, head), el("tbody", {}, ...rows)));
+      const ids = lists.flat().filter((id) => wanted(id) && !favs.includes(id));
+      if (ids.length) sections.push([titles[kind] || kind, ids]);
     }
-    if (!any) box.append(el("p", { className: "empty", textContent: "Nothing matches." }));
+    const all = sections.flatMap(([, ids]) => ids);
+    // The sales columns only while aion2.exchange has sales to tell.
+    const sales = all.some((id) => prices.get(String(id))?.sold != null || prices.get(String(id))?.soldAvg != null);
+    const span = sales ? 6 : 4;
+    const head = [el("th", {}, "Material"), el("th", {}, "Lowest"), el("th", {}, "Listed")];
+    if (sales) head.push(el("th", { title: "Sold in the last 28 days" }, "Sold 28 d"), el("th", {}, "Avg sold"));
+    head.push(el("th", {}, "Change"));
+    const body = el("tbody");
+    for (const [title, ids] of sections) {
+      body.append(groupRow(title, span));
+      for (const id of ids) {
+        const p = prices.get(String(id)) || {};
+        const key = `g:${id}`;
+        const cells = [nameCell(id), priceCell(p.price), el("td", {}, p.listings ? kina(p.listings) : "—")];
+        if (sales) cells.push(el("td", {}, p.sold != null ? kina(p.sold) : "—"), priceCell(p.soldAvg));
+        cells.push(changeCell(p.change));
+        body.append(opener(el("tr", {}, ...cells), key, renderGather));
+        if (open.has(key)) body.append(el("tr", { className: "detail" }, el("td", { colSpan: span }, usesTable(id))));
+      }
+    }
+    const widths = sales ? ["34%", "14%", "11%", "13%", "14%", "14%"] : ["46%", "20%", "16%", "18%"];
+    const box = $(".gatherList");
+    if (!all.length) box.replaceChildren(el("p", { className: "empty", textContent: "Nothing matches." }));
+    else box.replaceChildren(table(widths, head, body));
   }
 
   function renderOdyle() {
     const e = C.energyMorphCost(prices);
-    const box = $(".energy");
-    box.replaceChildren(
+    $(".energy").replaceChildren(
       el("strong", {}, "Odyle Energy (Bound), +40: "),
       "25 Odyle, 5 Fine Odyle, 1 Pure Odyle and 50,000 Kina",
       e ? ` = ${kina(e.total)} Kina, ${kina(e.perEnergy)} per energy` : " (no Odyle prices yet)",
       el("span", { className: "sub" }, " · at most 4 a week per character, 16 per server"),
     );
-    const head = el("tr", {}, el("th", {}, "Material"), el("th", {}, "Market"), el("th", {}, "Odyle used"),
-      el("th", {}, "Odyle price"), el("th", { title: "What one morphed instead of bought saves" }, "Morph saves"));
-    const rows = C.morphTable(prices).map((r) => {
+    const head = [el("th", {}, "Material"), el("th", {}, "Market"), el("th", {}, "Odyle used"),
+      el("th", {}, "Odyle price"), el("th", { title: "What one morphed instead of bought saves" }, "Morph saves")];
+    const body = el("tbody");
+    for (const r of favFirst(C.morphTable(prices, faction()), (x) => x.item)) {
+      const key = `o:${r.item}`;
       const save = r.saving == null ? el("td", { className: "none" }, "—")
         : el("td", { className: r.saving > 0 ? "gain" : "loss" },
           r.saving > 0 ? `${kina(r.saving)} (${Math.round(r.savingPct * 100)}%)` : `buy (${kina(-r.saving)} cheaper)`);
-      return el("tr", {}, el("td", {}, C.name(r.item)), priceCell(r.market), el("td", { className: "sub" }, C.name(r.odyle)),
-        priceCell(r.odylePrice), save);
-    });
-    $(".odyleList").replaceChildren(el("table", {}, el("thead", {}, head), el("tbody", {}, ...rows)));
+      body.append(opener(el("tr", {}, nameCell(r.item), priceCell(r.market), el("td", { className: "sub" }, C.name(r.odyle)),
+        priceCell(r.odylePrice), save), key, renderOdyle));
+      if (open.has(key)) body.append(el("tr", { className: "detail" }, el("td", { colSpan: 5 }, usesTable(r.item))));
+    }
+    $(".odyleList").replaceChildren(table(["34%", "14%", "16%", "14%", "22%"], head, body));
   }
 
   const PROFS = ["all", "Alchemy", "Blacksmithing", "Jewelcrafting", "Tailoring", "Cooking"];
@@ -264,7 +385,7 @@
     const head = el("tr", {}, el("th", {}, "Material"), el("th", {}, "Count"), el("th", {}, "Market each"),
       el("th", {}, "Best each"), el("th", {}, "Total"));
     const rows = sums.lines.map((l) => el("tr", {},
-      el("td", {}, C.name(l.item), sourceTag(l.best)),
+      nameCell(l.item, sourceTag(l.best)),
       el("td", {}, `× ${l.count}`),
       priceCell(l.buy.source === "npc" ? l.buy.unit : C.market(prices, l.item)),
       priceCell(l.best.unit),
@@ -277,7 +398,7 @@
     }
     if (recipe[4] > 0) extra.push(`Level ${recipe[4]}`);
     extra.push(recipe[5] === "Auto" ? "learnt by level" : recipe[5] === "Advancement" ? "mastery advancement" : recipe[5]);
-    return el("div", {}, el("table", {}, el("thead", {}, head), el("tbody", {}, ...rows)), el("div", { className: "sub" }, extra.join(" · ")));
+    return el("div", {}, el("table", { className: "inner" }, el("thead", {}, head), el("tbody", {}, ...rows)), el("div", { className: "sub" }, extra.join(" · ")));
   }
 
   function renderRecipes() {
@@ -296,8 +417,8 @@
     $(".sort").value = settings.sort;
     if (document.activeElement !== $(".fee")) $(".fee").value = String(settings.fee);
     const box = $(".recipeList");
-    if (!server()) {
-      box.replaceChildren(el("p", { className: "empty", textContent: "Pick your server above: its faction's recipes and its prices." }));
+    if (!faction()) {
+      box.replaceChildren(el("p", { className: "empty", textContent: "Pick your server or faction above: its recipes and its prices." }));
       renderNpc();
       return;
     }
@@ -308,7 +429,7 @@
       .filter((r) => settings.prof === "all" || r[2] === settings.prof)
       .filter((r) => !q || fold(C.name(r[6])).includes(q) || r[8].some(([i]) => fold(C.name(i)).includes(q)))
       .map((r) => ({ r, s: C.recipeSums(r, prices, n, { fee }) }));
-    if (settings.priced) list = list.filter((x) => x.s.sell != null);
+    if (settings.priced) list = list.filter((x) => x.s.sell != null || isFav(x.r[6]));
     const by = {
       profit: (a, b) => (b.s.profit ?? -Infinity) - (a.s.profit ?? -Infinity),
       margin: (a, b) => (b.s.margin ?? -Infinity) - (a.s.margin ?? -Infinity),
@@ -316,28 +437,23 @@
       name: (a, b) => C.name(a.r[6]).localeCompare(C.name(b.r[6])),
     }[settings.sort] || (() => 0);
     list.sort((a, b) => by(a, b) || C.name(a.r[6]).localeCompare(C.name(b.r[6])));
-    const head = el("tr", {}, el("th", {}, "Product"), el("th", { title: "Lowest listing × how many, less the fee" }, "Sells for"),
+    list = favFirst(list, (x) => x.r[6]);
+    const head = [el("th", {}, "Product"), el("th", { title: "Lowest listing × how many, less the fee" }, "Sells for"),
       el("th", { title: "Every material bought" }, "Cost: market"), el("th", { title: "Odyle morphed where cheaper" }, "Cost: morph"),
-      el("th", { title: "Sells for − cost with morph" }, "Profit"));
+      el("th", { title: "Sells for − cost with morph" }, "Profit")];
     const body = el("tbody");
     for (const { r, s } of list.slice(0, shown.recipes)) {
       const key = `r:${r[0]}`;
-      const isOpen = open.has(key);
       const profit = s.profit == null ? el("td", { className: "none" }, s.complete ? "—" : "prices missing")
         : el("td", { className: s.profit >= 0 ? "gain" : "loss" }, `${s.profit >= 0 ? "+" : ""}${kina(s.profit)}`,
           s.margin != null ? el("span", { className: "sub" }, ` ${Math.round(s.margin * 100)}%`) : null);
-      const row = el("tr", { className: `click${isOpen ? " open" : ""}` },
-        el("td", {}, C.name(r[6]), r[7] > 1 ? el("span", { className: "sub" }, ` × ${r[7]}`) : null, el("span", { className: "sub" }, ` · ${r[2]}`)),
+      const row = el("tr", {},
+        nameCell(r[6], r[7] > 1 ? el("span", { className: "sub" }, ` × ${r[7]}`) : null, el("span", { className: "sub" }, ` · ${r[2]}`)),
         priceCell(s.net), priceCell(s.complete ? s.costBuy : null), priceCell(s.complete ? s.costBest : null), profit);
-      row.addEventListener("click", () => {
-        if (open.has(key)) open.delete(key);
-        else open.add(key);
-        renderRecipes();
-      });
-      body.append(row);
-      if (isOpen) body.append(el("tr", { className: "detail" }, el("td", { colSpan: 5 }, recipeDetail(s, r))));
+      body.append(opener(row, key, renderRecipes));
+      if (open.has(key)) body.append(el("tr", { className: "detail" }, el("td", { colSpan: 5 }, recipeDetail(s, r))));
     }
-    const kids = [el("table", {}, el("thead", {}, head), body)];
+    const kids = [table(["34%", "15%", "15%", "15%", "21%"], head, body)];
     if (!list.length) kids.push(el("p", { className: "empty", textContent: prices.size ? "Nothing matches." : "No prices yet." }));
     if (list.length > shown.recipes) {
       const more = el("button", { type: "button", className: "more", textContent: `Show more (${list.length - shown.recipes})` });
@@ -389,45 +505,29 @@
       return b;
     }));
     const box = $(".materialList");
-    if (!server()) {
-      box.replaceChildren(el("p", { className: "empty", textContent: "Pick your server above." }));
+    if (!faction()) {
+      box.replaceChildren(el("p", { className: "empty", textContent: "Pick your server or faction above." }));
       return;
     }
     const q = fold(settings.search.materials || "");
     const n = npc();
-    const fee = Math.max(0, Math.min(50, Number(settings.fee) || 0)) / 100;
     const uses = C.usesOf(faction());
-    const list = [...uses.entries()]
+    let list = [...uses.entries()]
       .filter(([id]) => settings.kind === "all" || materialKind(id) === settings.kind)
       .filter(([id, us]) => !q || fold(C.name(id)).includes(q) || us.some((u) => fold(C.name(u.recipe[6])).includes(q)))
       .sort((a, b) => b[1].length - a[1].length || C.name(a[0]).localeCompare(C.name(b[0])));
-    const head = el("tr", {}, el("th", {}, "Material"), el("th", {}, "Market"), el("th", {}, "Best"), el("th", {}, "Recipes"));
+    list = favFirst(list, (x) => x[0]);
+    const head = [el("th", {}, "Material"), el("th", {}, "Market"), el("th", {}, "Best"), el("th", {}, "Recipes")];
     const body = el("tbody");
     for (const [id, us] of list.slice(0, shown.materials)) {
       const key = `m:${id}`;
-      const isOpen = open.has(key);
       const best = C.unitCost(prices, n, id);
-      const row = el("tr", { className: `click${isOpen ? " open" : ""}` },
-        el("td", {}, C.name(id), sourceTag(best)), priceCell(best.source === "npc" ? best.unit : C.market(prices, id)), priceCell(best.unit),
-        el("td", {}, String(us.length)));
-      row.addEventListener("click", () => {
-        if (open.has(key)) open.delete(key);
-        else open.add(key);
-        renderMaterials();
-      });
-      body.append(row);
-      if (isOpen) {
-        const h = el("tr", {}, el("th", {}, "Used in"), el("th", {}, "Count"), el("th", { title: "Count × best price each" }, "Costs"),
-          el("th", { title: "The product's lowest listing, less the fee" }, "Product sells for"));
-        const rows = us.slice().sort((a, b) => b.count - a.count || C.name(a.recipe[6]).localeCompare(C.name(b.recipe[6]))).map((u) => {
-          const s = C.recipeSums(u.recipe, prices, n, { fee });
-          return el("tr", {}, el("td", {}, C.name(u.recipe[6]), el("span", { className: "sub" }, ` · ${u.recipe[2]}`)),
-            el("td", {}, `× ${u.count}`), priceCell(best.unit == null ? null : best.unit * u.count), priceCell(s.net));
-        });
-        body.append(el("tr", { className: "detail" }, el("td", { colSpan: 4 }, el("table", {}, el("thead", {}, h), el("tbody", {}, ...rows)))));
-      }
+      body.append(opener(el("tr", {},
+        nameCell(id, sourceTag(best)), priceCell(best.source === "npc" ? best.unit : C.market(prices, id)), priceCell(best.unit),
+        el("td", {}, String(us.length))), key, renderMaterials));
+      if (open.has(key)) body.append(el("tr", { className: "detail" }, el("td", { colSpan: 4 }, usesTable(id))));
     }
-    const kids = [el("table", {}, el("thead", {}, head), body)];
+    const kids = [table(["52%", "17%", "17%", "14%"], head, body)];
     if (!list.length) kids.push(el("p", { className: "empty", textContent: "Nothing matches." }));
     if (list.length > shown.materials) {
       const more = el("button", { type: "button", className: "more", textContent: `Show more (${list.length - shown.materials})` });
@@ -469,6 +569,19 @@
     if (!servers.length) loadServers().then(() => loadPrices(true));
     else loadPrices(true);
   });
+  for (const b of document.querySelectorAll(".faction button")) {
+    b.addEventListener("click", () => {
+      settings.faction = b.dataset.faction;
+      open.clear();
+      saveLater();
+      render();
+    });
+  }
+  $(".favFirst").addEventListener("click", () => {
+    settings.favFirst = !settings.favFirst;
+    saveLater();
+    render();
+  });
   $(".priced").addEventListener("change", () => {
     settings.priced = $(".priced").checked;
     saveLater();
@@ -500,7 +613,10 @@
   (async () => {
     try {
       const s = await a2.storage.get("settings");
-      if (s && typeof s === "object") settings = { ...settings, ...s, npc: { ...(s.npc || {}) }, search: { ...(s.search || {}) } };
+      if (s && typeof s === "object") {
+        settings = { ...settings, ...s, npc: { ...(s.npc || {}) }, search: { ...(s.search || {}) } };
+        if (!Array.isArray(settings.fav)) settings.fav = [];
+      }
     } catch {}
     try {
       const c = await a2.storage.get("servers");

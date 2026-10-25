@@ -24,6 +24,7 @@
     pick: "auto",
     lastKey: null,
     focus: null, // what the search or another plugin asked to show
+    markScale: 1.25, // how large the marks are drawn, on the map and the overlay
   };
   let world = null;
   let shared = {};
@@ -32,6 +33,38 @@
   let headingFrom = null;
   let compact = false;
   const focusSeen = {}; // plugin -> the last focus request handled (its time)
+
+  // ---------- the spots this meter has seen (marks.js learnFrom) ----------
+  // Kept per map ("learned.<map>"), each at most 25,000 points.
+  let learned = {};
+  let learnedVersion = 0;
+  const learnedDirty = new Set();
+  const saveLearned = (() => {
+    let t = 0;
+    return () => {
+      clearTimeout(t);
+      t = setTimeout(() => {
+        for (const key of learnedDirty) a2.storage.set(`learned.${key}`, learned[key]).catch(() => {});
+        learnedDirty.clear();
+      }, 5000);
+    };
+  })();
+  function learn(w) {
+    // Only where the zone says the map: never a guess.
+    const key = w?.zone != null ? D.zones[String(w.zone)] : null;
+    if (!key || !D.maps[key]) return;
+    if (M.learnFrom(learned, key, w)) {
+      learnedVersion++;
+      M.setLearned(learned);
+      learnedDirty.add(key);
+      saveLearned();
+    }
+  }
+  const learnedCount = (key) => {
+    const lk = learned[key];
+    if (!lk) return 0;
+    return Object.values(lk.g || {}).reduce((n, a) => n + a.length / 2, 0) + Object.values(lk.s || {}).reduce((n, a) => n + a.length / 2, 0) + (lk.c || []).length / 2;
+  };
 
   const saveLater = (() => {
     let t = 0;
@@ -115,6 +148,7 @@
       saveLater();
     }
     view.setMap(key);
+    view.setMarkScale(settings.markScale);
     const built = M.build(state(key));
     view.setMarks(built.marks);
     const me = world?.me;
@@ -160,7 +194,9 @@
       const name = Object.assign(document.createElement("strong"), { textContent: ` ${n.name} ` });
       const dist = Object.assign(document.createElement("span"), {
         className: "muted",
-        textContent: `${M.arrow(n.bearing)} ${Math.round(n.metres)} m${n.live ? " (there now)" : n.focus ? "" : " (spawn point)"}`,
+        textContent: n.via
+          ? `teleport to Kibelisk ${n.via.name}, then ${Math.round(n.via.metres)} m (walking: ${Math.round(n.metres)} m)`
+          : `${M.arrow(n.bearing)} ${Math.round(n.metres)} m${n.live ? " (there now)" : n.focus ? "" : " (spawn point)"}`,
       });
       $(".next").append(label, name, dist);
       // Why this one: what was searched, or how the pet is followed.
@@ -169,6 +205,8 @@
     const parts = [];
     if (settings.focus) parts.push(`${built.hits.length / 2} on this map`);
     else if (settings.layers.pets) parts.push(`${built.petsHere} pet${built.petsHere === 1 ? "" : "s"} on this map`, `${built.around} around you`);
+    const mine = learnedCount(currentKey());
+    if (mine) parts.push(`${mine} spot${mine === 1 ? "" : "s"} your meter saw`);
     $(".counts").textContent = parts.join(" · ");
   }
 
@@ -290,10 +328,12 @@
   const sizeName = () => Object.keys(SIZES).find((k) => SIZES[k][0] === settings.overlaySize?.[0] && SIZES[k][1] === settings.overlaySize?.[1]) || null;
   let lastSent = 0;
   let sendTimer = 0;
+  let learnedSent = -1;
   function sendOverlay(key, onThisMap, { region = null, guess = false } = {}) {
     if (!settings.overlay) return;
     const go = () => {
       lastSent = Date.now();
+      const sentVersion = learnedVersion;
       a2.widgets.send("overlay", {
         key,
         world: world ? { me: world.me, zone: world.zone, npcs: world.npcs, objects: world.objects } : null,
@@ -304,6 +344,9 @@
         petsMode: settings.petsMode,
         nextFor: settings.nextFor,
         focus: settings.focus,
+        markScale: settings.markScale,
+        // The learnt spots only when they changed (the overlay keeps them).
+        ...(learnedSent !== learnedVersion ? { learned, learnedVersion } : {}),
         zoom: settings.overlayZoom,
         opacity: settings.overlayOpacity,
         onThisMap: !!onThisMap,
@@ -311,7 +354,7 @@
         size: sizeName(),
         region,
         guess,
-      }).catch(() => {});
+      }).then(() => { learnedSent = sentVersion; }).catch(() => {});
     };
     clearTimeout(sendTimer);
     const wait = 250 - (Date.now() - lastSent);
@@ -373,6 +416,7 @@
       setFocus(null);
     } else if (data.type === "ready") {
       lastSent = 0;
+      learnedSent = -1;
       render();
     }
   });
@@ -389,6 +433,7 @@
     $(".petsMode").hidden = !settings.layers.pets;
     $(".nextFor").value = ["all", "chosen", "off"].includes(settings.nextFor) ? settings.nextFor : "all";
     $(".nextFor").hidden = !settings.layers.pets;
+    $(".markScale").value = String(settings.markScale);
     const kinds = $(".kinds");
     kinds.hidden = !settings.layers.gather || compact;
     kinds.replaceChildren(...M.KIND_ORDER.map((k) => {
@@ -439,6 +484,11 @@
     settings.petsMode = settings.petsMode === "all" ? "tracked" : "all";
     saveLater();
     renderTools();
+    render();
+  });
+  $(".markScale").addEventListener("change", () => {
+    settings.markScale = Number($(".markScale").value) || 1.25;
+    saveLater();
     render();
   });
   $(".nextFor").addEventListener("change", () => {
@@ -499,6 +549,7 @@
   // ---------- from the meter ----------
   a2.on("world", (w) => {
     world = w;
+    learn(w);
     followHeading(w?.me);
     render();
   });
@@ -512,9 +563,13 @@
     if (f && Number(f.at) > (focusSeen[plugin] || 0)) {
       focusSeen[plugin] = Number(f.at);
       if (Date.now() - Number(f.at) < 30_000) {
+        const bossNpc = f.boss != null ? D.bossIds?.[String(f.boss)] ?? f.boss : null;
+        const bossName = bossNpc != null ? Object.values(D.bosses || {}).flat().find(([npc]) => String(npc) === String(bossNpc))?.[1] : null;
         const focus = f.pet != null
           ? { type: "pet", ids: [String(f.pet)], label: f.name || M.petName(f.pet, tracked) }
-          : f.npc != null ? { type: "npc", ids: [String(f.npc)], label: f.name || D.npcNames[f.npc] || "Monster" } : null;
+          : f.npc != null ? { type: "npc", ids: [String(f.npc)], label: f.name || D.npcNames[f.npc] || "Monster" }
+          : bossNpc != null ? { type: "boss", ids: [String(bossNpc)], label: bossName || f.name || "Field boss" }
+          : f.gather ? M.gatherFor(f.gather) : null;
         if (focus) {
           setFocus(focus, { map: mapNamed(f.region) || f.map || null });
           // Brought forward: its dock tab, or its own window.
@@ -539,6 +594,14 @@
         if (!Array.isArray(settings.overlaySize)) settings.overlaySize = [...SIZES.m];
       }
     } catch {}
+    for (const key of Object.keys(D.maps)) {
+      try {
+        const lk = await a2.storage.get(`learned.${key}`);
+        if (lk && typeof lk === "object") learned[key] = lk;
+      } catch {}
+    }
+    M.setLearned(learned);
+    learnedVersion++;
     renderTools();
     if (settings.focus && !settings.follow) {
       view.setMap(currentKey());

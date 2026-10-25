@@ -30,6 +30,22 @@ goes.
   needs, what that many cost, and what the product sells for. Filter by
   gathered materials, crafted materials, NPC tools or earlier tiers.
 
+In every tab:
+
+- **Asmodian / Elyos** beside Update (remembered; your server's side until
+  picked): only that side's materials and recipes (Asvata, Azpha ... are
+  Asmodian; Yggdrasil, Aria ... Elyos; Odyle and ore both).
+- **One column layout** for a whole list, its header kept at the top while
+  the list scrolls; the sales columns only while aion2.exchange has sales.
+- **A star** before a name makes the item a favourite, in every tab;
+  **Favorites** in the bar lists them first (in Gatherables as a group of
+  their own), off again the usual order.
+- **A click** on a material (Gatherables, Odyle morph, Materials) lists the
+  recipes that need it, how many and what that many cost.
+- **A map button** beside a gathered material (also in a recipe's materials)
+  shows where it is gathered in the Map plugin, with the way there (permission
+  `share`).
+
 Prices: the server is picked from yours when the meter knows your character,
 else from the list. They are [aion2.exchange](https://aion2.exchange)'s
 (players' collected market prices, a new snapshot about every hour), read

@@ -23,6 +23,29 @@
   }
   for (const id of D.odyle) KIND.set(String(id), "Odyle");
 
+  // Each faction's items: what its recipes need or make. The gathered
+  // materials of one side's world (Asvata Log, Azpha ... Asmodian; Yggdrasil
+  // Log, Aria ... Elyos) appear only in its recipes.
+  const USED = { L: new Set(), D: new Set() };
+  for (const r of D.recipes) {
+    const side = USED[r[1]];
+    if (!side) continue;
+    side.add(String(r[6]));
+    for (const [item] of r[8]) side.add(String(item));
+  }
+  /** Whether a faction ("Elyos", "Asmodian"; else any) has `id`: Odyle and
+   *  what no recipe names, both. */
+  function ofFaction(id, faction) {
+    const race = FACTION_RACE[faction];
+    if (!race) return true;
+    const key = String(id);
+    if (D.odyle.includes(Number(key))) return true;
+    const l = USED.L.has(key);
+    const d = USED.D.has(key);
+    if (!l && !d) return true;
+    return race === "L" ? l : d;
+  }
+
   /** aion2.exchange's item rows -> Map(id -> { price, listings, sold,
    *  soldAvg, soldMin, soldMax, change, at }); price null while none is
    *  listed. */
@@ -178,10 +201,12 @@
   }
 
   /** The morphable materials against their Odyle: [{ item, odyle, market,
-   *  odylePrice, saving, savingPct }], biggest saving first. */
-  function morphTable(prices) {
+   *  odylePrice, saving, savingPct }], biggest saving first; a faction's
+   *  only, given one. */
+  function morphTable(prices, faction = null) {
     const rows = [];
     for (const [id, odyle] of MORPH) {
+      if (!ofFaction(id, faction)) continue;
       const m = market(prices, id);
       const o = market(prices, odyle);
       const saving = m != null && o != null ? m - o : null;
@@ -223,6 +248,6 @@
 
   globalThis.MarketCalc = Object.freeze({
     name, grade, readPrices, readCopy, readServers, serverOf, market, unitCost, morphFrom, recipesOf, recipeSums, usesOf, morphTable,
-    energyMorphCost, neededItems, kina, kindOf: (id) => KIND.get(String(id)) || null, FACTION_RACE,
+    energyMorphCost, neededItems, kina, kindOf: (id) => KIND.get(String(id)) || null, FACTION_RACE, ofFaction,
   });
 })();

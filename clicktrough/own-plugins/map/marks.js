@@ -8,6 +8,132 @@
   const RANK = { pinned: 3, farming: 2, needed: 1 };
   const cubes = new Set(D.cubes.map(String));
 
+  // ---------- spots the meter has seen (learnt) ----------
+  // The data knows only the gathering spots and pet monster spawns players'
+  // meters happened to report to SkeeveAN (Asvata: 3 in Altgard). What this
+  // player's meter sees is added: { key: { g: { env: [x, y, ...] }, s: { npc:
+  // [x, y, ...] }, c: [x, y, ...] } } (gathering spots, pet monsters' spawn
+  // points, Hidden Cubes), kept by the plugin.
+  let learned = {};
+  const LEARN_CAP = 25000; // points per map (a stored value may be 1 MB)
+  const setLearned = (value) => { learned = value && typeof value === "object" ? value : {}; };
+  const count = (lk) => (lk ? Object.values(lk.g || {}).reduce((n, a) => n + a.length / 2, 0)
+    + Object.values(lk.s || {}).reduce((n, a) => n + a.length / 2, 0) + (lk.c || []).length / 2 : 0);
+  const both = (a, b) => (b && b.length ? (a && a.length ? a.concat(b) : b) : a || []);
+  /** A map's gathering spots, the data's and the learnt: { env: [x, y, ...] }. */
+  function gatherPoints(key) {
+    const data = D.gather.points[key] || {};
+    const mine = learned[key]?.g;
+    if (!mine) return data;
+    const out = { ...data };
+    for (const [env, pts] of Object.entries(mine)) out[env] = both(out[env], pts);
+    return out;
+  }
+  /** A map's pet monster spawn points, the data's and the learnt. */
+  function spawnPoints(key) {
+    const data = D.spawns[key] || {};
+    const mine = learned[key]?.s;
+    if (!mine) return data;
+    const out = { ...data };
+    for (const [npc, pts] of Object.entries(mine)) out[npc] = both(out[npc], pts);
+    return out;
+  }
+  const cubeSpotPoints = (key) => both(D.cubeSpots?.[key], learned[key]?.c);
+  const near = (pts, x, y, cm) => {
+    for (let i = 0; i < (pts || []).length; i += 2) if ((pts[i] - x) ** 2 + (pts[i + 1] - y) ** 2 <= cm * cm) return true;
+    return false;
+  };
+  const sameName = new Map(); // env -> every env of that object's name
+  for (const [env, o] of Object.entries(D.gather.objects)) {
+    const all = Object.entries(D.gather.objects).filter(([, x]) => x.name === o.name && x.kind === o.kind).map(([e]) => e);
+    sameName.set(env, all);
+  }
+
+  /**
+   * What the world shows that the map doesn't know yet, added to `store`
+   * (the learnt spots, as setLearned takes them) for map `key`: gathering
+   * spots (8 m from any known one of its name), pet monsters (20 m from any
+   * known spawn point of theirs; they walk about) and Hidden Cubes. Returns
+   * how many it added.
+   */
+  function learnFrom(store, key, world) {
+    if (!key || !D.maps[key] || !world) return 0;
+    const lk = (store[key] ||= { g: {}, s: {}, c: [] });
+    lk.g ||= {};
+    lk.s ||= {};
+    lk.c ||= [];
+    let added = 0;
+    let room = LEARN_CAP - count(lk);
+    for (const [, env, x, y] of world.objects || []) {
+      if (room <= 0) break;
+      const id = String(env);
+      if (cubes.has(id)) {
+        if (near(D.cubeSpots?.[key], x, y, 800) || near(lk.c, x, y, 800)) continue;
+        lk.c.push(Math.round(x), Math.round(y));
+      } else if (D.gather.objects[id]) {
+        const kin = sameName.get(id) || [id];
+        if (kin.some((e) => near(D.gather.points[key]?.[e], x, y, 800) || near(lk.g[e], x, y, 800))) continue;
+        (lk.g[id] ||= []).push(Math.round(x), Math.round(y));
+      } else continue;
+      added++;
+      room--;
+    }
+    for (const [, npc, x, y] of world.npcs || []) {
+      if (room <= 0) break;
+      const id = String(npc);
+      if (D.npcPets[id] == null) continue;
+      if (near(D.spawns[key]?.[id], x, y, 2000) || near(lk.s[id], x, y, 2000)) continue;
+      (lk.s[id] ||= []).push(Math.round(x), Math.round(y));
+      added++;
+      room--;
+    }
+    return added;
+  }
+
+  // ---------- the way to a place ----------
+  // A teleport (to a Kibelisk) is worth about this much walking: its loading
+  // and its Kina.
+  const TELEPORT_M = 250;
+  /**
+   * The best way from `me` to the cheapest of `targets` ([[x, y], ...]) on
+   * map `key`: walk, or teleport to the Kibelisk nearest the target and walk
+   * from there, whichever is shorter. { to, from, walk, kib: [name, x, y] |
+   * null, metres (walking after the teleport, or all of it) }. Without `me`,
+   * the Kibelisk nearest the only target.
+   */
+  function routeTo(key, me, targets) {
+    const kibs = D.kibelisks[key] || [];
+    if (!targets.length) return null;
+    const nearestKib = (x, y) => {
+      let best = null;
+      for (const k of kibs) {
+        const d = K.metres(k[1], k[2], x, y);
+        if (!best || d < best[0]) best = [d, k];
+      }
+      return best;
+    };
+    if (!me) {
+      if (targets.length !== 1) return null;
+      const [x, y] = targets[0];
+      const nk = nearestKib(x, y);
+      return nk ? { to: [x, y], from: [nk[1][1], nk[1][2]], walk: null, kib: nk[1], metres: nk[0] } : null;
+    }
+    let best = null;
+    for (const [x, y] of targets) {
+      const walk = K.metres(me.x, me.y, x, y);
+      const nk = nearestKib(x, y);
+      const tele = nk ? nk[0] + TELEPORT_M : Infinity;
+      const cost = Math.min(walk, tele);
+      if (!best || cost < best.cost) {
+        const viaKib = tele < walk && nk;
+        best = { cost, to: [x, y], walk, kib: viaKib ? nk[1] : null, metres: viaKib ? nk[0] : walk,
+          from: viaKib ? [nk[1][1], nk[1][2]] : [me.x, me.y] };
+      }
+    }
+    delete best.cost;
+    return best;
+  }
+
   /** The pets the other plugins track, merged: id -> { mark, name }. */
   function mergeTracked(shared) {
     const out = new Map();
@@ -57,12 +183,14 @@
     if (!focus || !D.maps[key]) return out;
     const ids = new Set((focus.ids || []).map(String));
     if (focus.type === "gather") {
-      for (const [env, pts] of Object.entries(D.gather.points[key] || {})) {
+      for (const [env, pts] of Object.entries(gatherPoints(key))) {
         if (!ids.has(env)) continue;
         for (let i = 0; i < pts.length; i += 2) out.push([pts[i], pts[i + 1]]);
       }
+    } else if (focus.type === "boss") {
+      for (const [npc, , x, y] of D.bosses?.[key] || []) if (ids.has(String(npc))) out.push([x, y]);
     } else if (focus.type === "pet" || focus.type === "npc") {
-      for (const [npc, pts] of Object.entries(D.spawns[key] || {})) {
+      for (const [npc, pts] of Object.entries(spawnPoints(key))) {
         const hit = focus.type === "npc" ? ids.has(npc) : ids.has(String(D.npcPets[npc]));
         if (!hit) continue;
         for (let i = 0; i < pts.length; i += 2) out.push([pts[i], pts[i + 1]]);
@@ -71,7 +199,7 @@
       for (const [name, x, y] of D.kibelisks[key] || []) if (ids.has(name)) out.push([x, y]);
     } else if (focus.type === "cube" || focus.type === "monolith") {
       const pts = focus.type === "monolith" ? D.monoliths?.[key]
-        : ids.has("all") ? D.gather.points[key]?.cube : D.cubeSpots?.[key];
+        : ids.has("all") ? D.gather.points[key]?.cube : cubeSpotPoints(key);
       for (let i = 0; i < (pts || []).length; i += 2) out.push([pts[i], pts[i + 1]]);
     } else if (focus.type === "place") {
       for (const [kind, name, x, y] of D.places?.[key] || []) {
@@ -98,10 +226,26 @@
     if (!focus) return false;
     const ids = (focus.ids || []).map(String);
     if (focus.type === "gather") return kind === "object" && ids.includes(String(id));
-    if (focus.type === "npc") return kind === "npc" && ids.includes(String(id));
+    if (focus.type === "npc" || focus.type === "boss") return kind === "npc" && ids.includes(String(id));
     if (focus.type === "pet") return kind === "npc" && ids.includes(String(D.npcPets[id]));
     if (focus.type === "cube") return kind === "object" && cubes.has(String(id));
     return false;
+  }
+
+  /** The gathering spots a material comes from, by its name (as the Market
+   *  plugin names it: "Pure Asvata Log", "Fresh Aria", "Fine Odyle"): the
+   *  objects whose name is in it, the longest such name. A focus, or null. */
+  function gatherFor(itemName) {
+    const words = ` ${fold(itemName)} `;
+    let best = null;
+    for (const [env, o] of Object.entries(D.gather.objects)) {
+      if (o.kind === "Cube" || o.kind === "Fragment") continue;
+      const n = fold(o.name);
+      if (!words.includes(` ${n} `)) continue;
+      if (!best || n.length > best.n.length) best = { n, name: o.name, ids: [env] };
+      else if (n === best.n) best.ids.push(env);
+    }
+    return best ? { type: "gather", ids: best.ids, label: best.name } : null;
   }
 
   // ---------- the search ----------
@@ -139,6 +283,16 @@
       const pets = [...new Set(npcs.map((n) => D.pets[D.npcPets[n]]?.name).filter(Boolean))];
       entries.push({ label: name, sub: pets.length ? `Monster · ${pets.join(", ")}` : "Monster", focus: { type: "npc", ids: npcs, label: name } });
     }
+    // Field bosses, by name.
+    const bossNames = new Map();
+    for (const list of Object.values(D.bosses || {})) {
+      for (const [npc, name] of list) {
+        if (!name) continue;
+        if (!bossNames.has(name)) bossNames.set(name, []);
+        bossNames.get(name).push(String(npc));
+      }
+    }
+    for (const [name, npcs] of bossNames) entries.push({ label: name, sub: "Field boss", focus: { type: "boss", ids: npcs, label: name }, extra: "boss world" });
     // Kibelisk camps.
     const camps = new Set();
     for (const list of Object.values(D.kibelisks)) for (const [name] of list) camps.add(name);
@@ -194,12 +348,14 @@
 
   /**
    * state: { key, world, tracked (Map), heading, layers, gatherKinds, petsMode, focus, nextFor }
-   * -> { marks, next, petsHere, around, hits: [x, y, ...] }
+   * -> { marks, next, petsHere, around, hits: [x, y, ...], route }
+   * route: with a focus, the way to its cheapest place (routeTo); next then
+   * names the Kibelisk to teleport to (next.via) where that is shorter.
    */
   function build({ key, world, tracked, heading, layers, gatherKinds, petsMode, focus, nextFor = "all" }) {
     const marks = [];
     const map = D.maps[key];
-    if (!map) return { marks, next: null, petsHere: 0, around: 0, hits: [] };
+    if (!map) return { marks, next: null, petsHere: 0, around: 0, hits: [], route: null };
     const me = world?.me || null;
     // With no plugin tracking pets, all of them.
     const all = petsMode === "all" || tracked.size === 0;
@@ -233,7 +389,7 @@
 
     const petsHere = new Set();
     if (layers.pets) {
-      for (const [npc, pts] of Object.entries(D.spawns[key] || {})) {
+      for (const [npc, pts] of Object.entries(spawnPoints(key))) {
         const pet = D.npcPets[npc];
         if (pet == null) continue;
         if (!all && !tracked.has(String(pet))) continue;
@@ -262,7 +418,7 @@
     }
 
     if (layers.gather) {
-      for (const [env, pts] of Object.entries(D.gather.points[key] || {})) {
+      for (const [env, pts] of Object.entries(gatherPoints(key))) {
         const o = D.gather.objects[env];
         if (!o || o.kind === "Cube" || gatherKinds[o.kind] === false) continue;
         for (let i = 0; i < pts.length; i += 2) {
@@ -287,7 +443,7 @@
       }
     }
     if (layers.cubes) {
-      const pts = D.cubeSpots?.[key] || [];
+      const pts = cubeSpotPoints(key);
       for (let i = 0; i < pts.length; i += 2) {
         marks.push({ kind: "cubeSpot", x: pts[i], y: pts[i + 1], r: 3.5, label: "Hidden Cube (known spot)", z: 3 });
       }
@@ -303,11 +459,13 @@
         marks.push({ kind: "place", place: kind, x, y, r: 5, label: name ? `${name} (${placeLabel(kind)})` : placeLabel(kind), text: name || null, z: 4 });
       }
       for (const [name, x, y] of D.regions?.[key] || []) marks.push({ kind: "region", x, y, text: name, z: 0 });
+      for (const [, name, x, y] of D.bosses?.[key] || []) marks.push({ kind: "boss", x, y, r: 5, label: `${name} (field boss)`, text: name, z: 6 });
     }
 
     // The focus: its places with a gold ring, and the nearest one is next
     // (one that is there right now first).
     const hits = [];
+    let route = null;
     if (focus) {
       let best = null;
       const near = (x, y, live) => {
@@ -329,6 +487,7 @@
           return { kind: "place", place: kind, x, y, r: 5.5, text: name || null, label: name ? `${name} (${placeLabel(kind)})` : focus.label };
         },
         region: (x, y) => ({ kind: "place", place: "village", x, y, r: 5, text: focus.label }),
+        boss: (x, y) => ({ kind: "boss", x, y, r: 6, text: focus.label }),
       };
       const style = STYLES[focus.type] || ((x, y) => ({ kind: "petSpawn", x, y, r: 4.5, color: K.PET_RED }));
       for (const [x, y] of focusPoints(focus, key)) {
@@ -349,11 +508,34 @@
           : { kind: "gather", gather: D.gather.objects[env]?.kind, live: true, x, y, r: 5, hit: true, label: `${focus.label} · there now`, z: 60 });
         near(x, y, true);
       }
-      if (best) next = best;
+      // The way there: to one that is there right now, walking; else to the
+      // cheapest of its places, by teleport to a Kibelisk where that is
+      // shorter (not to every place a cube may appear: too many).
+      if (best?.live) next = best;
+      else if (!all && hits.length) {
+        const targets = [];
+        for (let i = 0; i < hits.length; i += 2) targets.push([hits[i], hits[i + 1]]);
+        route = routeTo(key, me, targets);
+        if (route) {
+          const [tx, ty] = route.to;
+          if (route.kib) {
+            const [kn, kx, ky] = route.kib;
+            marks.push({ kind: "teleport", x: kx, y: ky, r: 7, label: `Teleport to Kibelisk ${kn}, then ${Math.round(route.metres)} m`, text: `Teleport: ${kn}`, z: 55 });
+          }
+          marks.push({ kind: "route", x: tx, y: ty, from: route.from, z: 30 });
+          if (me) {
+            next = {
+              name: focus.label, focus: true, live: false,
+              metres: route.walk, bearing: K.bearing(me.x, me.y, tx, ty),
+              via: route.kib ? { name: route.kib[0], metres: route.metres, bearing: K.bearing(me.x, me.y, route.kib[1], route.kib[2]) } : null,
+            };
+          }
+        } else if (best) next = best;
+      } else if (best) next = best;
     }
 
     if (me) marks.push({ kind: "me", x: me.x, y: me.y, exact: !!me.exact, heading: heading ?? 0, r: 6, label: me.exact ? "You" : "You (about here)", z: 100 });
-    return { marks, next, petsHere: petsHere.size, around, hits };
+    return { marks, next, petsHere: petsHere.size, around, hits, route };
   }
 
   /** The map the player is on: the zone's, else the one the pet monsters,
@@ -388,6 +570,6 @@
   const arrow = (deg) => ARROWS[Math.round((((deg % 360) + 360) % 360) / 45) % 8];
 
   globalThis.MapMarks = Object.freeze({
-    build, mergeTracked, mapOf, regionAt, arrow, markText, petName, search, focusMaps, focusPoints, KIND_ORDER, kindLabel, kindTitle, placeLabel,
+    build, mergeTracked, mapOf, regionAt, arrow, markText, petName, setLearned, learnFrom, routeTo, gatherFor, TELEPORT_M, search, focusMaps, focusPoints, KIND_ORDER, kindLabel, kindTitle, placeLabel,
   });
 })();
