@@ -1,20 +1,23 @@
-From 6f334158fe5308883ef1fad481e0b0ed7611ab22 Mon Sep 17 00:00:00 2001
+From 2f7041b8c5aa7abc76fbd2f098aac13af2cc5309 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Sun, 25 Oct 2026 01:56:22 +0000
 Subject: [PATCH] Event Timers: a world boss on the Map, with the way there
 
-A map button beside each world boss's bell and settings (on the Bosses
-tab) shows it in the Map plugin: Event Timers shares it ("share",
-focus { boss: its world-map id, name }), and the Map frames it with the
+A map button beside each world boss shows it in the Map plugin: on the
+Bosses tab beside its bell and settings, and folded after the name of
+its map (now, soon and later). Event Timers shares it ("share", focus
+{ boss: its world-map id, name }), and the Map frames it with the
 Kibelisk to teleport to and the way from there, and comes forward.
-Without a meter that shares, no button.
+Without a meter that shares, no button. While a row's button is held,
+the folded lists aren't redrawn either, so its click isn't lost.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_01RBQati3x8VviBbpY9juEWf
 ---
- plugins/event-timers/manifest.json |  3 ++-
- plugins/event-timers/plugin.js     | 25 +++++++++++++++++++++++++
- 2 files changed, 27 insertions(+), 1 deletion(-)
+ plugins/event-timers/manifest.json |  3 +-
+ plugins/event-timers/plugin.js     | 48 ++++++++++++++++++++++++++++--
+ plugins/event-timers/style.css     | 12 ++++++++
+ 3 files changed, 60 insertions(+), 3 deletions(-)
 
 diff --git a/plugins/event-timers/manifest.json b/plugins/event-timers/manifest.json
 index 5177739..2076f5d 100644
@@ -31,7 +34,7 @@ index 5177739..2076f5d 100644
    "decoders": [],
    "ui": {
 diff --git a/plugins/event-timers/plugin.js b/plugins/event-timers/plugin.js
-index 0b10069..f5e0580 100644
+index 0b10069..de7cc66 100644
 --- a/plugins/event-timers/plugin.js
 +++ b/plugins/event-timers/plugin.js
 @@ -775,6 +775,9 @@ const BELL_ICON = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" s
@@ -44,26 +47,32 @@ index 0b10069..f5e0580 100644
  const GEAR_ICON = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" '
    + 'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 '
    + '1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 '
-@@ -820,9 +823,30 @@ function rowActions(id) {
+@@ -820,9 +823,36 @@ function rowActions(id) {
    gear.setAttribute("aria-label", gear.title);
    gear.innerHTML = GEAR_ICON;
    box.append(bell, gear);
 +  // Clicktrough: a world boss on the Map plugin, with the way there (the
 +  // nearest Kibelisk to teleport to).
-+  if (id.startsWith("field:") && typeof a2.share === "function") {
-+    const map = document.createElement("button");
-+    map.type = "button";
-+    map.className = "rowBtn mapBtn";
-+    map.dataset.act = "map";
-+    map.dataset.id = id;
-+    map.title = "Show it on the Map, with the way there";
-+    map.setAttribute("aria-label", map.title);
-+    map.innerHTML = MAP_ICON;
-+    box.append(map);
-+  }
++  const map = mapButton(id);
++  if (map) box.append(map);
    return box;
  }
  
++// Clicktrough: the button that shows a world boss on the Map plugin, or
++// null (not a world boss, or a meter that doesn't share).
++function mapButton(id) {
++  if (!id.startsWith("field:") || typeof a2.share !== "function") return null;
++  const map = document.createElement("button");
++  map.type = "button";
++  map.className = "rowBtn mapBtn";
++  map.dataset.act = "map";
++  map.dataset.id = id;
++  map.title = "Show it on the Map, with the way there";
++  map.setAttribute("aria-label", map.title);
++  map.innerHTML = MAP_ICON;
++  return map;
++}
++
 +// Clicktrough: the Map plugin shows a world boss (a2.share "focus", the id
 +// the in-game map knows it by) and brings itself forward.
 +function showBossOnMap(id) {
@@ -75,7 +84,7 @@ index 0b10069..f5e0580 100644
  function toggleBossAlert(id) {
    if (id in prefs.alerts) delete prefs.alerts[id];
    else prefs.alerts[id] = prefs.leads[id] ?? defaultLead();
-@@ -842,6 +866,7 @@ for (const list of [els.scheduled, els.field]) {
+@@ -842,6 +872,7 @@ for (const list of [els.scheduled, els.field]) {
      e.stopPropagation();
      const id = btn.dataset.id;
      if (btn.dataset.act === "alert") toggleBossAlert(id);
@@ -83,6 +92,70 @@ index 0b10069..f5e0580 100644
      else if (btn.dataset.act === "settings") {
        const { key } = bossAlert(id);
        if (key) openAlert(key);
+@@ -852,11 +883,21 @@ for (const list of [els.scheduled, els.field]) {
+ // release land on two drawings of the row would be lost.
+ let rowPress = false;
+ const endPress = () => { rowPress = false; };
+-for (const list of [els.scheduled, els.field]) {
++for (const list of [els.scheduled, els.field, els.foldedNow, els.foldedBoss, els.foldedLater]) {
+   list.addEventListener("pointerdown", (e) => {
+     if (e.target.closest?.(".rowBtn")) rowPress = true;
+   });
+ }
++// Clicktrough: the folded view's map buttons.
++for (const list of [els.foldedNow, els.foldedBoss, els.foldedLater]) {
++  list.addEventListener("click", (e) => {
++    const btn = e.target.closest?.(".rowBtn[data-act=\"map\"]");
++    if (!btn || !list.contains(btn)) return;
++    e.preventDefault();
++    e.stopPropagation();
++    showBossOnMap(btn.dataset.id);
++  });
++}
+ // A boss row's nearest teleport, in a tooltip while the pointer is on it.
+ // One tooltip for the page, placed by the row (the rows are drawn anew every
+ // second; the tooltip stays). Positions are corrected by what the browser
+@@ -1137,6 +1178,9 @@ function renderFoldedBosses(now) {
+     }
+     const name = text(b.name) + (b.level ? ` · Lv ${b.level}` : "");
+     const li = row({ id: `field:${b.id}`, name, where: text(b.where), countdown, at, up, soon: inWindow || next - now <= SOON_MS });
++    // Clicktrough: folded too, a world boss's map button after its map's name.
++    const map = mapButton(`field:${b.id}`);
++    if (map) li.querySelector(".where")?.append(map);
+     if (up && t.hp != null && t.hpAt) li.style.setProperty("--hp", `${Math.max(0, Math.min(100, t.hp))}%`);
+     li.classList.toggle("hasHp", up && t.hp != null && !!t.hpAt);
+     // In its window it may come any moment, but it isn't there yet: soon,
+@@ -1170,9 +1214,9 @@ function render() {
+   const now = Date.now();
+   renderHeader(now);
+   renderHidden(renderSchedule(els.events, scheduled("event"), now, { hideable: true }));
+-  renderFoldedBosses(now);
+   // Not while a row's button is pressed; a focused one keeps its focus.
+   if (rowPress) return;
++  renderFoldedBosses(now);
+   const focused = document.activeElement?.closest?.(".rowBtn");
+   const refocus = focused && { act: focused.dataset.act, id: focused.dataset.id };
+   renderSchedule(els.scheduled, scheduled("boss"), now, { hideable: false, actions: true });
+diff --git a/plugins/event-timers/style.css b/plugins/event-timers/style.css
+index e4ceda0..cb1b3f2 100644
+--- a/plugins/event-timers/style.css
++++ b/plugins/event-timers/style.css
+@@ -1232,3 +1232,15 @@ body.alertOnly .openFull:hover {
+   pointer-events: none;
+ }
+ .tpTip[hidden] { display: none; }
++
++/* Clicktrough: a world boss's map button, folded after its map's name. */
++.list .where .mapBtn {
++  width: 18px;
++  height: 14px;
++  margin-left: 4px;
++  vertical-align: -3px;
++}
++.list .where .mapBtn svg {
++  width: 12px;
++  height: 12px;
++}
 -- 
 2.43.0
 
