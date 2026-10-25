@@ -1,4 +1,4 @@
-From 3d86ebf6b729f0b2a6eb201904ddf7cdc8df1520 Mon Sep 17 00:00:00 2001
+From 75a1db979b013a8e0d81fa5093f5096cb94cf1cb Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Sat, 24 Oct 2026 12:35:54 +0000
 Subject: [PATCH] Daily Checklist: the lists side by side
@@ -17,7 +17,7 @@ Claude-Session: https://claude.ai/code/session_01RBQati3x8VviBbpY9juEWf
  3 files changed, 37 insertions(+), 1 deletion(-)
 
 diff --git a/plugins/checklist/index.html b/plugins/checklist/index.html
-index 9fe70fa..d944f36 100644
+index 314f76f..d2156bb 100644
 --- a/plugins/checklist/index.html
 +++ b/plugins/checklist/index.html
 @@ -13,6 +13,7 @@
@@ -29,19 +29,19 @@ index 9fe70fa..d944f36 100644
      </div>
      <div class="lists">
 diff --git a/plugins/checklist/plugin.js b/plugins/checklist/plugin.js
-index 8a45b39..db3730d 100644
+index 0d86dbf..4f02039 100644
 --- a/plugins/checklist/plugin.js
 +++ b/plugins/checklist/plugin.js
 @@ -39,7 +39,7 @@ const state = {
    main: null, // your main character's key
    progress: {},
    reminded: {},
--  prefs: { minutes: 420, weekday: 3, remindDaily: 2, remindWeekly: 24, sound: "chime" },
-+  prefs: { minutes: 420, weekday: 3, remindDaily: 2, remindWeekly: 24, sound: "chime", columns: false },
+-  prefs: { minutes: 420, weekday: 3, remindDaily: 2, remindWeekly: 24, sound: "chime", volume: 100 },
++  prefs: { minutes: 420, weekday: 3, remindDaily: 2, remindWeekly: 24, sound: "chime", volume: 100, columns: false },
    last: null,
  };
  const KEYS = Object.keys(state);
-@@ -358,6 +358,22 @@ for (const [cls, key] of [["resetDay", "weekday"], ["remindDaily", "remindDaily"
+@@ -379,6 +379,22 @@ $(".volume").addEventListener("change", () => playSound(state.prefs.sound));
  $(".testAlert").addEventListener("click", () => checkReminders(true));
  
  a2.on("compact", (on) => document.body.classList.toggle("compact", !!on));
@@ -64,7 +64,7 @@ index 8a45b39..db3730d 100644
  a2.on("character", setCharacter);
  
  // ── Start ──────────────────────────────────────────────────────────────────
-@@ -373,6 +389,7 @@ a2.on("character", setCharacter);
+@@ -394,6 +410,7 @@ a2.on("character", setCharacter);
    }
    for (const k of KINDS) state.items[k] ||= [];
    showPrefs();
@@ -73,10 +73,10 @@ index 8a45b39..db3730d 100644
    a2.ready();
    setInterval(() => {
 diff --git a/plugins/checklist/style.css b/plugins/checklist/style.css
-index 48f06d6..9d3fd1d 100644
+index 86635aa..7ef0a14 100644
 --- a/plugins/checklist/style.css
 +++ b/plugins/checklist/style.css
-@@ -93,6 +93,24 @@ body.editing .items li { cursor: default; }
+@@ -94,6 +94,24 @@ body.editing .items li { cursor: default; }
  .bannerText small { display: block; font-weight: 400; color: rgba(255, 255, 255, 0.8); }
  .bannerClose { position: absolute; top: 3px; right: 3px; border: 0; background: none; font-size: 14px; padding: 0 4px; }
  

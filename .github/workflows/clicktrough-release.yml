@@ -165,8 +165,10 @@ jobs:
           git -C plugins-up checkout -q --detach "$PLUGINS_COMMIT"
           for d in fork/clicktrough/plugins/*/; do
             id=$(basename "$d")
+            # -3: a change upstream next to a patched line merges instead of
+            # failing the build (only a real conflict still stops it).
             git -C plugins-up -c user.name="Clicktrough" -c user.email="clicktrough@users.noreply.github.com" \
-              am "$GITHUB_WORKSPACE/fork/clicktrough/plugins/$id/"*.patch
+              am -3 "$GITHUB_WORKSPACE/fork/clicktrough/plugins/$id/"*.patch
             mkdir -p src/src/data/ct-plugins
             cp -r "plugins-up/plugins/$id" "src/src/data/ct-plugins/$id"
             echo "$id $(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "plugins-up/plugins/$id/manifest.json" | head -n1)"

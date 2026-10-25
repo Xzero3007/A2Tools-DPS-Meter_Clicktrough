@@ -78,7 +78,7 @@ if [ ${#plugin_dirs[@]} -gt 0 ]; then
   git -C "$plugins_src" checkout -q --detach origin/HEAD
   for d in "${plugin_dirs[@]}"; do
     id=$(basename "$d")
-    git -C "$plugins_src" "${who[@]}" am -q "$d"*.patch || fail "The plugin patch for $id"
+    git -C "$plugins_src" "${who[@]}" am -3 -q "$d"*.patch || fail "The plugin patch for $id"
     mkdir -p src/data/ct-plugins
     cp -r "$plugins_src/plugins/$id" "src/data/ct-plugins/$id"
   done
