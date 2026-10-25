@@ -69,3 +69,6 @@ settings.properties
 
 # Never commit a signing key.
 *.pem
+
+# Python caches (dev scripts)
+__pycache__/

@@ -32,8 +32,8 @@ package.
   **Daily Checklist** the same way: Daily, Weekly and One-time as columns.
 - **A map with your position**: the Map plugin shows the map you are on (the
   game's own world maps, whole: Verteron, Altgard, the Abyss, Poeta,
-  Ishalgen), where you are and in which region, the pets Pet Finder and Pet Soul Tracker
-  follow, monsters around, gathering spots by kind, Hidden Cubes, Monolith
+  Ishalgen), where you are (steadied, with a ring for how far off it may
+  be) and in which region, Pet Finder's favourite and farmed pets, monsters around, gathering spots by kind, Hidden Cubes, Monolith
   pieces, Kibelisk camps, sealed dungeons and other places, each layer on or
   off, and a search (e.g. "Orichalcum" or "Hidden Cube": all its spots and the
   nearest); and an overlay with a small map that follows you, the next pet to
@@ -57,15 +57,18 @@ package.
 - **The way there on the Map**: for a search, a field boss (map button in
   Event Timers) or a material (map button in the Market), the Kibelisk to
   teleport to and a line from it; field bosses on the map; larger marks
-  (100–175 %); and the gathering spots and pets your meter sees are added.
+  (100–175 %); and the gathering spots and pets your meter sees are added
+  and kept, so the map fills as you play.
 - **Window sizes to switch between**: buttons 1, 2, 3 beside the text size
   of the plugin dock and of a plugin's window switch it between three sizes;
   a right-click keeps the window's size now under a button. Clickable while
   locked.
-- **Pet Finder built in**: pet mobs near you with how far and which way, a
-  search over every pet and a Black Cloud Merchant shopping list (data from
+- **Pet Finder built in, one pet list**: the Pet Soul Tracker's list as its
+  Pets tab (favourites ★ first everywhere and on the Map with the pet you
+  farm), pet mobs near you with how far and which way, and a Black Cloud
+  Merchant shopping list (data from
   [PetTracker](https://github.com/0Fox2Give/PetTracker)); the Merchant tab
-  optionally in columns.
+  optionally in columns. Pet Soul Tracker itself can then be turned off.
 - **No stuck tooltip**: the box that opens when you hover a row closes
   reliably on Linux (the original's fix, here before its next version).
 - **Updates come from this repo**, so an official update doesn't replace the
@@ -101,8 +104,11 @@ OBS overlay …) is covered by the original:
   and the build. The source of every package is the original at its version
   tag plus these patches.
 - Pet Finder (`clicktrough/own-plugins/pet-finder`) takes its data and packet
-  layouts from [PetTracker](https://github.com/0Fox2Give/PetTracker) and is
-  licensed under the GPL-3.0-or-later. The Map plugin
+  layouts from [PetTracker](https://github.com/0Fox2Give/PetTracker) and its
+  Pets tab from A2 Tools' Pet Soul Tracker
+  ([A2Tools-Plugins](https://github.com/taengu/A2Tools-Plugins), GPL-3.0, see
+  `NOTICE-PetSoulTracker.txt` there); its own parts are licensed under the
+  GPL-3.0-or-later, the whole under the GPL-3.0. The Map plugin
   (`clicktrough/own-plugins/map`, GPL-3.0-or-later) and the meter's position
   service (patch 0010) take their maps, map data, frame layouts and position
   estimate from SkeeveAN's

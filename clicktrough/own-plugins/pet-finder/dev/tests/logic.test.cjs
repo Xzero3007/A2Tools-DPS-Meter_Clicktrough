@@ -63,15 +63,15 @@ test("nearby groups by pet with mob names", () => {
   console.log("   nearby:", pet.name, "←", v[0].mobs.map((m) => `${m.name} ×${m.count}`).join(", "));
 });
 
-test("collection: snapshot, gains, spend at rank-up, rank; bad rank frame ignored", () => {
-  const { coll, log } = run();
-  assert.deepEqual(log.filter((l) => l[0] === "rejected"), [["rejected", "pet-rank"]]);
-  // 1007: rank 1 with 24, +1 = 25, spent 25 at the upgrade, now rank 2 with 0.
-  assert.deepEqual(coll.progress(1007), { rank: 2, souls: 0, goal: 75, toMax: 75 });
-  assert.deepEqual(coll.progress(1086), { rank: 2, souls: 45, goal: 75, toMax: 30 });
-  assert.deepEqual(coll.progress(1163), { rank: 1, souls: 0, goal: 25, toMax: 100 });
-  // 1029 was not owned: rank 0 with 1 of 5 to unlock.
-  assert.deepEqual(coll.progress(1029), { rank: 0, souls: 1, goal: 5, toMax: 104 });
+test("the Pets list's frames: the pet list at login, souls, a level; a level frame with a status is one to leave", () => {
+  const got = (name) => events.filter((e) => e.event === `decoded:${name}`).map((e) => e.data);
+  const [list, ...more] = got("pet-list");
+  assert.equal(more.length, 0, "the garbage 00 90 frame reads as no pet list");
+  assert.deepEqual(list.levels.map((l) => [l.pet, l.level]), [[1007, 1], [1086, 2], [1163, 1]]);
+  assert.deepEqual(list.points.map((p) => [p.pet, p.points]), [[1007, 24], [1086, 45]]);
+  assert.deepEqual(got("soul-gained").map((d) => d.souls.map((s) => [s.pet, s.amount])), [[[1007, 1]], [[1029, 1], [1098, 1]]]);
+  const levels = got("level-up");
+  assert.deepEqual(levels.map((d) => [d.status, d.pet, d.level]), [[0, 1007, 2], [1, 1007, 3]]);
 });
 
 test("collection frames that break PetTracker's rules are rejected", () => {

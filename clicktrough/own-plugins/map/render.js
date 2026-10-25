@@ -239,7 +239,7 @@
         case "me": {
           // Not exact: a ring as large as the guess is uncertain (~10 m).
           if (!m.exact) {
-            const ring = Math.max(r + 4, 1000 * map.scale * zoom);
+            const ring = Math.max(r + 4, (m.acc || 10) * 100 * map.scale * zoom);
             circle(sx, sy, ring, "rgba(255,255,255,0.08)", "rgba(255,255,255,0.35)", 1);
           }
           ctx.save();

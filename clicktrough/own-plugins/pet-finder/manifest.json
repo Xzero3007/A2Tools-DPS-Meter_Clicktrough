@@ -1,20 +1,21 @@
 {
   "id": "pet-finder",
   "name": "Pet Finder",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "apiVersion": 2,
-  "author": "community (data and packet layouts from PetTracker, GPLv3)",
-  "description": "Pet mobs near you with how far and which way, a search over every pet (your rank and souls, which mobs drop its souls, farming maps, other sources) and a Black Cloud Merchant shopping list.",
+  "author": "Clicktrough (the Pets list: A2 Tools' Pet Soul Tracker, GPL-3.0; nearby and merchant data and packet layouts: PetTracker, GPLv3)",
+  "description": "Every pet's level and the souls it still needs, from the game's own data, and where its souls drop (the Pet Soul Tracker's list); the pet mobs near you with how far and which way; and a Black Cloud Merchant shopping list. One list of favourites (★) for every tab and the Map plugin.",
   "permissions": [
     "storage",
     "notify",
+    "window",
     "events:character",
     "events:world",
+    "events:shared",
     "share",
-    "decoder:pet-collection",
-    "decoder:pet-souls",
-    "decoder:pet-spent",
-    "decoder:pet-rank",
+    "decoder:pet-list",
+    "decoder:soul-gained",
+    "decoder:level-up",
     "decoder:npc-spawn-40a",
     "decoder:npc-spawn-40b",
     "decoder:npc-spawn-41a",
@@ -31,15 +32,14 @@
   ],
   "decoders": [
     {
-      "name": "pet-collection",
+      "name": "pet-list",
       "opcode": "00 90",
       "fields": [
         {
-          "name": "equipped",
-          "type": "u32"
+          "type": "skip:4"
         },
         {
-          "name": "ranks",
+          "name": "levels",
           "type": "list",
           "count": "varint",
           "fields": [
@@ -48,17 +48,16 @@
               "type": "u32"
             },
             {
-              "name": "dup",
-              "type": "u32"
+              "type": "skip:4"
             },
             {
-              "name": "rank",
+              "name": "level",
               "type": "u32"
             }
           ]
         },
         {
-          "name": "souls",
+          "name": "points",
           "type": "list",
           "count": "varint",
           "fields": [
@@ -67,7 +66,7 @@
               "type": "u32"
             },
             {
-              "name": "souls",
+              "name": "points",
               "type": "u32"
             }
           ]
@@ -75,14 +74,14 @@
       ]
     },
     {
-      "name": "pet-souls",
+      "name": "soul-gained",
       "opcode": "0D 90",
       "immediate": true,
       "fields": [
         {
-          "name": "items",
+          "name": "souls",
           "type": "list",
-          "count": "varint",
+          "count": "u8",
           "fields": [
             {
               "name": "pet",
@@ -97,29 +96,7 @@
       ]
     },
     {
-      "name": "pet-spent",
-      "opcode": "0E 90",
-      "immediate": true,
-      "fields": [
-        {
-          "name": "items",
-          "type": "list",
-          "count": "varint",
-          "fields": [
-            {
-              "name": "pet",
-              "type": "u32"
-            },
-            {
-              "name": "amount",
-              "type": "u32"
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "pet-rank",
+      "name": "level-up",
       "opcode": "14 90",
       "immediate": true,
       "fields": [
@@ -132,7 +109,7 @@
           "type": "u32"
         },
         {
-          "name": "rank",
+          "name": "level",
           "type": "u32"
         }
       ]
@@ -731,8 +708,8 @@
   ],
   "ui": {
     "panel": {
-      "width": 380,
-      "height": 560
+      "width": 420,
+      "height": 600
     }
   }
 }

@@ -1,7 +1,11 @@
-// Pet Finder's page: the pet mobs near you and a search over every pet, with
-// your rank and souls from the login collection the meter reads.
+// Pet Finder's page: three tabs. Pets is the Pet Soul Tracker's list
+// (list.js): every pet's level and souls, where they drop, the favourites
+// (★). Nearby: the pet mobs near you, how far and which way. Merchant: the
+// Black Cloud Merchant's offers you still need. One collection and one list of
+// favourites for all three (globalThis.PetList), and one for the Map plugin.
 (() => {
   const L = globalThis.PetLogic;
+  const P = globalThis.PetList;
   const ix = L.index(globalThis.PET_DATA);
   const IMG = globalThis.PET_IMAGES || { portraits: {}, crystals: {} };
   const $ = (s) => document.querySelector(s);
@@ -9,16 +13,16 @@
 
   const STRINGS = {
     en: {
-      nearby: "Nearby", search: "Search", hideMaxed: "Hide maxed", clear: "Clear",
+      pets: "Pets", nearby: "Nearby", search: "Search", hideMaxed: "Hide level 3", clear: "Clear",
       keepFor: "Keep for", minutes: "{n} min", untilGone: "until gone",
       noNearby: "No pet mobs seen yet. They appear as the game shows them to you; changing map clears the list after a while.",
       searchPlaceholder: "Pet, mob, region or source…", allFamilies: "All",
-      pets: "{n} pets", more: "Show {n} more",
+      petCount: "{n} pets", more: "Show {n} more",
       notSynced: "Collection not read yet: log into your character with the meter running.",
       synced: "Synced at login, {t}", live: "live",
       toGo: "{n} of {all} pets still to reach rank 3 · {souls} souls to go",
-      rank: "Rank {r}", locked: "Not unlocked", max: "MAX", seen: "seen {t} ago", now: "just now",
-      pin: "Pin", unpin: "Unpin", mobs: "Souls from", maps: "Maps", source: "Source",
+      rank: "Lv {r}", locked: "Lv 0", max: "Lv 3", seen: "seen {t} ago", now: "just now",
+      pin: "A favourite: on the Map, first in every list", unpin: "Not a favourite any more", mobs: "Souls from", maps: "Maps", source: "Source",
       pinnedNearby: "Pinned pet nearby: {pet} ({mob})",
       character: "{name}", noData: "No data on this pet's sources yet.",
       merchant: "Merchant", kina: "{n} Kina", off: "−{n} %", bought: "✓ souls received",
@@ -37,21 +41,20 @@
   const fmtNum = (n) => Number(n).toLocaleString(locale());
 
   // ---------- state ----------
-  let settings = { tab: "nearby", hideMaxedNearby: false, hideMaxedSearch: false, family: "", keepMin: 10, merchantColumns: false };
-  let pinned = new Set();
+  let settings = { tab: "pets", hideMaxedNearby: false, keepMin: 10, merchantColumns: false };
   let character = null;
-  let collection = new L.Collection();
+  // The collection and the favourites: the Pets tab's (list.js), read here
+  // as Pet Finder's own collection was.
+  const collection = { get synced() { return P.synced; }, progress: (id) => P.progress(id) };
+  const pinned = { has: (id) => P.isPinned(id) };
   let compact = false;
-  let query = "";
-  let shown = 60;
   const nearby = new L.Nearby(ix);
   const frames = new L.Frames({
     spawn: ({ entity, npc }) => {
       const at = currentAt || Date.now();
       const isNew = nearby.spawn(entity, npc, at);
       if (isNew !== null && pinned.has(isNew) && Date.now() - at < 30000) {
-        const pet = ix.pets.get(isNew);
-        a2.notify(t("pinnedNearby", { pet: pet.name, mob: ix.npcNames.get(npc) || "" })).catch(() => {});
+        a2.notify(t("pinnedNearby", { pet: petName(isNew), mob: ix.npcNames.get(npc) || "" })).catch(() => {});
       }
       dirty();
     },
@@ -101,41 +104,19 @@
       timers[key] = setTimeout(() => a2.storage.set(key, value).catch(() => {}), 400);
     };
   })();
-  const saveCollection = () => {
-    saveLater(L.characterKey(character), collection.toJSON());
-    shareLater();
-  };
   const saveSettings = () => saveLater("settings", settings);
-  const savePins = () => {
-    saveLater("pins", [...pinned]);
-    shareLater();
-  };
-
-  // ---------- the Map plugin: the pets to show (a2.share) ----------
-  // Pinned pets, and once the collection is read every pet not at rank 3.
-  let shareTimer = 0;
-  function shareLater() {
-    clearTimeout(shareTimer);
-    shareTimer = setTimeout(() => {
-      const pets = [...pinned].filter((id) => ix.pets.has(id)).map((id) => ({ id, name: ix.pets.get(id).name, mark: "pinned" }));
-      if (collection.synced) {
-        for (const p of ix.list) {
-          if (pinned.has(p.id) || collection.progress(p.id).rank === 3) continue;
-          pets.push({ id: p.id, name: p.name, mark: "needed" });
-        }
-      }
-      lastPets = pets;
-      a2.share({ source: "Pet Finder", pets, focus: focusRequest }).catch(() => {});
-    }, 500);
-  }
-  // A map link: the Map plugin shows that pet's spawn points (on that
-  // region's map) instead of a website.
-  let lastPets = [];
-  let focusRequest = null;
-  function showOnMap(pet, region) {
-    focusRequest = { pet: pet.id, name: pet.name, region, at: Date.now() };
-    a2.share({ source: "Pet Finder", pets: lastPets, focus: focusRequest }).catch(() => {});
-  }
+  // The game's name in the meter's language (or the player's own), as the
+  // Pets tab shows it; else PetTracker's.
+  const petName = (id) => P.name(id) || ix.pets.get(id)?.name || `Pet ${id}`;
+  // Souls for a pet just after it was on offer: bought (the shopping list
+  // ticks it).
+  P.onGain((pet, amount, at) => {
+    const all = [...stocks.values()];
+    const offered = new Set([...L.recommendations(all, collection, at, ix), ...L.recommendations(all, collection, at, ix, { farmable: true })].map((r) => r.pet));
+    if (offered.has(pet) && !bought.has(pet)) bought.set(pet, at);
+    dirty();
+  });
+  P.onChange(() => { if (settings.tab !== "pets" || compact) dirty(); });
 
   // ---------- where things are (a2.on("world")) ----------
   // The meter's world around the player: where he is and where the monsters
@@ -171,21 +152,6 @@
     return best;
   }
 
-  async function loadCharacter(c) {
-    const key = L.characterKey(c);
-    let saved = null;
-    try {
-      saved = await a2.storage.get(key);
-    } catch {}
-    // Still the same character when the answer comes back, and no login
-    // collection read meanwhile (that one is newer than anything saved).
-    if (L.characterKey(character) === key && !collection.synced) {
-      collection = new L.Collection(saved);
-      render();
-      shareLater();
-    }
-  }
-
   // ---------- events from the meter ----------
   function sameCharacter(a, b) {
     return !!a && !!b && a.name === b.name && Number(a.serverId) === Number(b.serverId);
@@ -194,11 +160,9 @@
     if (!c || !c.name) return;
     if (sameCharacter(c, character)) return;
     character = { name: c.name, serverId: c.serverId };
-    collection = new L.Collection();
     nearby.clear();
     stocks.clear();
     bought.clear();
-    loadCharacter(character);
   }
 
   a2.on("compact", (on) => {
@@ -220,51 +184,6 @@
       flushTimer = setTimeout(() => frames.flush(), 250);
     });
   }
-
-  // Collection events: filed under the character the meter says was playing.
-  function forCharacter(meta) {
-    if (meta?.character?.name) setCharacter(meta.character);
-    return meta?.at || Date.now();
-  }
-  a2.on("decoded:pet-collection", (data, meta) => {
-    frames.flush();
-    const at = forCharacter(meta);
-    const c = L.collectionFrom(data, ix.catalog);
-    if (!c) return;
-    collection.snapshot(c, at);
-    nearby.clear(); // a login: what was near before is gone
-    saveCollection();
-    dirty();
-  });
-  a2.on("decoded:pet-souls", (data, meta) => {
-    const at = forCharacter(meta);
-    const items = L.batchFrom(data, ix.catalog);
-    if (!items || !collection.synced) return;
-    const all = [...stocks.values()];
-    const offered = new Set([...L.recommendations(all, collection, at, ix), ...L.recommendations(all, collection, at, ix, { farmable: true })].map((r) => r.pet));
-    for (const i of items) {
-      collection.gain(i.pet, i.amount, at);
-      if (offered.has(i.pet) && !bought.has(i.pet)) bought.set(i.pet, at);
-    }
-    saveCollection();
-    dirty();
-  });
-  a2.on("decoded:pet-spent", (data, meta) => {
-    const at = forCharacter(meta);
-    const items = L.batchFrom(data, ix.catalog);
-    if (!items || !collection.synced) return;
-    for (const i of items) collection.spend(i.pet, i.amount, at);
-    saveCollection();
-    dirty();
-  });
-  a2.on("decoded:pet-rank", (data, meta) => {
-    const at = forCharacter(meta);
-    const r = L.rankFrom(data, ix.catalog);
-    if (!r || !collection.synced) return;
-    collection.rank(r.pet, r.rank, at);
-    saveCollection();
-    dirty();
-  });
 
   // ---------- rendering ----------
   let renderQueued = false;
@@ -311,7 +230,7 @@
     const p = collection.progress(id);
     const wrap = el("div", "progress");
     if (p.rank === null) return wrap;
-    const label = el("span", "rankText", p.rank === 0 ? t("locked") : t("rank", { r: p.rank }));
+    const label = el("span", "rankText", t("rank", { r: p.rank }));
     const count = el("span", "count", p.goal === null ? t("max") : `${p.souls}/${p.goal}`);
     const bar = el("div", "bar");
     const fill = el("div", "fill");
@@ -328,10 +247,22 @@
     b.setAttribute("aria-pressed", String(on));
     b.addEventListener("click", (e) => {
       e.stopPropagation();
-      if (pinned.has(id)) pinned.delete(id);
-      else pinned.add(id);
-      savePins();
+      P.togglePin(id);
       render();
+    });
+    return b;
+  }
+  /** Its spawn points on the Map plugin. */
+  function mapButton(id) {
+    if (typeof a2.share !== "function") return null;
+    const b = el("button", "mapBtn");
+    b.type = "button";
+    b.title = t("onMap");
+    b.setAttribute("aria-label", b.title);
+    b.innerHTML = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4 3 6.5v13.5l6-2.5 6 2.5 6-2.5V4l-6 2.5L9 4Zm0 0v13.5m6-11v13.5"/></svg>';
+    b.addEventListener("click", (e) => {
+      e.stopPropagation();
+      P.showOnMap({ pet: id, name: petName(id) });
     });
     return b;
   }
@@ -351,12 +282,10 @@
       h.append(el("div", "muted", t("notSynced")));
       return;
     }
-    const time = new Date(collection.syncedAt).toLocaleString(locale(), { dateStyle: "short", timeStyle: "short" });
+    const time = new Date(P.syncedAt).toLocaleString(locale(), { dateStyle: "short", timeStyle: "short" });
     const line = el("div", "muted", t("synced", { t: time }));
     if (character?.name) line.prepend(el("strong", "who", `${character.name} · `));
     h.append(line);
-    const tot = L.totals(ix, collection);
-    if (tot) h.append(el("div", "totals", t("toGo", { n: fmtNum(tot.notMax), all: fmtNum(tot.all), souls: fmtNum(tot.toMax) })));
   }
 
   function renderTabs() {
@@ -365,14 +294,9 @@
     const count = nearby.view().length;
     const offers = [...merchantRows(Date.now()), ...merchantRows(Date.now(), true)].filter((r) => !r.done).length;
     nav.replaceChildren(
-      ...[["nearby", `${t("nearby")}${count ? ` (${count})` : ""}`], ["search", t("search")], ["merchant", `${t("merchant")}${offers ? ` (${offers})` : ""}`]].map(([id, label]) => {
+      ...[["pets", t("pets")], ["nearby", `${t("nearby")}${count ? ` (${count})` : ""}`], ["merchant", `${t("merchant")}${offers ? ` (${offers})` : ""}`]].map(([id, label]) => {
         const b = el("button", settings.tab === id ? "tab on" : "tab", label);
-        b.addEventListener("click", () => {
-          settings.tab = id;
-          saveSettings();
-          render();
-          if (id === "search") $("#q")?.focus();
-        });
+        b.addEventListener("click", () => select(id));
         return b;
       }),
     );
@@ -439,7 +363,9 @@
         const li = el("li", pinned.has(g.pet) ? "row pinned" : "row");
         const main = el("div", "main");
         const title = el("div", "title");
-        title.append(el("span", "name", pet.name), familyTag(pet.family));
+        title.append(el("span", "name", petName(g.pet)), familyTag(pet.family));
+        const mb = mapButton(g.pet);
+        if (mb) title.append(mb);
         main.append(title, el("div", "mobs", g.mobs.map((m) => (m.count > 1 ? `${m.name} ×${m.count}` : m.name)).join(", ")), progressLine(g.pet));
         const side = el("div", "side");
         const n = near.get(g.pet);
@@ -452,94 +378,6 @@
       frag.push(ul);
     }
     view.replaceChildren(...frag);
-  }
-
-  let searchBox = null;
-  function renderSearch() {
-    const view = $("#view");
-    if (!searchBox) {
-      searchBox = el("div", "searchBox");
-      const input = document.createElement("input");
-      input.id = "q";
-      input.type = "search";
-      input.autocomplete = "off";
-      input.spellcheck = false;
-      let timer = 0;
-      input.addEventListener("input", () => {
-        clearTimeout(timer);
-        timer = setTimeout(() => { query = input.value; shown = 60; renderResults(); }, 120);
-      });
-      const fams = el("div", "chips");
-      const opts = el("label", "check");
-      const cb = document.createElement("input");
-      cb.type = "checkbox";
-      cb.addEventListener("change", () => { settings.hideMaxedSearch = cb.checked; saveSettings(); shown = 60; renderResults(); });
-      opts.append(cb, el("span", "hideLabel"));
-      const results = el("div", "results");
-      searchBox.append(input, fams, opts, results);
-    }
-    const [input, fams, opts] = searchBox.children;
-    input.placeholder = t("searchPlaceholder");
-    opts.querySelector("input").checked = settings.hideMaxedSearch;
-    opts.querySelector(".hideLabel").textContent = t("hideMaxed");
-    fams.replaceChildren(
-      ...["", "Cogni", "Fera", "Natura", "Varian", "Special"].map((f) => {
-        const b = el("button", settings.family === f ? "chip on" : "chip", f || t("allFamilies"));
-        b.addEventListener("click", () => { settings.family = f; saveSettings(); shown = 60; render(); });
-        return b;
-      }),
-    );
-    if (view.firstChild !== searchBox) view.replaceChildren(searchBox);
-    renderResults();
-  }
-
-  function renderResults() {
-    if (!searchBox) return;
-    const results = searchBox.querySelector(".results");
-    const found = L.search(ix, query, collection, { family: settings.family, hideMaxed: settings.hideMaxedSearch, pinned });
-    const frag = [el("div", "muted count", t("pets", { n: found.length }))];
-    const ul = el("ul", "rows");
-    for (const pet of found.slice(0, shown)) {
-      const li = el("li", pinned.has(pet.id) ? "row pinned" : "row");
-      const main = el("div", "main");
-      const title = el("div", "title");
-      title.append(el("span", "name", pet.name), familyTag(pet.family));
-      main.append(title, progressLine(pet.id));
-      if (pet.mobs.length) {
-        const m = el("div", "mobs");
-        m.append(el("span", "label", `${t("mobs")}: `), document.createTextNode(pet.mobs.join(", ")));
-        main.append(m);
-      }
-      if (pet.maps.length) {
-        const maps = el("div", "maps");
-        for (const map of pet.maps) {
-          const b = el("button", "mapLink", `${map.region} ⌖`);
-          b.type = "button";
-          b.title = t("onMap");
-          b.addEventListener("click", () => showOnMap(pet, map.region));
-          maps.append(b);
-        }
-        main.append(maps);
-      }
-      if (pet.acq) {
-        const s = el("div", "source");
-        s.append(el("span", "label", `${pet.acq.kind}: `), document.createTextNode(pet.acq.how));
-        if (pet.acq.window) s.append(el("div", "window", pet.acq.window));
-        main.append(s);
-      }
-      if (!pet.mobs.length && !pet.maps.length && !pet.acq) main.append(el("div", "muted", t("noData")));
-      const side = el("div", "side");
-      side.append(pinButton(pet.id));
-      li.append(portrait(pet.id), main, side);
-      ul.append(li);
-    }
-    frag.push(ul);
-    if (found.length > shown) {
-      const more = el("button", "small more", t("more", { n: Math.min(60, found.length - shown) }));
-      more.addEventListener("click", () => { shown += 60; renderResults(); });
-      frag.push(more);
-    }
-    results.replaceChildren(...frag);
   }
 
   /** The shopping list: fresh offers you need; one you just got souls for stays 20 s, ticked. */
@@ -573,7 +411,7 @@
         const li = el("li", r.done ? "row done" : "row offer");
         const main = el("div", "main");
         const title = el("div", "title");
-        title.append(el("span", "name", pet.name), familyTag(pet.family));
+        title.append(el("span", "name", petName(r.pet)), familyTag(pet.family));
         main.append(title, progressLine(r.pet));
         const side = el("div", "side");
         if (r.done) side.append(el("span", "bought", t("bought")));
@@ -590,7 +428,8 @@
       if (farm.length || columns) frag.push(el("h3", "section first", t("onlyMerchant")));
       frag.push(offerList(rows));
     } else if (!collection.synced) {
-      frag.push(el("p", "empty", t("notSynced")));
+      // The line above says it already; the compact window has no such line.
+      if (compact) frag.push(el("p", "empty", t("notSynced")));
     } else if (shopSeenAt && now - shopSeenAt < 2 * 60 * 1000 && shopReadAt < shopSeenAt - 1000) {
       frag.push(el("p", "empty warn", t("merchantUnknown", { t: span(shopSeenAt) })));
     } else if (latest && L.freshStock(latest, now)) {
@@ -615,7 +454,7 @@
           const li = el("li", "row");
           const main = el("div", "main");
           const title = el("div", "title");
-          title.append(el("span", "name", pet.name), familyTag(pet.family));
+          title.append(el("span", "name", petName(pet.id)), familyTag(pet.family));
           main.append(title, progressLine(pet.id));
           li.append(portrait(pet.id), main, el("div", "side"));
           ul.append(li);
@@ -637,32 +476,45 @@
     view.replaceChildren(cols);
   }
 
+  // ---------- the tabs ----------
+  const TABS = ["pets", "nearby", "merchant"];
+  function select(tab) {
+    if (!TABS.includes(tab) || tab === settings.tab) return;
+    settings.tab = tab;
+    saveSettings();
+    render();
+  }
+  // The farming pop-up (list.js) opens on the Pets tab.
+  globalThis.PetFinderTabs = { select };
+
   function render() {
-    renderHeader();
     renderTabs();
     document.body.classList.toggle("compact", compact);
     document.body.classList.toggle("merchantColumns", !compact && settings.tab === "merchant" && !!settings.merchantColumns);
-    const tab = compact ? "nearby" : settings.tab;
-    if (tab !== "search" && searchBox && searchBox.parentNode) searchBox.remove();
+    const tab = TABS.includes(settings.tab) ? settings.tab : "pets";
+    document.body.dataset.tab = tab;
+    $("#petsView").hidden = tab !== "pets";
+    $("#finder").hidden = tab === "pets";
+    if (tab === "pets") return;
+    renderHeader();
     if (tab === "nearby") renderNearby();
-    else if (tab === "merchant") renderMerchant();
-    else renderSearch();
+    else renderMerchant();
   }
 
   // "seen 12s ago" and the keep-for limit, while nothing else changes.
   setInterval(() => {
-    if (compact || settings.tab !== "search") dirty();
+    if (settings.tab !== "pets") dirty();
   }, 5000);
 
   (async () => {
     try {
       const s = await a2.storage.get("settings");
       if (s && typeof s === "object") settings = { ...settings, ...s };
-      const p = await a2.storage.get("pins");
-      if (Array.isArray(p)) pinned = new Set(p.filter((id) => ix.pets.has(id)));
+      // Pet Finder 0.2's Search tab is the Pets tab now.
+      if (!TABS.includes(settings.tab)) settings.tab = "pets";
     } catch {}
     render();
-    shareLater();
-    a2.ready();
+    // a2.ready() comes from list.js, once its saved counts are loaded: the
+    // meter then sends what happened before, once (both scripts listen).
   })();
 })();

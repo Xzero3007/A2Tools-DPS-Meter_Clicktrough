@@ -4,28 +4,30 @@ The map you are on, with where you are, and an overlay with a small map that
 follows you over the game.
 
 - **Your position**: the arrow points the way you walk (the game sends no
-  facing). The meter knows your exact place only for a few seconds after an
-  action, an effect you put on, or a teleport; in between it is the middle of
-  the monsters and players around you (about 10 m off), shown with a ring.
-  The header names the region you are in (Safe Haven, Black Claw Village ...).
+  facing). The game reports your exact place only with an action, an effect
+  you put on, or a teleport; what your client tells the server as you walk is
+  encrypted, so no tool can read it. In between, the meter takes the middle
+  of the monsters and players moving around you (10 to 15 m off). The map
+  weighs that against your last exact place by how far each is likely off,
+  and moves the arrow there smoothly, no faster than one runs, instead of
+  jumping; the ring around it is how far off it may be ("±12 m"). The header
+  names the region you are in (Safe Haven, Black Claw Village ...).
 - **Which map**: the game names your zone at login and at each teleport or
   zone change. Started after that, the meter hasn't heard it yet: the map
   then goes by what is around you (pet monsters, gathering spots, Hidden
   Cubes), else it is the map you were on last time, marked "map as last
   time" (and a "?" in the overlay) until your next teleport.
-- **Pets**: the spawn points of the pets Pet Finder and Pet Soul Tracker
-  follow, in red: Pet Finder's pinned pets and those not at rank 3 yet, Pet
-  Soul Tracker's pinned ones and those you are farming (pinned with a gold
-  ring, farmed with a white one). The pet monsters around you right now are
+- **Pets**: the spawn points of the pets Pet Finder follows, in red: your
+  favourites (★, gold ring) and the one you are farming (white ring). Pet
+  Finder holds the Pet Soul Tracker's list now, so this is one list; while
+  the Pet Soul Tracker still runs too, the map goes by Pet Finder's alone. The pet monsters around you right now are
   the large dots. With no pet followed, or with **All pets**, every pet's
   spawn points show, small and white. At the bottom: the next pet to go for,
   which way and how far (hover it for why it is followed), and how many pets
   this map has and how many are around you.
-- **Next**: a pinned pet first (however far), then one you are farming, then
-  one Pet Finder still needs (every pet not at rank 3, so most of them);
+- **Next**: a favourite first (however far), then the one you are farming;
   among those, one that is there right now before a spawn point, then the
-  nearest. **Next: pinned & farmed only** leaves the needed ones out, **Next:
-  off** shows none (a search still has its Next).
+  nearest. **Next: off** shows none (a search still has its Next).
 - **Monsters**: the monsters around you right now, by name.
 - **Gathering**: the gathering spots by kind, each kind on or off (hover a kind
   for what it holds); those there right now framed white:
@@ -52,7 +54,8 @@ follows you over the game.
   spots and pet spawns players' meters happened to report (Asvata: 3 in
   Altgard). Each gathering spot, Hidden Cube and pet monster your meter sees
   where the map has none of its kind yet (8 m for a spot, 20 m for a
-  monster) is added, kept and shown like the others ("12 spots your meter
+  monster), on the map the zone or what is around names, is added, kept
+  (0.5.0 kept nothing past a restart) and shown like the others ("12 spots your meter
   saw" at the bottom); the more you play, the fuller the map.
 
 **Search** (two letters or more): gathering spots by name (Orichalcum, Aria
@@ -67,7 +70,7 @@ from your position, walking, or a teleport to the Kibelisk nearest the place
 shorter (a teleport counts as 250 m of walking); to the cheapest of its
 places when it has several. **Next** says it, in the overlay too: "teleport
 to <Kibelisk>, then 186 m", or which way and how far. A map link in Pet
-Finder or Pet Soul Tracker does the same for that pet or monster, a world
+Finder (its Nearby tab, or Map beside a monster in a pet's sources) does the same for that pet or monster, a world
 boss's map button in **Event Timers** for that boss, and a material's map
 button in the **Market** for where it is gathered; each brings the Map
 forward. It stays, after a restart too, until its **×** stops it: in the bar

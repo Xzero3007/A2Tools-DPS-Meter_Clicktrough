@@ -1,5 +1,5 @@
 // The Map plugin's window: the map you are on with where you are, the pets
-// Pet Finder and Pet Soul Tracker follow, monsters around, gathering spots,
+// Pet Finder follows (favourites, farming), monsters around, gathering spots,
 // Hidden Cubes, Monolith pieces, Kibelisk camps, sealed dungeons and other
 // places; a search; and an overlay (a widget) with a small map that follows
 // you.
@@ -35,7 +35,7 @@
   const focusSeen = {}; // plugin -> the last focus request handled (its time)
 
   // ---------- the spots this meter has seen (marks.js learnFrom) ----------
-  // Kept per map ("learned.<map>"), each at most 25,000 points.
+  // Kept per map ("learned_<map>"), each at most 25,000 points.
   let learned = {};
   let learnedVersion = 0;
   const learnedDirty = new Set();
@@ -44,14 +44,18 @@
     return () => {
       clearTimeout(t);
       t = setTimeout(() => {
-        for (const key of learnedDirty) a2.storage.set(`learned.${key}`, learned[key]).catch(() => {});
+        // Storage keys are letters, digits, "-" and "_" (a "." was refused,
+        // and nothing learnt was kept: 0.5.0).
+        for (const key of learnedDirty) a2.storage.set(`learned_${key}`, learned[key]).catch(() => {});
         learnedDirty.clear();
       }, 5000);
     };
   })();
   function learn(w) {
-    // Only where the zone says the map: never a guess.
-    const key = w?.zone != null ? D.zones[String(w.zone)] : null;
+    // Where the zone says the map, or what is around shows it (most of a
+    // session the meter hasn't heard the zone: only at a teleport); never the
+    // map of last time.
+    const key = M.mapOf(w);
     if (!key || !D.maps[key]) return;
     if (M.learnFrom(learned, key, w)) {
       learnedVersion++;
@@ -547,10 +551,13 @@
   });
 
   // ---------- from the meter ----------
+  let shownMe = null;
   a2.on("world", (w) => {
-    world = w;
     learn(w);
-    followHeading(w?.me);
+    // The place shown: steadier than the meter's guess (marks.js steady).
+    shownMe = M.steady(shownMe, w);
+    world = w ? { ...w, me: shownMe } : w;
+    followHeading(world?.me);
     render();
   });
   a2.on("shared", ({ plugin, value }) => {
@@ -596,7 +603,7 @@
     } catch {}
     for (const key of Object.keys(D.maps)) {
       try {
-        const lk = await a2.storage.get(`learned.${key}`);
+        const lk = await a2.storage.get(`learned_${key}`);
         if (lk && typeof lk === "object") learned[key] = lk;
       } catch {}
     }

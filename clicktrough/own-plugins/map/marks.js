@@ -90,6 +90,58 @@
     return added;
   }
 
+  // ---------- where the player is, steadier ----------
+  // The game reports the player's own place only now and then (an action, an
+  // effect, a teleport); in between the meter takes the middle of what moves
+  // around him, which jumps about by 10 to 15 m (SkeeveAN's measurements: the
+  // last exact report is off by 0.5 m at once, 5 m after 1 to 2.5 s, 14 m
+  // after 2.5 to 5 s; the middle by 11 to 15 m). The client's own movement
+  // to the server is encrypted, so there is nothing better to read. So: the
+  // last exact report and the middle weighed by how far each is likely off,
+  // and the shown place moving toward that smoothly, at most as fast as one
+  // runs, instead of jumping.
+  const AROUND_OFF_M = 13;
+  const fixOff = (ageS) => 0.5 + 5 * ageS;
+  /**
+   * The place to show: { x, y, exact, acc (metres it may be off), at } from
+   * the world's me and fix, moving on from `prev` (the last shown).
+   */
+  function steady(prev, w, now = Date.now()) {
+    const me = w?.me;
+    if (!me) return null;
+    const fix = w.fix;
+    const age = fix && Number.isFinite(fix.at) ? Math.max(0, (now - fix.at) / 1000) : Infinity;
+    let tx = me.x;
+    let ty = me.y;
+    let acc;
+    if (me.exact && age < 1.5) {
+      return { x: me.x, y: me.y, exact: true, acc: 1, at: now };
+    }
+    if (!me.exact && me.from === "around" && fix && age < 30) {
+      const wf = 1 / fixOff(age) ** 2;
+      const wa = 1 / AROUND_OFF_M ** 2;
+      tx = (fix.x * wf + me.x * wa) / (wf + wa);
+      ty = (fix.y * wf + me.y * wa) / (wf + wa);
+      acc = 1 / Math.sqrt(wf + wa);
+    } else {
+      acc = me.from === "around" ? AROUND_OFF_M : Math.min(40, fixOff(age));
+    }
+    const target = { x: tx, y: ty, exact: false, acc, at: now };
+    // Nothing shown yet, or a jump no one runs (a teleport): there at once.
+    if (!prev || Math.hypot(tx - prev.x, ty - prev.y) > 15000) return target;
+    const dt = Math.min(2, Math.max(0, (now - prev.at) / 1000));
+    const k = 1 - Math.exp(-dt / 0.8);
+    let dx = (tx - prev.x) * k;
+    let dy = (ty - prev.y) * k;
+    const most = 1200 * dt + 150; // 12 m/s, and a little
+    const step = Math.hypot(dx, dy);
+    if (step > most) {
+      dx *= most / step;
+      dy *= most / step;
+    }
+    return { x: prev.x + dx, y: prev.y + dy, exact: false, acc, at: now };
+  }
+
   // ---------- the way to a place ----------
   // A teleport (to a Kibelisk) is worth about this much walking: its loading
   // and its Kina.
@@ -134,10 +186,13 @@
     return best;
   }
 
-  /** The pets the other plugins track, merged: id -> { mark, name }. */
+  /** The pets the other plugins track, merged: id -> { mark, name }. Pet
+   *  Finder's alone once it shares (it holds the Pet Soul Tracker's list
+   *  now: one list of favourites, not two). */
   function mergeTracked(shared) {
     const out = new Map();
-    for (const value of Object.values(shared || {})) {
+    const from = shared?.["pet-finder"] ? { "pet-finder": shared["pet-finder"] } : shared || {};
+    for (const value of Object.values(from)) {
       for (const p of Array.isArray(value?.pets) ? value.pets : []) {
         const id = String(p?.id ?? "");
         if (!id) continue;
@@ -534,7 +589,7 @@
       } else if (best) next = best;
     }
 
-    if (me) marks.push({ kind: "me", x: me.x, y: me.y, exact: !!me.exact, heading: heading ?? 0, r: 6, label: me.exact ? "You" : "You (about here)", z: 100 });
+    if (me) marks.push({ kind: "me", x: me.x, y: me.y, exact: !!me.exact, acc: me.acc, heading: heading ?? 0, r: 6, label: me.exact ? "You" : `You (about here, ±${Math.round(me.acc || 10)} m)`, z: 100 });
     return { marks, next, petsHere: petsHere.size, around, hits, route };
   }
 
@@ -562,7 +617,7 @@
   }
 
   /** Why a pet is followed, as the next one says it. */
-  const MARK_TEXT = { pinned: "pinned", farming: "being farmed (Pet Soul Tracker)", needed: "not at rank 3 yet (Pet Finder)" };
+  const MARK_TEXT = { pinned: "a favourite (Pet Finder ★)", farming: "being farmed", needed: "not at level 3 yet" };
   const markText = (mark) => MARK_TEXT[mark] || MARK_TEXT.needed;
 
   /** The compass arrow for a bearing (0 = up). */
@@ -570,6 +625,6 @@
   const arrow = (deg) => ARROWS[Math.round((((deg % 360) + 360) % 360) / 45) % 8];
 
   globalThis.MapMarks = Object.freeze({
-    build, mergeTracked, mapOf, regionAt, arrow, markText, petName, setLearned, learnFrom, routeTo, gatherFor, TELEPORT_M, search, focusMaps, focusPoints, KIND_ORDER, kindLabel, kindTitle, placeLabel,
+    build, mergeTracked, mapOf, regionAt, arrow, markText, petName, setLearned, learnFrom, routeTo, gatherFor, TELEPORT_M, steady, search, focusMaps, focusPoints, KIND_ORDER, kindLabel, kindTitle, placeLabel,
   });
 })();

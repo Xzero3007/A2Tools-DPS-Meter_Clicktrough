@@ -94,7 +94,7 @@ test("the next pet: a pinned one before a farmed one before one only needed, liv
   assert.equal(nextOf(at(["needed", "needed"]), "chosen"), null);
   assert.equal(nextOf(at(["needed", "farming"]), "chosen").name, "Second");
   assert.equal(nextOf(at(["pinned", "farming"]), "off"), null);
-  assert.match(M.markText("needed"), /rank 3/);
+  assert.match(M.markText("needed"), /level 3/);
 });
 
 test("with nothing tracked: every pet's spawn points, small and white, and no next", () => {
@@ -296,4 +296,43 @@ test("spots the meter sees are learnt, once each, and then shown", () => {
   assert.equal(M.focusPoints(M.gatherFor("Asvata Log"), "altgard").length, before + 1);
   assert.equal(M.learnFrom(store, "nowhere", world), 0);
   M.setLearned({});
+});
+
+test("the place shown: an exact report at once, else the report and the middle weighed, moving smoothly", () => {
+  const t0 = 1_000_000;
+  // A fresh exact report: there.
+  const a = M.steady(null, { me: { x: 1000, y: 0, exact: true, from: "pose", at: t0 }, fix: { x: 1000, y: 0, at: t0 } }, t0 + 200);
+  assert.deepEqual([a.x, a.y, a.exact], [1000, 0, true]);
+  // 8 s later the middle of what is around says 30 m east: the shown place
+  // moves toward a mix of both, not all the way at once.
+  const around = { me: { x: 4000, y: 0, exact: false, from: "around", at: t0 + 8000 }, fix: { x: 1000, y: 0, at: t0 } };
+  const b = M.steady(a, around, t0 + 8200);
+  assert.ok(b.x > 1000 && b.x < 4000, String(b.x));
+  assert.ok(!b.exact && b.acc > 5 && b.acc < 14, String(b.acc));
+  // Asked again and again, it settles near the weighted place (close to the
+  // middle, the report being 8 s old).
+  let c = b;
+  for (let i = 1; i <= 20; i++) c = M.steady(c, around, t0 + 8200 + i * 250);
+  assert.ok(c.x > 3300 && c.x < 4000, String(c.x));
+  // It never runs faster than 12 m/s (and a little).
+  const far = { me: { x: 10000, y: 0, exact: false, from: "around", at: t0 + 9000 }, fix: null };
+  const d = M.steady(c, far, c.at + 250);
+  assert.ok(d.x - c.x <= 1200 * 0.25 + 150 + 1, String(d.x - c.x));
+  // A teleport (hundreds of metres): there at once.
+  const e = M.steady(d, { me: { x: 900000, y: 0, exact: false, from: "around", at: t0 }, fix: null }, d.at + 250);
+  assert.equal(e.x, 900000);
+  assert.equal(M.steady(e, { me: null }), null);
+});
+
+test("the map follows Pet Finder's list alone once it shares", () => {
+  const both = {
+    "pet-finder": { pets: [{ id: 1116, mark: "pinned" }] },
+    "pet-souls": { pets: [{ id: 1083, mark: "pinned" }, { id: 1021, mark: "farming" }] },
+  };
+  assert.deepEqual([...M.mergeTracked(both).keys()], ["1116"]);
+  assert.deepEqual([...M.mergeTracked({ "pet-souls": both["pet-souls"] }).keys()], ["1083", "1021"]);
+});
+
+test("the learnt spots' storage keys are ones the meter keeps", () => {
+  for (const key of Object.keys(D.maps)) assert.match(`learned_${key}`, /^[A-Za-z0-9_-]{1,64}$/, key);
 });
