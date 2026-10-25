@@ -10,7 +10,9 @@ for all of them and for the Map plugin:
   regions), the pop-up while farming; a click on a pet shows where its souls
   drop (monsters with level, chance, zone, spawns and the nearest Kibelisk,
   and chests), and **Map** beside a monster shows its spawn points on the Map
-  plugin. ☆ makes a pet a favourite.
+  plugin. ☆ makes a pet a favourite. A favourite that reaches level 3 stops
+  being one, so the Map no longer follows it; made one again at level 3, it
+  stays.
 - **Nearby** – the pet mobs the game has shown you, grouped by pet, with your
   level and souls (the Pets tab's), how far the nearest one is and which way
   (north up); favourites first, then the nearest, a map button for each, and a
@@ -59,7 +61,8 @@ Needs A2Tools 2.0.65 or newer (plugin API 2).
   Changing map leaves old mobs until they time out; **Clear** empties the list.
 - **Map** – your favourites and the pet you are farming (a soul in the last
   30 minutes) go to the Map plugin (`share`), which shows where their
-  monsters are; Map buttons show one pet or monster there.
+  monsters are, and so does which pets are not at level 3 yet (the Map marks
+  them apart); Map buttons show one pet or monster there.
 - **Merchant** – the shop's stock (`91 56`), only in the layout PetTracker checked
   against the game; anything else is dropped. Open the shop after your collection is
   read; offers show for two minutes, as the stock may change.

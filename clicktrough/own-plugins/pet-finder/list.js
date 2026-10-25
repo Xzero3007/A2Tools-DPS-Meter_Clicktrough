@@ -211,6 +211,7 @@ function petOf(id) {
 }
 
 function render() {
+  dropMaxedPins();
   const ids = new Set([...Object.keys(state.levels), ...Object.keys(state.points)]);
   // Special pets come at their highest level and take no souls, so they are
   // left out, as are pets only found on maps not open yet (the game lists
@@ -238,6 +239,7 @@ function render() {
   els.status.textContent = state.syncedAt
     ? `Synced at login ${syncedText(state.syncedAt)}`
     : "Log in to a character (or relog) to read your pets.";
+  if (pinNote && Date.now() - pinNote.at < PIN_NOTE_MS) els.status.textContent += ` · ${pinNote.text}`;
 
   // A search matches the shown name, the English one or the id.
   const query = els.search.value.trim().toLocaleLowerCase();
@@ -249,7 +251,8 @@ function render() {
   const sort = SORTS[prefs.sort] || SORTS.left;
   const dir = prefs.desc ? -1 : 1;
   // Picking level 3 shows those pets even while they are otherwise hidden.
-  const listed = els.hideMax.checked && prefs.level !== String(MAX_LEVEL) ? open : pets;
+  // Clicktrough: a favourite at level 3 (made one again on purpose) stays listed.
+  const listed = els.hideMax.checked && prefs.level !== String(MAX_LEVEL) ? pets.filter((p) => p.level < MAX_LEVEL || pinned.includes(p.id)) : pets;
   const ofGenus = (p) => !prefs.genus || p.genus === prefs.genus;
   const ofLevel = (p) => !prefs.level || String(Math.min(p.level, MAX_LEVEL)) === prefs.level;
   // With a region turned off, the pets whose souls drop only there leave the
@@ -303,7 +306,7 @@ function render() {
 
   els.list.replaceChildren(...shown.map((p) => rowOf(p, pinned, farming)));
   renderFarm(pinned, farming);
-  shareWithMap(pinned);
+  shareWithMap(pinned, ids);
   for (const fn of listeners) fn();
 }
 
@@ -315,19 +318,26 @@ let sharedPets = [];
 let focusRequest = null;
 function showOnMap(what) {
   focusRequest = { ...what, at: Date.now() };
-  a2.share({ source: "Pet Finder", pets: sharedPets, focus: focusRequest }).catch(() => {});
+  a2.share({ source: "Pet Finder", pets: sharedPets, needed: sharedNeeded, focus: focusRequest }).catch(() => {});
 }
-function shareWithMap(pinned) {
+// With them, once the pet list is read, every pet not at level 3 yet
+// (`needed`): the Map marks those apart from the ones done.
+let sharedNeeded = null;
+function shareWithMap(pinned, ids) {
   if (typeof a2.share !== "function") return;
   const pets = pinned.map((id) => ({ id: Number(id), name: petName(id), mark: "pinned" }));
   for (const p of farmedPets()) {
     if (!pinned.includes(p.id) && p.level < MAX_LEVEL) pets.push({ id: Number(p.id), name: p.name, mark: "farming" });
   }
-  const k = JSON.stringify(pets);
+  const needed = state.syncedAt
+    ? [...ids].filter((id) => PET_GENUS[id] !== "special" && levelOfPet(id) < MAX_LEVEL).map(Number).sort((a, b) => a - b)
+    : null;
+  const k = JSON.stringify([pets, needed]);
   if (k === sharedKey) return;
   sharedKey = k;
   sharedPets = pets;
-  a2.share({ source: "Pet Finder", pets, focus: focusRequest }).catch(() => {});
+  sharedNeeded = needed;
+  a2.share({ source: "Pet Finder", pets, needed, focus: focusRequest }).catch(() => {});
 }
 
 // A pet's row in the chosen layout, its sources under it while open.
@@ -797,10 +807,36 @@ const listeners = [];
 const gainListeners = [];
 function togglePin(id) {
   const list = (prefs.pinned || []).map(String);
+  const kept = (prefs.keepAtMax || []).map(String);
   const k = String(id);
-  prefs.pinned = list.includes(k) ? list.filter((x) => x !== k) : [...list, k];
+  if (list.includes(k)) {
+    prefs.pinned = list.filter((x) => x !== k);
+    prefs.keepAtMax = kept.filter((x) => x !== k);
+  } else {
+    prefs.pinned = [...list, k];
+    // Made a favourite at level 3: on purpose, so it stays one.
+    if (state.syncedAt && levelOfPet(k) >= MAX_LEVEL) prefs.keepAtMax = [...kept.filter((x) => x !== k), k];
+  }
   savePrefs();
   render();
+}
+const levelOfPet = (id) => Math.min(MAX_LEVEL, state.levels[id] || 0);
+// A favourite that reaches level 3 stops being one, so the Map no longer
+// follows it; one made a favourite again at level 3 stays (keepAtMax). Only
+// once the pet list is read: before, the levels aren't known.
+const PIN_NOTE_MS = 60_000;
+let pinNote = null;
+function dropMaxedPins() {
+  if (!state.syncedAt) return;
+  const list = (prefs.pinned || []).map(String);
+  const kept = new Set((prefs.keepAtMax || []).map(String));
+  const done = list.filter((id) => !kept.has(id) && levelOfPet(id) >= MAX_LEVEL);
+  if (!done.length) return;
+  prefs.pinned = list.filter((id) => !done.includes(id));
+  prefs.keepAtMax = [...kept].filter((id) => prefs.pinned.includes(id));
+  savePrefs();
+  const names = done.map((id) => petName(id));
+  pinNote = { at: Date.now(), text: `${names.length > 2 ? `${names.length} pets` : names.join(" and ")} at level 3: no longer ${names.length > 1 ? "favourites" : "a favourite"}` };
 }
 /** A pet's progress as Pet Finder's tabs show it: { rank (the level, 0-3),
  *  souls, goal (souls for the next level, null at 3), toMax }; all null

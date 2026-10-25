@@ -17,12 +17,16 @@ follows you over the game.
   then goes by what is around you (pet monsters, gathering spots, Hidden
   Cubes), else it is the map you were on last time, marked "map as last
   time" (and a "?" in the overlay) until your next teleport.
-- **Pets**: the spawn points of the pets Pet Finder follows, in red: your
-  favourites (★, gold ring) and the one you are farming (white ring). Pet
-  Finder holds the Pet Soul Tracker's list now, so this is one list; while
-  the Pet Soul Tracker still runs too, the map goes by Pet Finder's alone. The pet monsters around you right now are
-  the large dots. With no pet followed, or with **All pets**, every pet's
-  spawn points show, small and white. At the bottom: the next pet to go for,
+- **Pets**: the spawn points of the pets Pet Finder follows: your
+  favourites as a **gold star** and the one you are farming as a **red
+  target** (white ring and dot). Pet Finder holds the Pet Soul Tracker's list
+  now, so this is one list; while the Pet Soul Tracker still runs too, the map
+  goes by Pet Finder's alone. With no pet followed, or with **All pets**,
+  every pet's spawn points show: **red in a white ring** while the pet is not
+  at level 3 yet, **small and grey** at level 3 (Pet Finder tells which once it
+  has read your pet list; before, small and white). The pet monsters around
+  you right now are the large marks with a white halo, and every one not at
+  level 3 yet shows, followed or not. A legend under the map explains them. At the bottom: the next pet to go for,
   which way and how far (hover it for why it is followed), and how many pets
   this map has and how many are around you.
 - **Next**: a favourite first (however far), then the one you are farming;

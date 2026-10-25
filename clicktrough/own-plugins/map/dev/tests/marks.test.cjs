@@ -60,7 +60,7 @@ test("with a pet tracked: only its spawn points, the next one and the counts", (
   const b = M.build({ key: "verteron", world, tracked, heading: 0, layers, gatherKinds: {}, petsMode: "tracked" });
   const spawns = b.marks.filter((m) => m.kind === "petSpawn");
   assert.equal(spawns.length, D.spawns.verteron[npc].length / 2 + Object.entries(D.spawns.verteron).filter(([n]) => n !== npc && String(D.npcPets[n]) === pet).reduce((s, [, p]) => s + p.length / 2, 0));
-  assert.ok(spawns.every((m) => m.ring), "pinned: a ring");
+  assert.ok(spawns.every((m) => m.look === "fav"), "a favourite: the star");
   assert.equal(b.petsHere, 1);
   assert.equal(b.around, 1);
   // The live monster (20 m off) beats the nearer spawn point (10 m off).
@@ -70,6 +70,28 @@ test("with a pet tracked: only its spawn points, the next one and the counts", (
   assert.ok(b.marks.some((m) => m.kind === "cube"));
   assert.ok(b.marks.some((m) => m.kind === "monster"));
   assert.ok(b.marks.some((m) => m.kind === "me" && m.exact));
+});
+
+test("pets by level: not at level 3 apart from level 3; a live one not at level 3 shows without being followed", () => {
+  const npc2 = Object.keys(D.spawns.verteron).find((n) => D.npcPets[n] != null && String(D.npcPets[n]) !== pet);
+  const pet2 = String(D.npcPets[npc2]);
+  const [ox, oy] = D.spawns.verteron[npc2];
+  const needed = M.neededOf({ "pet-finder": { pets: [], needed: [Number(pet2)] } });
+  assert.ok(needed.has(pet2) && !needed.has(pet));
+  assert.equal(M.neededOf({ "pet-finder": { pets: [] } }), null, "not known before the pet list is read");
+  const all = M.build({ key: "verteron", world: { zone: 1010, me: null }, tracked: new Map(), needed, heading: 0, layers, gatherKinds: {}, petsMode: "all" });
+  const lookOf = (p) => new Set(all.marks.filter((m) => m.kind === "petSpawn" && m.label.startsWith(M.petName(p, new Map()))).map((m) => m.look));
+  assert.deepEqual([...lookOf(pet2)], ["need"]);
+  assert.deepEqual([...lookOf(pet)], ["max"]);
+  // Following nothing but a favourite elsewhere: the live pet2 monster (not at
+  // level 3) shows, the live one at level 3 doesn't.
+  const tracked = M.mergeTracked({ pf: { pets: [{ id: 999999, mark: "pinned" }] } });
+  const world = { zone: 1010, me: { x: ox, y: oy, exact: true }, npcs: [[7, Number(npc2), ox + 800, oy], [8, Number(npc), ox + 900, oy]] };
+  const b = M.build({ key: "verteron", world, tracked, needed, heading: 0, layers: { ...layers, monsters: false }, gatherKinds: {}, petsMode: "tracked" });
+  const live = b.marks.filter((m) => m.kind === "petLive");
+  assert.equal(live.length, 1);
+  assert.equal(live[0].look, "need");
+  assert.match(live[0].label, /not at level 3 yet/);
 });
 
 test("the next pet: a pinned one before a farmed one before one only needed, live first within them", () => {

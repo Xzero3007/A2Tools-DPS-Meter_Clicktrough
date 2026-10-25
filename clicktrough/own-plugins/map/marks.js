@@ -186,6 +186,13 @@
     return best;
   }
 
+  /** The pets not at level 3 yet, as Pet Finder shares them once it has read
+   *  the pet list (ids as strings); null when not known. */
+  function neededOf(shared) {
+    const list = shared?.["pet-finder"]?.needed;
+    return Array.isArray(list) ? new Set(list.map(String)) : null;
+  }
+
   /** The pets the other plugins track, merged: id -> { mark, name }. Pet
    *  Finder's alone once it shares (it holds the Pet Soul Tracker's list
    *  now: one list of favourites, not two). */
@@ -407,7 +414,7 @@
    * route: with a focus, the way to its cheapest place (routeTo); next then
    * names the Kibelisk to teleport to (next.via) where that is shorter.
    */
-  function build({ key, world, tracked, heading, layers, gatherKinds, petsMode, focus, nextFor = "all" }) {
+  function build({ key, world, tracked, heading, layers, gatherKinds, petsMode, focus, nextFor = "all", needed = null }) {
     const marks = [];
     const map = D.maps[key];
     if (!map) return { marks, next: null, petsHere: 0, around: 0, hits: [], route: null };
@@ -415,14 +422,19 @@
     // With no plugin tracking pets, all of them.
     const all = petsMode === "all" || tracked.size === 0;
     const wanted = (pet) => all || tracked.has(String(pet));
-    // Pets nobody tracks: small and white; the tracked ones red, pinned with
-    // a gold ring, farmed with a white one.
+    // How a pet looks (render.js pet()): a favourite a gold star, the one
+    // being farmed red in a thick white ring, one not at level 3 yet red in a
+    // white ring, one at level 3 small and grey; levels not known: small and
+    // white. The size of its spawn points and their order (z).
+    const isNeeded = (pet) => (needed ? needed.has(String(pet)) : null);
     const style = (pet) => {
       const t = tracked.get(String(pet));
-      if (!t) return { color: "rgba(255,255,255,0.85)", ring: null, small: true };
-      if (t.mark === "pinned") return { color: K.PET_RED, ring: K.GOLD };
-      if (t.mark === "farming") return { color: K.PET_RED, ring: "#ffffff" };
-      return { color: K.PET_RED, ring: null };
+      if (t?.mark === "pinned") return { look: "fav", r: 4.5, z: 3, text: "★ favourite" };
+      if (t?.mark === "farming") return { look: "farm", r: 4, z: 3, text: "being farmed" };
+      const n = isNeeded(pet);
+      if (n === true || (n === null && t)) return { look: "need", r: 3.5, z: 2, text: "not at level 3 yet" };
+      if (n === false) return { look: "max", r: 2.5, z: 1, text: "level 3" };
+      return { look: "plain", r: 2.5, z: 1, text: "" };
     };
 
     // The next pet to go for: a pinned one before one being farmed, that
@@ -450,22 +462,24 @@
         if (!all && !tracked.has(String(pet))) continue;
         petsHere.add(String(pet));
         const s = style(pet);
-        const label = `${petName(pet, tracked)} · ${npcName(npc)}`;
+        const label = `${petName(pet, tracked)} · ${npcName(npc)}${s.text ? ` · ${s.text}` : ""}`;
         for (let i = 0; i < pts.length; i += 2) {
-          marks.push({ kind: "petSpawn", x: pts[i], y: pts[i + 1], r: s.small ? 2.5 : s.ring ? 4.5 : 3.5, color: s.color, ring: s.ring, label, z: s.ring ? 3 : s.small ? 1 : 2 });
+          marks.push({ kind: "petSpawn", x: pts[i], y: pts[i + 1], r: s.r, look: s.look, label, z: s.z });
           consider(pet, pts[i], pts[i + 1], false);
         }
       }
     }
 
     let around = 0;
+    // A pet monster there now: the ones followed, and every one not at level
+    // 3 yet (so what is still worth killing near you stands out).
     for (const [, npc, x, y] of world?.npcs || []) {
       const pet = D.npcPets[npc];
-      if (pet != null && layers.pets && wanted(pet)) {
+      if (pet != null && layers.pets && (wanted(pet) || isNeeded(pet))) {
         around++;
         const s = style(pet);
         const d = me ? ` · ${Math.round(K.metres(me.x, me.y, x, y))} m` : "";
-        marks.push({ kind: "petLive", x, y, r: 6, color: s.color === K.PET_RED ? K.PET_RED : "#f2f2f2", ring: s.ring || "#ffffff", label: `${petName(pet, tracked)} · ${npcName(npc)}${d}`, z: 8 });
+        marks.push({ kind: "petLive", x, y, r: s.look === "max" ? 4 : 6, look: s.look, label: `${petName(pet, tracked)} · ${npcName(npc)}${s.text ? ` · ${s.text}` : ""}${d}`, z: s.look === "max" ? 7 : 8 });
         consider(pet, x, y, true);
       } else if (layers.monsters) {
         marks.push({ kind: "monster", x, y, r: 2.5, label: npcName(npc), z: 4 });
@@ -544,7 +558,7 @@
         region: (x, y) => ({ kind: "place", place: "village", x, y, r: 5, text: focus.label }),
         boss: (x, y) => ({ kind: "boss", x, y, r: 6, text: focus.label }),
       };
-      const style = STYLES[focus.type] || ((x, y) => ({ kind: "petSpawn", x, y, r: 4.5, color: K.PET_RED }));
+      const style = STYLES[focus.type] || ((x, y) => ({ kind: "petSpawn", x, y, r: 4.5, look: "need" }));
       for (const [x, y] of focusPoints(focus, key)) {
         hits.push(x, y);
         // Every place a cube may appear: many, so no gold ring each.
@@ -553,7 +567,7 @@
       }
       for (const [, npc, x, y] of world?.npcs || []) {
         if (!focusLive(focus, "npc", npc)) continue;
-        marks.push({ kind: "petLive", x, y, r: 6, color: K.PET_RED, ring: "#ffffff", hit: true, label: `${focus.label} · there now`, z: 60 });
+        marks.push({ kind: "petLive", x, y, r: 6, look: "need", hit: true, label: `${focus.label} · there now`, z: 60 });
         near(x, y, true);
       }
       for (const [, env, x, y] of world?.objects || []) {
@@ -625,6 +639,6 @@
   const arrow = (deg) => ARROWS[Math.round((((deg % 360) + 360) % 360) / 45) % 8];
 
   globalThis.MapMarks = Object.freeze({
-    build, mergeTracked, mapOf, regionAt, arrow, markText, petName, setLearned, learnFrom, routeTo, gatherFor, TELEPORT_M, steady, search, focusMaps, focusPoints, KIND_ORDER, kindLabel, kindTitle, placeLabel,
+    build, mergeTracked, neededOf, mapOf, regionAt, arrow, markText, petName, setLearned, learnFrom, routeTo, gatherFor, TELEPORT_M, steady, search, focusMaps, focusPoints, KIND_ORDER, kindLabel, kindTitle, placeLabel,
   });
 })();

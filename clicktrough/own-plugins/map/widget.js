@@ -20,7 +20,7 @@
     view.setMap(state.key);
     view.setMarkScale(state.markScale ?? 1.25);
     const built = M.build({
-      key: state.key, world: state.world, tracked, heading: state.heading, layers: state.layers,
+      key: state.key, world: state.world, tracked, needed: Array.isArray(state.needed) ? new Set(state.needed.map(String)) : null, heading: state.heading, layers: state.layers,
       gatherKinds: state.gatherKinds || {}, petsMode: state.petsMode, focus: state.focus, nextFor: state.nextFor,
     });
     view.setMarks(built.marks);

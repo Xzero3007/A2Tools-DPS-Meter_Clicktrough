@@ -58,6 +58,11 @@ select.chip option { background: #1c1f24; color: #fff; }
 .mapTip { position: absolute; z-index: 5; pointer-events: none; padding: 3px 7px; border-radius: 5px; font-size: 12px; white-space: nowrap;
   background: rgba(10, 12, 16, 0.92); border: 1px solid rgba(255, 255, 255, 0.18); }
 
+/* The pet marks explained, under the map while pets show. */
+.legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 11px; color: rgba(255, 255, 255, 0.6); }
+.legend span { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.legend svg { width: 14px; height: 14px; flex: none; }
+body.compact .legend, body.noPets .legend { display: none; }
 .status { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; min-height: 18px; flex-wrap: wrap; }
 .nextLabel { color: rgba(255, 255, 255, 0.55); }
 

@@ -29,6 +29,8 @@
   let world = null;
   let shared = {};
   let tracked = new Map();
+  // The pets not at level 3 yet (Pet Finder's), or null.
+  let needed = null;
   let heading = 0;
   let headingFrom = null;
   let compact = false;
@@ -140,7 +142,7 @@
   }
 
   function state(key) {
-    return { key, world, tracked, heading, layers: settings.layers, gatherKinds: settings.gatherKinds, petsMode: settings.petsMode, focus: settings.focus, nextFor: settings.nextFor };
+    return { key, world, tracked, needed, heading, layers: settings.layers, gatherKinds: settings.gatherKinds, petsMode: settings.petsMode, focus: settings.focus, nextFor: settings.nextFor };
   }
 
   function draw() {
@@ -342,6 +344,7 @@
         key,
         world: world ? { me: world.me, zone: world.zone, npcs: world.npcs, objects: world.objects } : null,
         tracked: [...tracked].map(([id, t]) => [id, t.mark, t.name]),
+        needed: needed ? [...needed] : null,
         heading,
         layers: settings.layers,
         gatherKinds: settings.gatherKinds,
@@ -437,6 +440,7 @@
     $(".petsMode").hidden = !settings.layers.pets;
     $(".nextFor").value = ["all", "chosen", "off"].includes(settings.nextFor) ? settings.nextFor : "all";
     $(".nextFor").hidden = !settings.layers.pets;
+    document.body.classList.toggle("noPets", !settings.layers.pets);
     $(".markScale").value = String(settings.markScale);
     const kinds = $(".kinds");
     kinds.hidden = !settings.layers.gather || compact;
@@ -564,6 +568,7 @@
     if (value == null) delete shared[plugin];
     else shared[plugin] = value;
     tracked = M.mergeTracked(shared);
+    needed = M.neededOf(shared);
     // A map link clicked in that plugin: its pet or monster, here. Only a
     // fresh one: the value shared earlier comes again when the map starts.
     const f = value?.focus;

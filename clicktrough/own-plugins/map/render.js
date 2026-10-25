@@ -232,6 +232,48 @@
       }
     }
 
+    // A pet's spawn point or a pet monster there now ("live"), by how it
+    // stands: "fav" (a favourite: a gold star), "farm" (being farmed: a red
+    // target, thick white ring and dot), "need" (not at level 3 yet: red, a white ring),
+    // "max" (level 3: small and grey), "plain" (levels not known: small and
+    // white). Each with a dark edge, so it shows on sand as on grass.
+    function pet(sx, sy, r, look, live) {
+      if (look === "fav") {
+        const R = r * 1.8;
+        if (live) circle(sx, sy, R + 3, null, "rgba(255,255,255,0.9)", 2);
+        ctx.beginPath();
+        for (let i = 0; i < 10; i++) {
+          const a = -Math.PI / 2 + (i * Math.PI) / 5;
+          const d = i % 2 ? R * 0.48 : R;
+          ctx[i ? "lineTo" : "moveTo"](sx + d * Math.cos(a), sy + d * Math.sin(a));
+        }
+        ctx.closePath();
+        ctx.fillStyle = GOLD;
+        ctx.lineJoin = "round";
+        ctx.lineWidth = 1.75;
+        ctx.strokeStyle = "rgba(0,0,0,0.8)";
+        ctx.fill();
+        ctx.stroke();
+        circle(sx, sy, R * 0.3, PET_RED, null);
+        return;
+      }
+      if (look === "max") {
+        circle(sx, sy, r * 0.8, "rgba(175,175,175,0.7)", "rgba(0,0,0,0.5)", 1);
+        return;
+      }
+      if (look === "plain") {
+        circle(sx, sy, r, "rgba(255,255,255,0.85)", "rgba(0,0,0,0.55)", 1);
+        if (live) circle(sx, sy, r + 3, null, "rgba(255,255,255,0.7)", 1.5);
+        return;
+      }
+      const farm = look === "farm";
+      if (live) circle(sx, sy, r + (farm ? 6.5 : 5), null, "rgba(255,255,255,0.75)", 1.5);
+      circle(sx, sy, r + (farm ? 2.6 : 1.9), null, "rgba(0,0,0,0.6)", 1.2);
+      circle(sx, sy, r + (farm ? 1.2 : 0.8), PET_RED, "#ffffff", farm ? 2.6 : 1.8);
+      // Being farmed: a white dot in the middle too (a target).
+      if (farm) circle(sx, sy, Math.max(1.5, r * 0.4), "#ffffff", null);
+    }
+
     // An upright cube seen from above at an angle: a hexagon of three faces
     // around its centre, "size" from the centre to a corner.
     function cube(sx, sy, size, alpha, stroke, width) {
@@ -302,10 +344,10 @@
           break;
         }
         case "petSpawn":
-          circle(sx, sy, r, m.color || PET_RED, m.ring || "rgba(0,0,0,0.55)", m.ring ? 1.5 : 1);
+          pet(sx, sy, r, m.look || "need", false);
           break;
         case "petLive":
-          circle(sx, sy, r, m.color || PET_RED, m.ring || "#ffffff", 2);
+          pet(sx, sy, r, m.look || "need", true);
           break;
         case "monster":
           circle(sx, sy, r, "rgba(220,220,220,0.75)", "rgba(0,0,0,0.5)", 1);
