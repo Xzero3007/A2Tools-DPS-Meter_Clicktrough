@@ -7,8 +7,10 @@
 
   const GATHER_COLORS = {
     Ore: "#c9b08f", Herb: "#79d38a", Food: "#f0a35e", Gemstone: "#c99af7", Od: "#62d6c8",
-    Cotton: "#ededed", Wood: "#b0845c", Fragment: "#ffd666", Cube: "#ffd666",
+    Cotton: "#ededed", Wood: "#b0845c", Fragment: "#ffd666", Cube: "#a35cf5",
   };
+  // A Hidden Cube: a small purple cube (top, left and right face).
+  const CUBE_FACES = ["#d7a8ff", "#a35cf5", "#7434d0"];
   const PET_RED = "#e5484d";
   const PLACE_COLORS = { seal: "#ff8a7a", battlefield: "#ffb454", occupation: "#c99af7", village: "#ffffff" };
   const GOLD = "#ffd666";
@@ -230,6 +232,46 @@
       }
     }
 
+    // An upright cube seen from above at an angle: a hexagon of three faces
+    // around its centre, "size" from the centre to a corner.
+    function cube(sx, sy, size, alpha, stroke, width) {
+      const w = size * 0.866;
+      const h = size / 2;
+      const faces = [
+        [[0, -size], [w, -h], [0, 0], [-w, -h]],
+        [[-w, -h], [0, 0], [0, size], [-w, h]],
+        [[0, 0], [w, -h], [w, h], [0, size]],
+      ];
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      faces.forEach((f, i) => {
+        ctx.beginPath();
+        f.forEach(([x, y], j) => (j ? ctx.lineTo(sx + x, sy + y) : ctx.moveTo(sx + x, sy + y)));
+        ctx.closePath();
+        ctx.fillStyle = CUBE_FACES[i];
+        ctx.fill();
+      });
+      ctx.globalAlpha = 1;
+      ctx.lineJoin = "round";
+      // The inner edges thin and dark, the outline as asked.
+      ctx.beginPath();
+      ctx.moveTo(sx - w, sy - h);
+      ctx.lineTo(sx, sy);
+      ctx.lineTo(sx + w, sy - h);
+      ctx.moveTo(sx, sy);
+      ctx.lineTo(sx, sy + size);
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = "rgba(30,10,52,0.55)";
+      ctx.stroke();
+      ctx.beginPath();
+      [[0, -size], [w, -h], [w, h], [0, size], [-w, h], [-w, -h]].forEach(([x, y], j) => (j ? ctx.lineTo(sx + x, sy + y) : ctx.moveTo(sx + x, sy + y)));
+      ctx.closePath();
+      ctx.lineWidth = width;
+      ctx.strokeStyle = stroke;
+      ctx.stroke();
+      ctx.restore();
+    }
+
     let shrink = 1;
     // How large the marks are drawn (the player's setting: 1 = as designed).
     let markScale = 1;
@@ -278,17 +320,8 @@
           ctx.stroke();
           break;
         case "cube":
-          ctx.beginPath();
-          ctx.moveTo(sx, sy - r * 1.3);
-          ctx.lineTo(sx + r, sy);
-          ctx.lineTo(sx, sy + r * 1.3);
-          ctx.lineTo(sx - r, sy);
-          ctx.closePath();
-          ctx.fillStyle = GOLD;
-          ctx.lineWidth = 2;
-          ctx.strokeStyle = "#ffffff";
-          ctx.fill();
-          ctx.stroke();
+          // A cube in range right now: solid, with a white edge.
+          cube(sx, sy, r * 1.25, 1, "#ffffff", 2);
           break;
         case "boss": {
           // A field boss: a crown of three points on a dark disc, orange-red.
@@ -334,19 +367,10 @@
           ctx.stroke();
           break;
         case "cubeSpot":
-          // A place a Hidden Cube is known to stand at: an outline of the
-          // cube's diamond (a cube there right now is the filled one).
-          ctx.beginPath();
-          ctx.moveTo(sx, sy - r * 1.3);
-          ctx.lineTo(sx + r, sy);
-          ctx.lineTo(sx, sy + r * 1.3);
-          ctx.lineTo(sx - r, sy);
-          ctx.closePath();
-          ctx.fillStyle = m.all ? "rgba(255,214,102,0.35)" : "rgba(40,32,10,0.65)";
-          ctx.lineWidth = m.all ? 1 : 1.75;
-          ctx.strokeStyle = GOLD;
-          ctx.fill();
-          ctx.stroke();
+          // A place a Hidden Cube is known to stand at: the cube, paler (a
+          // cube there right now is the solid one); every place one can
+          // appear (the search): fainter still.
+          cube(sx, sy, r * 1.3, m.all ? 0.45 : 0.7, "rgba(20,8,36,0.85)", m.all ? 1 : 1.25);
           break;
         case "monolith":
           // A Monolith piece: a small upright bar.

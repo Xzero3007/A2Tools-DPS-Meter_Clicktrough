@@ -39,9 +39,9 @@ follows you over the game.
   - Gemstones: Sapphire, Diamond, Ruby, Aquamarine, Topaz and more
   - Odyle: Odyle, Splendent Odyle, Mysterious Odyle
   - Empyrean Traces: the traces to collect in Verteron
-- **Hidden Cubes**: the spots where a cube is known to stand (gold outline,
-  about 110 per map), and a cube in range right now (filled gold, it shows as
-  soon as the game announces it).
+- **Hidden Cubes**: purple cubes: the spots where a cube is known to stand
+  (pale, about 110 per map), and a cube in range right now (solid with a white
+  edge, it shows as soon as the game announces it).
 - **Monoliths**: the Monolith pieces to collect (560 in Verteron and in
   Altgard, about 200 in the Abyss).
 - **Kibelisks**: the Kibelisk camps.
