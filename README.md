@@ -46,9 +46,14 @@ package.
 - **Usable with the game closed**: "Hide when AION2 isn't focused" hides the
   meter only while AION2 runs.
 - **Market**: your server's prices of the gathered materials (from
-  [aion2.exchange](https://aion2.exchange)), what they cost made from Odyle
-  (Substance Morph), what every recipe costs and brings with and without
-  morphing, and which recipes need each material, with its cost.
+  [aion2.exchange](https://aion2.exchange), read from the fork's hourly copy
+  of them, which is fast where the site is slow), what they cost made from
+  Odyle (Substance Morph), what every recipe costs and brings with and
+  without morphing, and which recipes need each material, with its cost.
+- **Window sizes to switch between**: buttons 1, 2, 3 beside the text size
+  of the plugin dock and of a plugin's window switch it between three sizes;
+  a right-click keeps the window's size now under a button. Clickable while
+  locked.
 - **Pet Finder built in**: pet mobs near you with how far and which way, a
   search over every pet and a Black Cloud Merchant shopping list (data from
   [PetTracker](https://github.com/0Fox2Give/PetTracker)); the Merchant tab

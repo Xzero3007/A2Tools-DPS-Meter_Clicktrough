@@ -1,0 +1,615 @@
+From 54c634e2c81a6373c1b4f0c218b93a45fc241a89 Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Sun, 25 Oct 2026 00:35:48 +0000
+Subject: [PATCH] Plugins: window sizes to switch between, set by the player
+
+A plugin's window or the plugin dock could only be resized from its
+edges, which a locked (click-through) window doesn't offer. Three
+numbered buttons beside the text size, in the dock's panel bar and in a
+plugin window's bar, switch the window between three sizes: a click
+gives it the size kept under that button, a right-click (or Shift+click)
+keeps the window's size now under it ("Size 2 is now 640 x 680"). The
+dock has its own three (420 x 560, 640 x 680, 960 x 820 to begin with),
+each plugin window its own; the button whose size the window has shows
+pressed. They are buttons of those bars, so they stay clickable while
+the windows are locked (patch 0007). The meter resizes the window
+(plugin_window_size: the dock and plugin windows only, each only
+itself, 240 x 120 to 2000 x 1600), and remembers the size as any other;
+a folded dock unfolds first.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01RBQati3x8VviBbpY9juEWf
+---
+ public/plugin-dock.html       |   2 +
+ public/plugin-host.html       |   2 +
+ public/src/js/pluginDock.js   |  11 +++
+ public/src/js/pluginHost.css  |  44 ++++++++++++
+ public/src/js/pluginHost.js   |   8 +++
+ public/src/js/windowSizes.js  | 124 ++++++++++++++++++++++++++++++++++
+ src-tauri/src/app.rs          |   1 +
+ src-tauri/src/plugins/mod.rs  |  32 +++++++++
+ src/data/i18n/ui/de.json      |   2 +
+ src/data/i18n/ui/en.json      |   2 +
+ src/data/i18n/ui/es.json      |   2 +
+ src/data/i18n/ui/fr.json      |   2 +
+ src/data/i18n/ui/ja.json      |   2 +
+ src/data/i18n/ui/ko.json      |   2 +
+ src/data/i18n/ui/pt.json      |   2 +
+ src/data/i18n/ui/ru.json      |   2 +
+ src/data/i18n/ui/zh-Hans.json |   2 +
+ src/data/i18n/ui/zh-Hant.json |   2 +
+ tests/window-sizes.test.mjs   |  96 ++++++++++++++++++++++++++
+ 19 files changed, 340 insertions(+)
+ create mode 100644 public/src/js/windowSizes.js
+ create mode 100644 tests/window-sizes.test.mjs
+
+diff --git a/public/plugin-dock.html b/public/plugin-dock.html
+index 9721346..e28ac07 100644
+--- a/public/plugin-dock.html
++++ b/public/plugin-dock.html
+@@ -35,6 +35,7 @@
+           <span class="dockPanelName"></span>
+           <button type="button" class="dockPanelSmaller"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 13h6"/><path d="m2 16 4.5-9 4.5 9"/><path d="M18 7v9"/><path d="m14 12 4 4 4-4"/></svg></button>
+           <button type="button" class="dockPanelLarger"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 13h6"/><path d="m2 16 4.5-9 4.5 9"/><path d="M18 16V7"/><path d="m14 11 4-4 4 4"/></svg></button>
++          <span class="dockPanelSizes"></span>
+           <button type="button" class="dockPanelCompact" aria-pressed="false">
+             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16"/><path d="M4 12h10"/><path d="M4 18h6"/></svg>
+           </button>
+@@ -51,6 +52,7 @@
+     <script src="/vendor/lucide.min.js"></script>
+     <script src="/src/js/pluginIcons.js"></script>
+     <script src="/src/js/pluginFrame.js"></script>
++    <script src="/src/js/windowSizes.js"></script>
+     <script src="/src/js/pluginDock.js"></script>
+     <script src="/src/js/lockedButtons.js"></script>
+   </body>
+diff --git a/public/plugin-host.html b/public/plugin-host.html
+index 8f52a31..2cd040a 100644
+--- a/public/plugin-host.html
++++ b/public/plugin-host.html
+@@ -21,6 +21,7 @@
+       </button>
+       <button type="button" class="pluginSmaller" aria-label="Smaller text" title="Smaller text"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 13h6"/><path d="m2 16 4.5-9 4.5 9"/><path d="M18 7v9"/><path d="m14 12 4 4 4-4"/></svg></button>
+       <button type="button" class="pluginLarger" aria-label="Larger text" title="Larger text"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 13h6"/><path d="m2 16 4.5-9 4.5 9"/><path d="M18 16V7"/><path d="m14 11 4-4 4 4"/></svg></button>
++      <span class="pluginSizes"></span>
+       <button type="button" class="pluginCompact" aria-label="Hide the controls" title="Hide the controls" aria-pressed="false">
+         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m18 15-6-6-6 6"/></svg>
+       </button>
+@@ -31,6 +32,7 @@
+     <main class="pluginStage"></main>
+     <div class="pluginToast" role="status" hidden></div>
+     <script src="/src/js/pluginFrame.js"></script>
++    <script src="/src/js/windowSizes.js"></script>
+     <script src="/src/js/pluginHost.js"></script>
+     <script src="/src/js/lockedButtons.js"></script>
+   </body>
+diff --git a/public/src/js/pluginDock.js b/public/src/js/pluginDock.js
+index a185c41..4ec2357 100644
+--- a/public/src/js/pluginDock.js
++++ b/public/src/js/pluginDock.js
+@@ -194,6 +194,16 @@
+     smaller.addEventListener("click", () => { d.plugin?.stepTextScale(-1); showScale(); });
+     larger.addEventListener("click", () => { d.plugin?.stepTextScale(1); showScale(); });
+     showScale();
++    // Clicktrough: the dock's sizes to switch between (windowSizes.js), the
++    // same three in every panel's bar; a folded dock unfolds first.
++    window.A2_WINDOW_SIZES?.(panel.querySelector(".dockPanelSizes"), {
++      key: "dock",
++      defaults: [[420, 560], [640, 680], [960, 820]],
++      t,
++      toast: showToast,
++      before: () => { if (prefs.folded) setFolded(false); },
++      canKeep: () => !prefs.folded,
++    });
+     const popOut = panel.querySelector(".dockPanelPopOut");
+     setLabel(popOut, t("popOut", "Open in its own window"));
+     popOut.addEventListener("click", () => {
+@@ -323,6 +333,7 @@
+     setLabel(document.querySelector(".pluginSettings"), t("pluginSettings", "Plugin settings"));
+     setLabel(document.querySelector(".pluginClose"), t("close", "Hide the dock (the plugins keep running)"));
+     applyLayout(hello);
++    window.A2_WINDOW_SIZES?.refresh?.();
+     // Built to show one plugin (a widget double-clicked): on its tab.
+     if (typeof hello.focus === "string" && docked.has(hello.focus)) activate(hello.focus);
+     try { window.lucide?.createIcons(); } catch {}
+diff --git a/public/src/js/pluginHost.css b/public/src/js/pluginHost.css
+index c5f8b1d..18d8e7c 100644
+--- a/public/src/js/pluginHost.css
++++ b/public/src/js/pluginHost.css
+@@ -138,6 +138,50 @@ body.pluginFitted {
+   opacity: 0.35;
+   cursor: default;
+ }
++/* Clicktrough: the window's sizes to switch between (windowSizes.js): small
++   numbered keys as dim as the icons beside them; the size the window has
++   pressed. */
++.sizePresets {
++  flex: none;
++  display: inline-flex;
++  align-items: center;
++  gap: 3px;
++}
++.sizePreset {
++  flex: none;
++  box-sizing: border-box;
++  width: 15px;
++  height: 15px;
++  padding: 0;
++  border: 1px solid rgba(255, 255, 255, 0.28);
++  border-radius: 3px;
++  background: none;
++  color: rgba(255, 255, 255, 0.55);
++  font-family: system-ui, sans-serif;
++  font-weight: 700;
++  font-size: 9px;
++  line-height: 13px;
++  text-align: center;
++  cursor: pointer;
++  transition: color 120ms ease, border-color 120ms ease;
++}
++.sizePreset:hover,
++.sizePreset:focus-visible {
++  color: #fff;
++  border-color: rgba(255, 255, 255, 0.6);
++}
++.sizePreset[aria-pressed="true"] {
++  color: #fff;
++  border-color: rgba(255, 255, 255, 0.75);
++  background: rgba(255, 255, 255, 0.14);
++}
++/* The dock's panel bar has the smaller icons. */
++.dockPanelBar .sizePreset {
++  width: 13px;
++  height: 13px;
++  line-height: 11px;
++  font-size: 8px;
++}
+ .pluginToast {
+   position: fixed;
+   left: 12px;
+diff --git a/public/src/js/pluginHost.js b/public/src/js/pluginHost.js
+index 395cd85..3feffce 100644
+--- a/public/src/js/pluginHost.js
++++ b/public/src/js/pluginHost.js
+@@ -94,6 +94,14 @@
+   larger?.addEventListener("click", () => { plugin.stepTextScale(1); showScale(); });
+   showScale();
+ 
++  // Clicktrough: this window's sizes to switch between (windowSizes.js).
++  window.A2_WINDOW_SIZES?.(document.querySelector(".pluginSizes"), {
++    key: `window:${id}`,
++    defaults: [[420, 520], [640, 680], [960, 820]],
++    toast: showToast,
++    canKeep: () => !document.body.classList.contains("pluginFitted"),
++  });
++
+   const opacity = document.querySelector(".pluginOpacity");
+   const compact = document.querySelector(".pluginCompact");
+   const applyOpacity = () => document.body.style.setProperty("--panel-alpha", String(panel.opacity / 100));
+diff --git a/public/src/js/windowSizes.js b/public/src/js/windowSizes.js
+new file mode 100644
+index 0000000..398bec2
+--- /dev/null
++++ b/public/src/js/windowSizes.js
+@@ -0,0 +1,124 @@
++// Clicktrough: sizes to switch a plugin window or the plugin dock between,
++// set by the player. Three buttons (1, 2, 3) beside the text size: a click
++// gives the window the size kept under that button, a right-click (or
++// Shift+click) keeps the window's size now under it. The dock has its own
++// three, each plugin's window its own. The button whose size the window has
++// shows pressed. Locked, they stay clickable as the bar's other buttons
++// (lockedButtons.js). The window is resized by the meter (plugin_window_size,
++// plugins/mod.rs), so it works while the window can't be dragged.
++(() => {
++  const invoke = window.__TAURI__?.core?.invoke;
++  const COUNT = 3;
++  const MIN_W = 240;
++  const MIN_H = 120;
++  const MAX_W = 2000;
++  const MAX_H = 1600;
++  const groups = new Map(); // key -> { sizes, holders: Set, options }
++
++  const clampSize = ([w, h]) => [
++    Math.round(Math.min(MAX_W, Math.max(MIN_W, Number(w) || MIN_W))),
++    Math.round(Math.min(MAX_H, Math.max(MIN_H, Number(h) || MIN_H))),
++  ];
++
++  const load = (key, defaults) => {
++    let kept = null;
++    try { kept = JSON.parse(localStorage.getItem(`a2plugin.sizes.${key}`) || "null"); } catch {}
++    return Array.from({ length: COUNT }, (_, i) => {
++      const k = Array.isArray(kept) ? kept[i] : null;
++      return clampSize(Array.isArray(k) && k.length === 2 ? k : defaults[i] || defaults[defaults.length - 1]);
++    });
++  };
++  const save = (key, sizes) => {
++    try { localStorage.setItem(`a2plugin.sizes.${key}`, JSON.stringify(sizes)); } catch {}
++  };
++
++  const now = () => [Math.round(window.innerWidth), Math.round(window.innerHeight)];
++  const fits = ([w, h]) => {
++    const [cw, ch] = now();
++    return Math.abs(cw - w) <= 2 && Math.abs(ch - h) <= 2;
++  };
++
++  const show = (group) => {
++    const t = group.options.t;
++    for (const holder of group.holders) {
++      // A panel gone from the page (its plugin left the dock); one not in
++      // it yet is being made.
++      if (!holder.isConnected && holder.a2Shown) {
++        group.holders.delete(holder);
++        continue;
++      }
++      if (holder.isConnected) holder.a2Shown = true;
++      holder.querySelectorAll(".sizePreset").forEach((btn, i) => {
++        const [w, h] = group.sizes[i];
++        btn.setAttribute("aria-pressed", String(fits(group.sizes[i])));
++        const label = t("size", "Size {n}: {w} × {h} · right-click keeps this window's size here", { n: i + 1, w, h });
++        btn.title = label;
++        btn.setAttribute("aria-label", label);
++      });
++    }
++  };
++
++  const keep = (group, i) => {
++    if (group.options.canKeep && !group.options.canKeep()) return;
++    group.sizes[i] = clampSize(now());
++    save(group.key, group.sizes);
++    show(group);
++    const [w, h] = group.sizes[i];
++    group.options.toast?.(group.options.t("sizeKept", "Size {n} is now {w} × {h}", { n: i + 1, w, h }));
++  };
++
++  const apply = async (group, i) => {
++    const [width, height] = group.sizes[i];
++    try {
++      await group.options.before?.();
++      await invoke("plugin_window_size", { width, height });
++    } catch (e) {
++      group.options.toast?.(String(e));
++    }
++  };
++
++  /**
++   * Put the three buttons into `holder` (an element in the window's bar).
++   * key: whose sizes ("dock", or the plugin's id); defaults: three [w, h];
++   * t(key, fallback, vars): the words; toast(text); before(): before a
++   * resize (the dock unfolds); canKeep(): whether the size now may be kept.
++   */
++  window.A2_WINDOW_SIZES = (holder, options) => {
++    if (!holder || typeof invoke !== "function") return;
++    const key = String(options.key);
++    let group = groups.get(key);
++    if (!group) {
++      const t = options.t || ((_, fallback, vars = {}) => String(fallback).replace(/\{(\w+)\}/g, (_, k) => (k in vars ? vars[k] : `{${k}}`)));
++      group = { key, sizes: load(key, options.defaults), holders: new Set(), options: { ...options, t } };
++      groups.set(key, group);
++    }
++    holder.classList.add("sizePresets");
++    holder.setAttribute("role", "group");
++    holder.replaceChildren();
++    for (let i = 0; i < COUNT; i++) {
++      const btn = document.createElement("button");
++      btn.type = "button";
++      btn.className = "sizePreset";
++      btn.textContent = String(i + 1);
++      btn.addEventListener("click", (e) => {
++        if (e.shiftKey) keep(group, i);
++        else apply(group, i);
++      });
++      btn.addEventListener("contextmenu", (e) => {
++        e.preventDefault();
++        keep(group, i);
++      });
++      holder.appendChild(btn);
++    }
++    group.holders.add(holder);
++    show(group);
++  };
++
++  // The window resized (by a button, its edges, or folding): which size it has.
++  let pending = 0;
++  window.addEventListener("resize", () => {
++    clearTimeout(pending);
++    pending = setTimeout(() => groups.forEach(show), 120);
++  });
++  window.A2_WINDOW_SIZES.refresh = () => groups.forEach(show);
++})();
+diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
+index e26e137..b7a4094 100644
+--- a/src-tauri/src/app.rs
++++ b/src-tauri/src/app.rs
+@@ -4031,6 +4031,7 @@ pub fn run() {
+             crate::plugins::plugin_share,
+             crate::plugins::plugin_file,
+             crate::plugins::plugin_web_get,
++            crate::plugins::plugin_window_size,
+             crate::plugins::widgets::plugin_widget_file,
+             crate::plugins::widgets::plugin_widget_resize,
+             open_settings_at,
+diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
+index 71a241d..2ea7669 100644
+--- a/src-tauri/src/plugins/mod.rs
++++ b/src-tauri/src/plugins/mod.rs
+@@ -1585,6 +1585,25 @@ fn saved_size(app: &tauri::AppHandle, id: &str) -> Option<(f64, f64)> {
+     (w.is_finite() && h.is_finite() && w >= 120.0 && h >= 120.0).then_some((w.min(2000.0), h.min(1600.0)))
+ }
+ 
++/// Clicktrough: the plugin dock or a plugin's window at one of the sizes its
++/// player keeps (three buttons beside the text size, windowSizes.js), in CSS
++/// pixels, within what such a window may be. Only those windows (not the
++/// meter's, not a widget), each only itself. The size is remembered as any
++/// other (note_resized).
++#[tauri::command]
++pub fn plugin_window_size(window: tauri::WebviewWindow, width: f64, height: f64) -> Result<(), String> {
++    if place_id(window.label()).is_none() {
++        return Err("not a plugin window".into());
++    }
++    let (w, h) = window_size_within(width, height).ok_or("not a size")?;
++    window.set_size(tauri::LogicalSize::new(w, h)).map_err(|e| e.to_string())
++}
++
++/// A size a plugin window may be given: 240 x 120 to 2000 x 1600.
++fn window_size_within(width: f64, height: f64) -> Option<(f64, f64)> {
++    (width.is_finite() && height.is_finite()).then(|| (width.clamp(240.0, 2000.0).round(), height.clamp(120.0, 1600.0).round()))
++}
++
+ /// A plugin window was resized: remember its size, once it has settled, as
+ /// `note_moved` does its place. Not while it is being shown, nor a minimized
+ /// or hidden window's.
+@@ -2547,6 +2566,19 @@ mod tests {
+         }
+     }
+ 
++    #[test]
++    fn a_window_size_stays_within_what_a_plugin_window_may_be() {
++        use super::{place_id, window_size_within};
++        assert_eq!(window_size_within(640.4, 680.0), Some((640.0, 680.0)));
++        assert_eq!(window_size_within(10.0, 99999.0), Some((240.0, 1600.0)));
++        assert_eq!(window_size_within(f64::NAN, 500.0), None);
++        // The dock and plugin windows only.
++        assert!(place_id(super::dock::LABEL).is_some());
++        assert!(place_id("plugin-market").is_some());
++        assert!(place_id("main").is_none());
++        assert!(place_id("pw_map_overlay").is_none());
++    }
++
+     /// A failed request says why ("Connection refused"), not only reqwest's
+     /// "error sending request for url (...)".
+     #[cfg(feature = "online")]
+diff --git a/src/data/i18n/ui/de.json b/src/data/i18n/ui/de.json
+index 39ee1fe..3fca853 100644
+--- a/src/data/i18n/ui/de.json
++++ b/src/data/i18n/ui/de.json
+@@ -796,6 +796,8 @@
+   "pluginDock": {
+     "smaller": "Schrift kleiner",
+     "larger": "Schrift größer",
++    "size": "Größe {n}: {w} × {h} · Rechtsklick speichert die jetzige Fenstergröße hier",
++    "sizeKept": "Größe {n} ist jetzt {w} × {h}",
+     "toggle": "Plugin-Fenster ein- oder ausblenden",
+     "tabs": "Plugins als Tabs zeigen",
+     "stack": "Plugins untereinander zeigen",
+diff --git a/src/data/i18n/ui/en.json b/src/data/i18n/ui/en.json
+index f30d05d..1560c2f 100644
+--- a/src/data/i18n/ui/en.json
++++ b/src/data/i18n/ui/en.json
+@@ -808,6 +808,8 @@
+   "pluginDock": {
+     "smaller": "Smaller text",
+     "larger": "Larger text",
++    "size": "Size {n}: {w} × {h} · right-click keeps this window's size here",
++    "sizeKept": "Size {n} is now {w} × {h}",
+     "toggle": "Show or hide the plugin window",
+     "tabs": "Show the plugins as tabs",
+     "stack": "Stack the plugins",
+diff --git a/src/data/i18n/ui/es.json b/src/data/i18n/ui/es.json
+index 75bd7dc..1f6d8d9 100644
+--- a/src/data/i18n/ui/es.json
++++ b/src/data/i18n/ui/es.json
+@@ -796,6 +796,8 @@
+   "pluginDock": {
+     "smaller": "Texto más pequeño",
+     "larger": "Texto más grande",
++    "size": "Tamaño {n}: {w} × {h} · clic derecho guarda aquí el tamaño actual de la ventana",
++    "sizeKept": "El tamaño {n} es ahora {w} × {h}",
+     "toggle": "Mostrar u ocultar la ventana de plugins",
+     "tabs": "Mostrar los plugins en pestañas",
+     "stack": "Apilar los plugins",
+diff --git a/src/data/i18n/ui/fr.json b/src/data/i18n/ui/fr.json
+index 66f9b2c..c4ea8e2 100644
+--- a/src/data/i18n/ui/fr.json
++++ b/src/data/i18n/ui/fr.json
+@@ -796,6 +796,8 @@
+   "pluginDock": {
+     "smaller": "Texte plus petit",
+     "larger": "Texte plus grand",
++    "size": "Taille {n} : {w} × {h} · clic droit enregistre ici la taille actuelle de la fenêtre",
++    "sizeKept": "La taille {n} est maintenant {w} × {h}",
+     "toggle": "Afficher ou masquer la fenêtre des plugins",
+     "tabs": "Afficher les plugins en onglets",
+     "stack": "Empiler les plugins",
+diff --git a/src/data/i18n/ui/ja.json b/src/data/i18n/ui/ja.json
+index 3f61e22..5c6d53b 100644
+--- a/src/data/i18n/ui/ja.json
++++ b/src/data/i18n/ui/ja.json
+@@ -796,6 +796,8 @@
+   "pluginDock": {
+     "smaller": "文字を小さく",
+     "larger": "文字を大きく",
++    "size": "サイズ {n}: {w} × {h} · 右クリックで現在のウィンドウサイズをここに保存",
++    "sizeKept": "サイズ {n} を {w} × {h} にしました",
+     "toggle": "プラグインウィンドウを表示／非表示",
+     "tabs": "プラグインをタブで表示",
+     "stack": "プラグインを縦に並べる",
+diff --git a/src/data/i18n/ui/ko.json b/src/data/i18n/ui/ko.json
+index a1050a6..82bd31d 100644
+--- a/src/data/i18n/ui/ko.json
++++ b/src/data/i18n/ui/ko.json
+@@ -803,6 +803,8 @@
+   "pluginDock": {
+     "smaller": "글자 작게",
+     "larger": "글자 크게",
++    "size": "크기 {n}: {w} × {h} · 우클릭하면 현재 창 크기를 여기에 저장",
++    "sizeKept": "크기 {n}: 이제 {w} × {h}",
+     "toggle": "플러그인 창 표시/숨기기",
+     "tabs": "플러그인을 탭으로 보기",
+     "stack": "플러그인을 세로로 쌓기",
+diff --git a/src/data/i18n/ui/pt.json b/src/data/i18n/ui/pt.json
+index e7e398d..6831f1a 100644
+--- a/src/data/i18n/ui/pt.json
++++ b/src/data/i18n/ui/pt.json
+@@ -796,6 +796,8 @@
+   "pluginDock": {
+     "smaller": "Texto menor",
+     "larger": "Texto maior",
++    "size": "Tamanho {n}: {w} × {h} · clique direito guarda aqui o tamanho atual da janela",
++    "sizeKept": "O tamanho {n} agora é {w} × {h}",
+     "toggle": "Mostrar ou ocultar a janela de plugins",
+     "tabs": "Mostrar os plugins em abas",
+     "stack": "Empilhar os plugins",
+diff --git a/src/data/i18n/ui/ru.json b/src/data/i18n/ui/ru.json
+index c9e7883..a578068 100644
+--- a/src/data/i18n/ui/ru.json
++++ b/src/data/i18n/ui/ru.json
+@@ -801,6 +801,8 @@
+   "pluginDock": {
+     "smaller": "Мельче текст",
+     "larger": "Крупнее текст",
++    "size": "Размер {n}: {w} × {h} · правый клик сохраняет сюда текущий размер окна",
++    "sizeKept": "Размер {n} теперь {w} × {h}",
+     "toggle": "Показать или скрыть окно плагинов",
+     "tabs": "Показывать плагины вкладками",
+     "stack": "Показывать плагины друг под другом",
+diff --git a/src/data/i18n/ui/zh-Hans.json b/src/data/i18n/ui/zh-Hans.json
+index 0d4f016..9d0b7c1 100644
+--- a/src/data/i18n/ui/zh-Hans.json
++++ b/src/data/i18n/ui/zh-Hans.json
+@@ -803,6 +803,8 @@
+   "pluginDock": {
+     "smaller": "缩小文字",
+     "larger": "放大文字",
++    "size": "尺寸 {n}：{w} × {h} · 右键将当前窗口尺寸保存到这里",
++    "sizeKept": "尺寸 {n} 现为 {w} × {h}",
+     "toggle": "显示或隐藏插件窗口",
+     "tabs": "以标签页显示插件",
+     "stack": "堆叠显示插件",
+diff --git a/src/data/i18n/ui/zh-Hant.json b/src/data/i18n/ui/zh-Hant.json
+index 926c85b..a433bdf 100644
+--- a/src/data/i18n/ui/zh-Hant.json
++++ b/src/data/i18n/ui/zh-Hant.json
+@@ -803,6 +803,8 @@
+   "pluginDock": {
+     "smaller": "縮小文字",
+     "larger": "放大文字",
++    "size": "尺寸 {n}：{w} × {h} · 右鍵將目前視窗尺寸儲存到這裡",
++    "sizeKept": "尺寸 {n} 現為 {w} × {h}",
+     "toggle": "顯示或隱藏外掛視窗",
+     "tabs": "以分頁顯示外掛",
+     "stack": "堆疊顯示外掛",
+diff --git a/tests/window-sizes.test.mjs b/tests/window-sizes.test.mjs
+new file mode 100644
+index 0000000..195bd5c
+--- /dev/null
++++ b/tests/window-sizes.test.mjs
+@@ -0,0 +1,96 @@
++// Clicktrough: a plugin window's (or the dock's) three sizes to switch
++// between (windowSizes.js): a click asks the meter for that size, a
++// right-click or Shift+click keeps the window's size now, kept per window.
++import assert from "node:assert/strict";
++import { readFileSync } from "node:fs";
++import test from "node:test";
++import vm from "node:vm";
++
++const source = readFileSync(new URL("../public/src/js/windowSizes.js", import.meta.url), "utf8");
++const tick = () => new Promise((resolve) => setImmediate(resolve));
++
++function element() {
++  const listeners = {};
++  const attrs = {};
++  return {
++    children: [],
++    attrs,
++    title: "",
++    textContent: "",
++    isConnected: true,
++    classList: { add() {} },
++    setAttribute: (k, v) => { attrs[k] = String(v); },
++    getAttribute: (k) => attrs[k] ?? null,
++    addEventListener: (name, fn) => { listeners[name] = fn; },
++    fire(name, extra = {}) { listeners[name]?.({ preventDefault() {}, shiftKey: false, ...extra }); },
++    appendChild(child) { this.children.push(child); },
++    replaceChildren() { this.children = []; },
++    querySelectorAll() { return this.children; },
++  };
++}
++
++function setup(stored = {}, size = [640, 680]) {
++  const storage = new Map(Object.entries(stored));
++  const invoked = [];
++  const toasts = [];
++  const window = {
++    innerWidth: size[0],
++    innerHeight: size[1],
++    __TAURI__: { core: { invoke: (name, args) => { invoked.push({ name, args }); return Promise.resolve(null); } } },
++    addEventListener() {},
++  };
++  const document = { createElement: () => element() };
++  const localStorage = { getItem: (k) => storage.get(k) ?? null, setItem: (k, v) => storage.set(k, String(v)) };
++  vm.runInContext(source, vm.createContext({ window, document, localStorage, JSON, Number, Math, String, Array, Promise, Map, Set, setTimeout, clearTimeout }));
++  const holder = element();
++  return { window, holder, storage, invoked, toasts };
++}
++
++test("three numbered buttons; the one whose size the window has is pressed", () => {
++  const { window, holder } = setup();
++  window.A2_WINDOW_SIZES(holder, { key: "dock", defaults: [[420, 560], [640, 680], [960, 820]] });
++  assert.deepEqual(holder.children.map((b) => b.textContent), ["1", "2", "3"]);
++  assert.deepEqual(holder.children.map((b) => b.attrs["aria-pressed"]), ["false", "true", "false"]);
++  assert.match(holder.children[0].title, /Size 1: 420 × 560/);
++});
++
++test("a click asks the meter for that size; a folded dock unfolds first", async () => {
++  const { window, holder, invoked } = setup();
++  let unfolded = 0;
++  window.A2_WINDOW_SIZES(holder, { key: "dock", defaults: [[420, 560], [640, 680], [960, 820]], before: () => { unfolded++; } });
++  holder.children[2].fire("click");
++  await tick();
++  assert.equal(unfolded, 1);
++  // (made in the page's own realm: compared as JSON)
++  assert.equal(JSON.stringify(invoked.at(-1)), JSON.stringify({ name: "plugin_window_size", args: { width: 960, height: 820 } }));
++});
++
++test("a right-click or Shift+click keeps the window's size now, per window", async () => {
++  const { window, holder, storage, invoked } = setup({}, [777, 555]);
++  const toasts = [];
++  window.A2_WINDOW_SIZES(holder, { key: "window:market", defaults: [[420, 520], [640, 680], [960, 820]], toast: (t) => toasts.push(t) });
++  holder.children[0].fire("contextmenu");
++  assert.deepEqual(JSON.parse(storage.get("a2plugin.sizes.window:market"))[0], [777, 555]);
++  assert.equal(holder.children[0].attrs["aria-pressed"], "true");
++  assert.deepEqual(toasts, ["Size 1 is now 777 × 555"]);
++  holder.children[1].fire("click", { shiftKey: true });
++  assert.deepEqual(JSON.parse(storage.get("a2plugin.sizes.window:market"))[1], [777, 555]);
++  assert.equal(invoked.length, 0, "keeping a size resizes nothing");
++});
++
++test("kept sizes come back, within what a plugin window may be; none kept while folded", () => {
++  const { window, holder, storage } = setup({ "a2plugin.sizes.dock": JSON.stringify([[100, 50], [5000, 9000], "bad"]) });
++  window.A2_WINDOW_SIZES(holder, { key: "dock", defaults: [[420, 560], [640, 680], [960, 820]], canKeep: () => false });
++  assert.match(holder.children[0].title, /240 × 120/);
++  assert.match(holder.children[1].title, /2000 × 1600/);
++  assert.match(holder.children[2].title, /960 × 820/);
++  holder.children[0].fire("contextmenu");
++  assert.equal(storage.get("a2plugin.sizes.dock"), JSON.stringify([[100, 50], [5000, 9000], "bad"]));
++});
++
++test("the words in the meter's language", () => {
++  const { window, holder } = setup();
++  const t = (key, fallback, vars) => `${key}:${vars.n}:${vars.w}x${vars.h}`;
++  window.A2_WINDOW_SIZES(holder, { key: "dock", defaults: [[420, 560], [640, 680], [960, 820]], t });
++  assert.equal(holder.children[1].title, "size:2:640x680");
++});
+-- 
+2.43.0
+
