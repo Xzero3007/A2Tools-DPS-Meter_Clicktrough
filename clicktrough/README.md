@@ -25,6 +25,7 @@ automatically with these changes:
 | 0018 | **A link whose click the plugin took doesn't open the browser**: the plugin page's own link handling opened every https link clicked, even one the plugin had handled itself (Pet Soul Tracker's map links opened Aion 2 Timers' map next to the Map plugin). |
 | 0019 | **The green button looks every 20 minutes**: the meter looked for an update at start and then only every 6 hours, and a check that failed at start (the meter's bridge not up yet, no network) waited as long, so the green button in the title seldom showed and updates came through Settings. Now it looks every 20 minutes, and a minute after a failed check. |
 | 0020 | **Plugin updates only from this repo**: the plugin catalog no longer offers the original author's newer versions (the green button, Settings' "Update to …"). The package ships the original's other plugins as this repo's build took them (`data/ct-plugins`, listed in `installed-only.txt`); each runs from there only where it is installed, in place of the installed copy, and a new version comes with the next release here (a change to any of them makes one). Installing a plugin from the catalog still works. |
+| 0021 | **This build's plugins can be removed**: Settings' Remove did nothing for a plugin the package ships (Map, Market, Pet Finder, the changed Pet Soul Tracker, Event Timers, Daily Checklist). Now they are tagged **Clicktrough** (not "Dev"); Remove takes one away and keeps it away, and **Available** lists it to install again, which brings it back with its saved data. |
 
 ### Taken early from the original
 
@@ -42,13 +43,13 @@ build leaves it out; the file can be deleted then.
 | Plugin | What's different |
 |---|---|
 | Daily Checklist | **Side by side**: the button next to "Edit" puts Daily, Weekly and One-time side by side as columns, a wide bar. Too narrow for that, they wrap under each other. |
-| Pet Soul Tracker | **For the Map plugin**: the pets pinned and those being farmed go to the map (`share`), which shows where their monsters are; a monster's map link shows its spawn points on the Map instead of opening the website (and no longer opens it as well). Its list is now also **Pet Finder's Pets tab**, so it can be turned off (Settings → Plugins); while Pet Finder runs, the Map follows only Pet Finder's pets. |
+| Pet Soul Tracker | **For the Map plugin**: the pets pinned and those being farmed go to the map (`share`), which shows where their monsters are; a monster's map link shows its spawn points on the Map instead of opening the website (and no longer opens it as well). Its list is now also **Pet Finder's Pets tab**, so it can be removed (Settings → Plugins → Pet Soul Tracker → Remove); while Pet Finder runs, the Map follows only Pet Finder's pets. |
 | Event Timers | **Folded**, with the controls off, it shows the **bosses** below the next events too: scheduled bosses running or starting soon, and world bosses that are up, in their window or back soon, in three parts: **now** (up, running), **soon** (in their spawn window, or within 15 min) and **later** (within Settings → "Folded: bosses due within": off, 30 min, 1 h, 2 h, 3 h; 1 h at first). The next **Artifact Siege** always stays visible folded, however far off. The bar at the top of the folded view has a button for each part (**Events, Now, Soon, Later**) to show or hide it, and the layout button (or Settings → "Folded: layout") puts the parts **side by side** as columns, a wide bar; too narrow for that, they wrap under each other. Side by side an empty part keeps its column. A **map button** beside each world boss (on the Bosses tab, and folded after its map's name) shows it on the Map plugin, with the Kibelisk to teleport to and the way there. |
 
 The changes live in `clicktrough/plugins/<id>/`. When the author changes such
 a plugin, the build makes a new package, and the update comes through the
-green button. In Settings such a plugin shows "Dev", as it doesn't come from
-the reviewed catalogue.
+green button. In Settings such a plugin is tagged "Clicktrough"; Remove takes
+it away until it is installed again under Available (patch 0021).
 
 ### Own plugins
 

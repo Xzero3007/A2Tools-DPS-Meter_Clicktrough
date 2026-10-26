@@ -1,0 +1,337 @@
+From 73575157060171fa1b97f7f7b97ba493da8c9874 Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Mon, 26 Oct 2026 00:41:58 +0000
+Subject: [PATCH] Plugins: this build's own plugins can be removed, and added
+ again
+
+Settings' Remove did nothing for a plugin this build ships (data/ct-plugins:
+the fork's own plugins and the original's as the fork took them): it tried
+to forget a developer folder. Now such a plugin is a reviewed one tagged
+"Clicktrough" (not "Dev"); Remove takes it away (the installed copy too)
+and keeps it away (dpsMeter.ctPluginsRemoved), and Available lists it to
+install again, which brings this build's copy back with its saved data.
+One of the original's that runs only where installed is simply uninstalled.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01RBQati3x8VviBbpY9juEWf
+---
+ public/src/js/pluginSettings.js | 40 +++++++++++++--
+ src-tauri/src/app.rs            |  1 +
+ src-tauri/src/plugins/mod.rs    | 90 +++++++++++++++++++++++++++++++--
+ src/styles.css                  |  9 ++++
+ 4 files changed, 131 insertions(+), 9 deletions(-)
+
+diff --git a/public/src/js/pluginSettings.js b/public/src/js/pluginSettings.js
+index b7465d4..50a9588 100644
+--- a/public/src/js/pluginSettings.js
++++ b/public/src/js/pluginSettings.js
+@@ -285,9 +285,13 @@
+       noMatch.hidden = !query || shown > 0;
+     };
+ 
++    // Clicktrough: this build's plugins removed in Settings, to add again;
++    // the catalog's entry for one of them gives way to it.
++    const removedBundled = () => view.removedBundled || [];
++    const isRemovedBundled = (id) => removedBundled().some((p) => p.id === id);
+     const refreshBar = () => {
+       const installed = (view.plugins || []).length;
+-      const offered = catalog ? catalog.filter((e) => !e.installed).length : 0;
++      const offered = (catalog ? catalog.filter((e) => !e.installed && !isRemovedBundled(e.id)).length : 0) + removedBundled().length;
+       document.querySelector(".pluginInstalledCount").textContent = installed ? String(installed) : "";
+       document.querySelector(".pluginAvailableCount").textContent = offered ? String(offered) : "";
+       search.hidden = installed + offered < SEARCH_FROM && !query;
+@@ -306,13 +310,33 @@
+     const renderCatalog = () => {
+       catalogList.replaceChildren();
+       catalogStatus.classList.remove("pluginError");
++      for (const p of removedBundled()) {
++        if (!matches(p.name, p.description, p.id)) continue;
++        const tag = el("span", "pluginBundledTag", "Clicktrough");
++        tag.title = "Comes with this build of the meter: added again, it runs as before, with its saved data.";
++        catalogList.append(
++          pluginRow({
++            id: p.id,
++            name: p.name,
++            version: p.version,
++            tags: [tag],
++            description: p.description,
++            controls: [button(t("settings.plugins.install", "Install"), () => {
++              say("");
++              run(invoke("plugin_restore_bundled", { id: p.id })).then(() => renderCatalog());
++            }, "pluginInstallBtn")],
++            details: [el("p", "pluginDescFull", p.description || ""), permissionList(p.permissions || [])],
++          }),
++        );
++      }
++      if (removedBundled().length) window.lucide?.createIcons?.({ root: catalogList });
+       if (!view.online) {
+         catalogStatus.textContent = t("settings.plugins.offline", "The offline build does not download plugins.");
+         refreshBar();
+         return;
+       }
+       if (!catalog) return refreshBar();
+-      const offered = catalog.filter((e) => !e.installed);
++      const offered = catalog.filter((e) => !e.installed && !isRemovedBundled(e.id));
+       for (const entry of offered) {
+         if (!matches(entry.name, entry.description, entry.id, entry.author)) continue;
+         const details = [el("p", "pluginDescFull", entry.description || "")];
+@@ -329,7 +353,7 @@
+           }),
+         );
+       }
+-      catalogStatus.textContent = offered.length ? "" : t("settings.plugins.catalogEmpty", "Every reviewed plugin is installed.");
++      catalogStatus.textContent = offered.length || removedBundled().length ? "" : t("settings.plugins.catalogEmpty", "Every reviewed plugin is installed.");
+       window.lucide?.createIcons?.({ root: catalogList });
+       refreshBar();
+     };
+@@ -341,7 +365,8 @@
+         catalog = await invoke("plugin_catalog");
+       } catch (e) {
+         catalog = null;
+-        catalogList.replaceChildren();
++        // Clicktrough: this build's removed plugins still show, to add again.
++        renderCatalog();
+         catalogStatus.textContent = t("settings.plugins.catalogError", "Couldn't load the plugin list: {error}", { error: String(e) });
+         catalogStatus.classList.add("pluginError");
+         return;
+@@ -403,7 +428,12 @@
+           badge.title = label;
+           tags.push(badge);
+         }
+-        if (!p.reviewed) {
++        if (p.bundled) {
++          // Clicktrough: this build's copy; its updates come with the meter's.
++          const tag = el("span", "pluginBundledTag", "Clicktrough");
++          tag.title = "Comes with this build of the meter (the Clicktrough fork): its updates come with the meter's. Remove takes it away until you add it again under Browse.";
++          tags.push(tag);
++        } else if (!p.reviewed) {
+           const tag = el("span", "pluginUnreviewedTag", t("settings.plugins.unreviewed", "Dev"));
+           tag.title = t("settings.plugins.hint", "Plugins loaded here are not reviewed. Only load plugins you trust.");
+           tags.push(tag);
+diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
+index b7a4094..67bc95a 100644
+--- a/src-tauri/src/app.rs
++++ b/src-tauri/src/app.rs
+@@ -4032,6 +4032,7 @@ pub fn run() {
+             crate::plugins::plugin_file,
+             crate::plugins::plugin_web_get,
+             crate::plugins::plugin_window_size,
++            crate::plugins::plugin_restore_bundled,
+             crate::plugins::widgets::plugin_widget_file,
+             crate::plugins::widgets::plugin_widget_resize,
+             open_settings_at,
+diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
+index 640b727..6f6c03b 100644
+--- a/src-tauri/src/plugins/mod.rs
++++ b/src-tauri/src/plugins/mod.rs
+@@ -66,6 +66,9 @@ pub const WINDOWS_KEY: &str = "dpsMeter.pluginWindows";
+ /// Plugins turned off in Settings, a JSON array of ids: they stay installed
+ /// but don't run. Every other plugin starts with the meter.
+ pub const DISABLED_KEY: &str = "dpsMeter.pluginsDisabled";
++/// Clicktrough: the plugins this build ships that the player removed (a JSON
++/// array of ids): they don't load until added again.
++pub const BUNDLED_REMOVED_KEY: &str = "dpsMeter.ctPluginsRemoved";
+ /// Plugins whose windows and widgets hide while AION2 is closed, a JSON
+ /// array of ids (Settings → Plugins).
+ pub const HIDE_CLOSED_KEY: &str = "dpsMeter.pluginsHideClosed";
+@@ -214,6 +217,8 @@ struct Loaded {
+     decoders: Vec<Decoder>,
+     /// Installed from the signed catalog, not a developer folder.
+     reviewed: bool,
++    /// Clicktrough: this build's own copy (data/ct-plugins).
++    bundled: bool,
+ }
+ 
+ /// What Settings lists.
+@@ -228,6 +233,9 @@ pub struct PluginInfo {
+     pub permissions: Vec<String>,
+     /// Installed from the signed catalog (otherwise a developer folder).
+     pub reviewed: bool,
++    /// Clicktrough: this build's copy (the fork's own plugins and the
++    /// original's as the fork took them); removed, it waits to be added again.
++    pub bundled: bool,
+     /// Set when the folder could not be loaded.
+     pub error: Option<String>,
+ }
+@@ -248,6 +256,8 @@ pub struct PluginsView {
+     pub hide_unfocused: Vec<String>,
+     /// Ids of the plugins in a window of their own, not the dock.
+     pub own_window: Vec<String>,
++    /// Clicktrough: this build's plugins the player removed, to add again.
++    pub removed_bundled: Vec<PluginInfo>,
+ }
+ 
+ fn view(app: &tauri::AppHandle, host: &PluginHost) -> PluginsView {
+@@ -262,9 +272,66 @@ fn view(app: &tauri::AppHandle, host: &PluginHost) -> PluginsView {
+         hide_closed: hide_closed(app),
+         hide_unfocused: listed(app, HIDE_UNFOCUSED_KEY),
+         own_window: listed(app, dock::OWN_WINDOW_KEY),
++        removed_bundled: removed_bundled_info(app),
+     }
+ }
+ 
++/// Clicktrough: the ids of this build's plugins the player removed.
++fn bundled_removed(app: &tauri::AppHandle) -> Vec<String> {
++    listed(app, BUNDLED_REMOVED_KEY)
++}
++
++fn set_bundled_removed(app: &tauri::AppHandle, id: &str, removed: bool) {
++    let Some(state) = app.try_state::<AppState>() else { return };
++    let mut ids = bundled_removed(app);
++    ids.retain(|x| x != id);
++    if removed {
++        ids.push(id.to_string());
++    }
++    state.settings.set(BUNDLED_REMOVED_KEY, &serde_json::to_string(&ids).unwrap_or_default());
++}
++
++/// This build's copy of a plugin (data/ct-plugins/<id>), if it has one.
++fn bundled_dir(app: &tauri::AppHandle, id: &str) -> Option<PathBuf> {
++    let state = app.try_state::<AppState>()?;
++    let dir = state.i18n_data_dir.as_ref()?.join("ct-plugins").join(id);
++    (valid_id(id) && dir.join("manifest.json").is_file()).then_some(dir)
++}
++
++/// The original's plugins this build ships to run only where installed
++/// (data/ct-plugins/installed-only.txt).
++fn installed_only(app: &tauri::AppHandle) -> Vec<String> {
++    app.try_state::<AppState>()
++        .and_then(|s| s.i18n_data_dir.as_ref().map(|d| d.join("ct-plugins").join("installed-only.txt")))
++        .and_then(|f| std::fs::read_to_string(f).ok())
++        .map(|text| text.lines().map(str::trim).filter(|l| !l.is_empty()).map(String::from).collect())
++        .unwrap_or_default()
++}
++
++/// Clicktrough: one of this build's plugins removed in Settings, added again.
++#[tauri::command]
++pub fn plugin_restore_bundled(app: tauri::AppHandle, id: String) -> Result<PluginsView, String> {
++    if bundled_dir(&app, &id).is_none() {
++        return Err("this build has no such plugin".into());
++    }
++    set_bundled_removed(&app, &id, false);
++    let host = host(&app)?;
++    host.reload(&app);
++    refresh_windows(&app, &host);
++    restore_windows(&app);
++    dock::sync(&app, None);
++    Ok(view(&app, &host))
++}
++
++/// The removed ones as Settings lists them (each with its manifest's words).
++fn removed_bundled_info(app: &tauri::AppHandle) -> Vec<PluginInfo> {
++    bundled_removed(app)
++        .iter()
++        .filter_map(|id| load_folder(&bundled_dir(app, id)?).ok())
++        .map(|l| PluginInfo { reviewed: true, bundled: true, ..info(&l) })
++        .collect()
++}
++
+ /// The plugins turned off.
+ fn disabled(app: &tauri::AppHandle) -> Vec<String> {
+     app.try_state::<AppState>()
+@@ -577,7 +644,7 @@ fn load_folder(dir: &Path) -> Result<Loaded, String> {
+         }
+         decoders.push(decoder);
+     }
+-    Ok(Loaded { manifest, dir: dir.to_path_buf(), decoders, reviewed: false })
++    Ok(Loaded { manifest, dir: dir.to_path_buf(), decoders, reviewed: false, bundled: false })
+ }
+ 
+ impl PluginHost {
+@@ -609,6 +676,7 @@ impl PluginHost {
+                     path: folder,
+                     permissions: Vec::new(),
+                     reviewed: false,
++                    bundled: false,
+                     error: Some(e),
+                 }),
+             }
+@@ -628,6 +696,7 @@ impl PluginHost {
+             .map(|text| text.lines().map(str::trim).filter(|l| !l.is_empty()).map(String::from).collect())
+             .unwrap_or_default();
+         let installed_root = plugins_dir(app).ok();
++        let removed = bundled_removed(app);
+         let bundled = bundled_root
+             .and_then(|dir| std::fs::read_dir(dir).ok())
+             .into_iter()
+@@ -641,13 +710,17 @@ impl PluginHost {
+             if only_installed && !installed_root.as_ref().is_some_and(|root| root.join(&name).is_dir()) {
+                 continue;
+             }
++            // Removed in Settings: not until added again.
++            if removed.iter().any(|id| id == &name) {
++                continue;
++            }
+             match load_folder(&dir) {
+                 Ok(l) if loaded.iter().any(|x: &Loaded| x.manifest.id == l.manifest.id) => {}
+                 Ok(l) => {
+                     tracing::info!("Plugins: {} {} runs from this build's own copy", l.manifest.id, l.manifest.version);
+-                    // One the player installed: a reviewed plugin, the
+-                    // version this build brings.
+-                    loaded.push(Loaded { reviewed: only_installed || l.reviewed, ..l });
++                    // A reviewed plugin, the version this build brings:
++                    // Settings removes it as an installed one.
++                    loaded.push(Loaded { reviewed: true, bundled: true, ..l });
+                 }
+                 Err(e) => tracing::warn!("Plugins: this build's {} does not load: {e}", dir.display()),
+             }
+@@ -933,6 +1006,7 @@ fn info(l: &Loaded) -> PluginInfo {
+         path: l.dir.to_string_lossy().into_owned(),
+         permissions: l.manifest.permissions.clone(),
+         reviewed: l.reviewed,
++        bundled: l.bundled,
+         error: None,
+     }
+ }
+@@ -1428,6 +1502,8 @@ pub async fn plugin_install(app: tauri::AppHandle, id: String) -> Result<Plugins
+         let http = app.try_state::<AppState>().ok_or("no app state")?.http.clone();
+         let catalog = catalog::fetch(&http).await?;
+         let entry = catalog.plugins.iter().find(|e| e.id == id).ok_or("that plugin is not in the catalog")?;
++        // Clicktrough: installed again, this build's copy of it runs again.
++        set_bundled_removed(&app, &id, false);
+         install_entry(&app, &host, entry).await?;
+         Ok(view(&app, &host))
+     }
+@@ -1453,6 +1529,11 @@ pub fn plugin_uninstall(app: tauri::AppHandle, id: String) -> Result<PluginsView
+     if dir.is_dir() {
+         std::fs::remove_dir_all(&dir).map_err(|e| e.to_string())?;
+     }
++    // Clicktrough: this build's own copy stays away too, until added again
++    // (one that runs only where installed is gone with the installed copy).
++    if bundled_dir(&app, &id).is_some() && !installed_only(&app).contains(&id) {
++        set_bundled_removed(&app, &id, true);
++    }
+     let host = host(&app)?;
+     host.reload(&app);
+     dock::sync(&app, None);
+@@ -2711,6 +2792,7 @@ mod tests {
+             path: String::new(),
+             permissions: Vec::new(),
+             reviewed: true,
++            bundled: false,
+             error: error.map(str::to_string),
+         };
+         let off = vec!["off".to_string()];
+diff --git a/src/styles.css b/src/styles.css
+index 723fa36..a024a09 100644
+--- a/src/styles.css
++++ b/src/styles.css
+@@ -8179,6 +8179,15 @@ html.a2-offline .historyUploadBtn {
+   font-size: 11px;
+   font-weight: 500;
+ }
++/* Clicktrough: a plugin this build ships (neutral, not the Dev warning). */
++.settingsPanel .pluginBundledTag {
++  padding: 0 6px;
++  border: 1px solid rgba(255, 255, 255, 0.28);
++  border-radius: 3px;
++  color: rgba(255, 255, 255, 0.72);
++  font-size: 11px;
++  font-weight: 500;
++}
+ /* What a plugin may do, in the install prompt. */
+ .settingsPanel .pluginConsentList {
+   margin: 0 0 12px;
+-- 
+2.43.0
+
