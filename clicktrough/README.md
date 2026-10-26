@@ -108,6 +108,15 @@ It asks for the password as usual.
 Build by hand: Actions → Clicktrough release → Run workflow (optionally with a
 version, e.g. `v2.0.77`).
 
+## Working on it
+
+`CLAUDE.md` at the top of the repo holds the rules and the way of working for
+Claude sessions (and anyone else). `clicktrough/dev/setup-workspace.sh` makes
+the working clones in a few seconds: the original meter with every patch
+(`../ct-src`) and the original's plugins with theirs (`../ct-plugins`);
+`--build` adds a debug build, which `clicktrough/dev/run-meter.sh` runs on a
+virtual screen.
+
 ## Building without GitHub
 
 `clicktrough/a2tools-rebuild.sh` builds the same locally: fetch the original,
