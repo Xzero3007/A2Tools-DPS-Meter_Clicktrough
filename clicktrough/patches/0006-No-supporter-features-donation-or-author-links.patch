@@ -1,7 +1,7 @@
-From 77e135d62243f79d1f8496ffbff0e6818375b6b3 Mon Sep 17 00:00:00 2001
+From e24eed99f030e90ac477206bec54954e4eb92eb9 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Sat, 24 Oct 2026 10:13:55 +0000
-Subject: [PATCH 6/7] No supporter features, donation or author links
+Subject: [PATCH 06/22] No supporter features, donation or author links
 
 This build is a fork; the app carries nothing that points to the original
 author's support channels:
@@ -24,19 +24,19 @@ Discord status, the A2 tag in a party).
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_01RBQati3x8VviBbpY9juEWf
 ---
- index.html            | 192 ------------------------------------------
- public/src/js/core.js |  25 +++---
+ index.html            | 206 ------------------------------------------
+ public/src/js/core.js |  25 +++--
  src-tauri/src/app.rs  |   8 +-
- 3 files changed, 17 insertions(+), 208 deletions(-)
+ 3 files changed, 17 insertions(+), 222 deletions(-)
 
 diff --git a/index.html b/index.html
-index b4c4a18..912f902 100644
+index ae3bea3..487a5c9 100644
 --- a/index.html
 +++ b/index.html
-@@ -575,13 +575,6 @@
-                       <span class="settingsToggleTrack" aria-hidden="true"></span>
-                     </span>
-                   </label>
+@@ -590,13 +590,6 @@
+                       <button class="settingsAction guestClaimBtn" type="button" data-i18n="settings.account.guestClaimButton">Get a claim code</button>
+                     </div>
+                   </div>
 -                  <label class="settingsToggle" title="Supporters' names render gold. Cosmetic only — it never changes any number." data-i18n-title="settings.showSupporterColorsHint">
 -                    <span class="settingsToggleLabel settingsLabel" data-i18n="settings.showSupporterColors">Show supporter colours</span>
 -                    <span class="settingsToggleControl">
@@ -47,7 +47,7 @@ index b4c4a18..912f902 100644
                  </div>
                  <div class="accountCodeBox" style="display:none">
                    <div class="accountCodeLabel" data-i18n="settings.account.codePrompt">Approve this code in your browser:</div>
-@@ -820,28 +813,6 @@
+@@ -847,28 +840,6 @@
                        <div class="settingsDropdownMenu themeDropdownMenu" role="menu"></div>
                      </div>
                    </div>
@@ -76,7 +76,7 @@ index b4c4a18..912f902 100644
                    <div class="settingsRow settingsRowInput">
                      <div class="settingsInfo">
                        <div class="settingsLabel" data-i18n="settings.meterSaturation.label" title="How strong the bars' colours are: lower for softer, higher for more vivid." data-i18n-title="settings.tips.meterSaturation">Bar colour strength</div>
-@@ -1235,14 +1206,6 @@
+@@ -1262,14 +1233,6 @@
                        <span class="settingsToggleTrack" aria-hidden="true"></span>
                      </span>
                    </label>
@@ -91,7 +91,7 @@ index b4c4a18..912f902 100644
                  </div>
                  <div class="settingsRow settingsRowAction">
                    <button
-@@ -1316,31 +1279,6 @@
+@@ -1343,31 +1306,6 @@
              </div>
              <div class="settingsFooter">
                <div class="settingsFooterLinks">
@@ -123,7 +123,7 @@ index b4c4a18..912f902 100644
                </div>
                <button class="quitButton" type="button" data-i18n="settings.quit">Quit</button>
              </div>
-@@ -1515,136 +1453,6 @@
+@@ -1542,150 +1480,6 @@
          <button class="discordPromoDone partyPromoDone" type="button" data-i18n="discordPromo.done">Done</button>
        </div>
      </div>
@@ -147,6 +147,7 @@ index b4c4a18..912f902 100644
 -          <span data-i18n="settings.account.autoUpload">Upload boss fights automatically</span>
 -        </label>
 -        <div class="discordPromoHint" data-i18n="accountPromo.hint">Other players' names stay masked, and training dummies are never uploaded. You can change this any time in Settings.</div>
+-        <div class="discordPromoHint" data-i18n="accountPromo.guestHint">No account? Fights still upload, and become yours when you sign in.</div>
 -        <div class="accountPromoCodeBox" style="display:none">
 -          <div class="discordPromoHint" data-i18n="settings.account.codePrompt">Approve this code in your browser:</div>
 -          <div class="accountPromoCode"></div>
@@ -154,6 +155,7 @@ index b4c4a18..912f902 100644
 -        <div class="discordPromoHint accountPromoState"></div>
 -        <div class="accountPromoActions">
 -          <button class="accountPromoLater" type="button" data-i18n="accountPromo.later">Not now</button>
+-          <button class="accountPromoLater accountPromoGuest" type="button" data-i18n="accountPromo.guest">No account</button>
 -          <button class="discordPromoDone accountPromoSignIn" type="button" data-i18n="accountPromo.signIn">Sign in</button>
 -        </div>
 -      </div>
@@ -255,16 +257,28 @@ index b4c4a18..912f902 100644
 -          </button>
 -        </div>
 -        <div class="supportCopyStatus" role="status" aria-live="polite"></div>
+-        <a class="supportMore" href="https://a2tools.app/#support" data-open-url data-i18n="support.more">More ways to donate on a2tools.app</a>
+-        <a class="supportSponsor" href="https://www.exitlag.com/refer/A2TOOLS" data-open-url rel="sponsored">
+-          <span class="supportSponsorLabel" data-i18n="support.sponsorLabel">Sponsored</span>
+-          <span class="supportSponsorRow">
+-            <img class="supportSponsorLogo" src="/src/assets/exitlag.png" alt="ExitLag" />
+-            <span class="supportSponsorText">
+-              <span class="supportSponsorTitle" data-i18n="support.sponsorShort">Reduce your ping with ExitLag</span>
+-              <span class="supportSponsorCode"><span data-i18n="support.sponsorCode">Use code</span> <b>A2TOOLS</b></span>
+-            </span>
+-          </span>
+-          <span class="supportSponsorNote" data-i18n="support.sponsorDisclosure">Affiliate link. A2 Tools earns a commission if you subscribe, which helps keep these tools free.</span>
+-        </a>
 -      </div>
 -    </div>
      <script src="/src/js/tauriBridge.js?v=202b2"></script>
      <script src="/src/js/battleTime.js"></script>
      <script src="/src/js/ttk.js"></script>
 diff --git a/public/src/js/core.js b/public/src/js/core.js
-index 2a49919..dea456f 100644
+index 6b25157..2d2223d 100644
 --- a/public/src/js/core.js
 +++ b/public/src/js/core.js
-@@ -73,7 +73,8 @@ class DpsApp {
+@@ -75,7 +75,8 @@ class DpsApp {
      this.pinMeToTop = false;
      this.slimMode = false;
      this.mainPlayerNamesBold = true;
@@ -274,7 +288,7 @@ index 2a49919..dea456f 100644
      this.mainPlayerDpsBold = true;
      this.includeMainMeterScreenshot = false;
      this.saveScreenshotToFolder = false;
-@@ -2704,10 +2705,8 @@ class DpsApp {
+@@ -2750,10 +2751,8 @@ class DpsApp {
        { name },
        `Signed in as ${name}`
      );
@@ -284,10 +298,10 @@ index 2a49919..dea456f 100644
 -    this.setSupporter(who.supporter);
 +    // Clicktrough: no supporter status or perks in this build.
 +    this.setSupporter(false);
+     if (this._claimedNote) label += " · " + this._claimedNote;
      this.setAccountState(label);
    }
- 
-@@ -2834,10 +2833,8 @@ class DpsApp {
+@@ -2909,10 +2908,8 @@ class DpsApp {
      }
      const storedDebugLogging = this.safeGetSetting(this.storageKeys.debugLogging) === "true";
      const storedPinMeToTop = this.safeGetSetting(this.storageKeys.pinMeToTop) === "true";
@@ -300,7 +314,7 @@ index 2a49919..dea456f 100644
      const mainPlayerNamesBoldSetting = this.safeGetSetting(this.storageKeys.mainPlayerNamesBold);
      const storedMainPlayerNamesBold = mainPlayerNamesBoldSetting !== "false";
      const mainPlayerDpsBoldSetting = this.safeGetSetting(this.storageKeys.mainPlayerDpsBold);
-@@ -3572,10 +3569,9 @@ class DpsApp {
+@@ -3687,10 +3684,9 @@ class DpsApp {
        else say(t("settings.update.failed", "Couldn't check. Try again later."));
      });
  
@@ -313,7 +327,7 @@ index 2a49919..dea456f 100644
      });
  
      // Quit is wired in startApp, before anything that can be slow.
-@@ -5721,8 +5717,9 @@ class DpsApp {
+@@ -5853,8 +5849,9 @@ class DpsApp {
    }
  
    setSupporter(isSupporter) {
@@ -326,10 +340,10 @@ index 2a49919..dea456f 100644
      this.syncBarTextureControl();
    }
 diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
-index 3ece757..14647dc 100644
+index ca29797..59bc46b 100644
 --- a/src-tauri/src/app.rs
 +++ b/src-tauri/src/app.rs
-@@ -3845,8 +3845,12 @@ pub fn run() {
+@@ -4059,8 +4059,12 @@ pub fn run() {
              // — asking the server "is this player a supporter?" would hand it a
              // list of who you play with, every fight, for a cosmetic. The
              // private build fetches nothing: only a local override counts.
@@ -343,7 +357,7 @@ index 3ece757..14647dc 100644
                  let mut had_override = false;
                  // The published roster: asked for when due, with the ETag of
                  // the one held. The loop itself turns every 15 s, for the
-@@ -3917,7 +3921,7 @@ pub fn run() {
+@@ -4131,7 +4135,7 @@ pub fn run() {
                      }
                      tokio::time::sleep(wait).await;
                  }

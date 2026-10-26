@@ -1,8 +1,8 @@
-From 73575157060171fa1b97f7f7b97ba493da8c9874 Mon Sep 17 00:00:00 2001
+From 5003630ff22a4f5f5745bcfe036c91443774aad1 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Mon, 26 Oct 2026 00:41:58 +0000
-Subject: [PATCH] Plugins: this build's own plugins can be removed, and added
- again
+Subject: [PATCH 21/22] Plugins: this build's own plugins can be removed, and
+ added again
 
 Settings' Remove did nothing for a plugin this build ships (data/ct-plugins:
 the fork's own plugins and the original's as the fork took them): it tried
@@ -22,10 +22,10 @@ Claude-Session: https://claude.ai/code/session_01RBQati3x8VviBbpY9juEWf
  4 files changed, 131 insertions(+), 9 deletions(-)
 
 diff --git a/public/src/js/pluginSettings.js b/public/src/js/pluginSettings.js
-index b7465d4..50a9588 100644
+index 83faa6c..49b6e2f 100644
 --- a/public/src/js/pluginSettings.js
 +++ b/public/src/js/pluginSettings.js
-@@ -285,9 +285,13 @@
+@@ -288,9 +288,13 @@
        noMatch.hidden = !query || shown > 0;
      };
  
@@ -40,7 +40,7 @@ index b7465d4..50a9588 100644
        document.querySelector(".pluginInstalledCount").textContent = installed ? String(installed) : "";
        document.querySelector(".pluginAvailableCount").textContent = offered ? String(offered) : "";
        search.hidden = installed + offered < SEARCH_FROM && !query;
-@@ -306,13 +310,33 @@
+@@ -309,6 +313,26 @@
      const renderCatalog = () => {
        catalogList.replaceChildren();
        catalogStatus.classList.remove("pluginError");
@@ -67,24 +67,25 @@ index b7465d4..50a9588 100644
        if (!view.online) {
          catalogStatus.textContent = t("settings.plugins.offline", "The offline build does not download plugins.");
          refreshBar();
-         return;
-       }
+@@ -317,7 +341,7 @@
        if (!catalog) return refreshBar();
+       // Reviewed plugins, then the test plugins under their own heading:
+       // early versions, signed the same way, there for anyone to try.
 -      const offered = catalog.filter((e) => !e.installed);
 +      const offered = catalog.filter((e) => !e.installed && !isRemovedBundled(e.id));
-       for (const entry of offered) {
-         if (!matches(entry.name, entry.description, entry.id, entry.author)) continue;
-         const details = [el("p", "pluginDescFull", entry.description || "")];
-@@ -329,7 +353,7 @@
-           }),
-         );
+       const reviewed = offered.filter((e) => !e.test);
+       const tests = offered.filter((e) => e.test);
+       const rowFor = (entry) => {
+@@ -351,7 +375,7 @@
+         // The heading only with a test plugin under it (a search can hide them all).
+         if (catalogList.childElementCount === shownBefore + 1) head.remove();
        }
 -      catalogStatus.textContent = offered.length ? "" : t("settings.plugins.catalogEmpty", "Every reviewed plugin is installed.");
 +      catalogStatus.textContent = offered.length || removedBundled().length ? "" : t("settings.plugins.catalogEmpty", "Every reviewed plugin is installed.");
        window.lucide?.createIcons?.({ root: catalogList });
        refreshBar();
      };
-@@ -341,7 +365,8 @@
+@@ -363,7 +387,8 @@
          catalog = await invoke("plugin_catalog");
        } catch (e) {
          catalog = null;
@@ -94,7 +95,7 @@ index b7465d4..50a9588 100644
          catalogStatus.textContent = t("settings.plugins.catalogError", "Couldn't load the plugin list: {error}", { error: String(e) });
          catalogStatus.classList.add("pluginError");
          return;
-@@ -403,7 +428,12 @@
+@@ -425,7 +450,12 @@
            badge.title = label;
            tags.push(badge);
          }
@@ -109,10 +110,10 @@ index b7465d4..50a9588 100644
            tag.title = t("settings.plugins.hint", "Plugins loaded here are not reviewed. Only load plugins you trust.");
            tags.push(tag);
 diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
-index b7a4094..67bc95a 100644
+index bfc2624..7f687af 100644
 --- a/src-tauri/src/app.rs
 +++ b/src-tauri/src/app.rs
-@@ -4032,6 +4032,7 @@ pub fn run() {
+@@ -4246,6 +4246,7 @@ pub fn run() {
              crate::plugins::plugin_file,
              crate::plugins::plugin_web_get,
              crate::plugins::plugin_window_size,
@@ -121,10 +122,10 @@ index b7a4094..67bc95a 100644
              crate::plugins::widgets::plugin_widget_resize,
              open_settings_at,
 diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
-index 640b727..6f6c03b 100644
+index bce297b..b65e639 100644
 --- a/src-tauri/src/plugins/mod.rs
 +++ b/src-tauri/src/plugins/mod.rs
-@@ -66,6 +66,9 @@ pub const WINDOWS_KEY: &str = "dpsMeter.pluginWindows";
+@@ -67,6 +67,9 @@ pub const WINDOWS_KEY: &str = "dpsMeter.pluginWindows";
  /// Plugins turned off in Settings, a JSON array of ids: they stay installed
  /// but don't run. Every other plugin starts with the meter.
  pub const DISABLED_KEY: &str = "dpsMeter.pluginsDisabled";
@@ -134,7 +135,7 @@ index 640b727..6f6c03b 100644
  /// Plugins whose windows and widgets hide while AION2 is closed, a JSON
  /// array of ids (Settings → Plugins).
  pub const HIDE_CLOSED_KEY: &str = "dpsMeter.pluginsHideClosed";
-@@ -214,6 +217,8 @@ struct Loaded {
+@@ -215,6 +218,8 @@ struct Loaded {
      decoders: Vec<Decoder>,
      /// Installed from the signed catalog, not a developer folder.
      reviewed: bool,
@@ -143,7 +144,7 @@ index 640b727..6f6c03b 100644
  }
  
  /// What Settings lists.
-@@ -228,6 +233,9 @@ pub struct PluginInfo {
+@@ -229,6 +234,9 @@ pub struct PluginInfo {
      pub permissions: Vec<String>,
      /// Installed from the signed catalog (otherwise a developer folder).
      pub reviewed: bool,
@@ -153,7 +154,7 @@ index 640b727..6f6c03b 100644
      /// Set when the folder could not be loaded.
      pub error: Option<String>,
  }
-@@ -248,6 +256,8 @@ pub struct PluginsView {
+@@ -249,6 +257,8 @@ pub struct PluginsView {
      pub hide_unfocused: Vec<String>,
      /// Ids of the plugins in a window of their own, not the dock.
      pub own_window: Vec<String>,
@@ -162,7 +163,7 @@ index 640b727..6f6c03b 100644
  }
  
  fn view(app: &tauri::AppHandle, host: &PluginHost) -> PluginsView {
-@@ -262,9 +272,66 @@ fn view(app: &tauri::AppHandle, host: &PluginHost) -> PluginsView {
+@@ -263,9 +273,66 @@ fn view(app: &tauri::AppHandle, host: &PluginHost) -> PluginsView {
          hide_closed: hide_closed(app),
          hide_unfocused: listed(app, HIDE_UNFOCUSED_KEY),
          own_window: listed(app, dock::OWN_WINDOW_KEY),
@@ -229,7 +230,7 @@ index 640b727..6f6c03b 100644
  /// The plugins turned off.
  fn disabled(app: &tauri::AppHandle) -> Vec<String> {
      app.try_state::<AppState>()
-@@ -577,7 +644,7 @@ fn load_folder(dir: &Path) -> Result<Loaded, String> {
+@@ -626,7 +693,7 @@ fn load_folder(dir: &Path) -> Result<Loaded, String> {
          }
          decoders.push(decoder);
      }
@@ -238,7 +239,7 @@ index 640b727..6f6c03b 100644
  }
  
  impl PluginHost {
-@@ -609,6 +676,7 @@ impl PluginHost {
+@@ -658,6 +725,7 @@ impl PluginHost {
                      path: folder,
                      permissions: Vec::new(),
                      reviewed: false,
@@ -246,7 +247,7 @@ index 640b727..6f6c03b 100644
                      error: Some(e),
                  }),
              }
-@@ -628,6 +696,7 @@ impl PluginHost {
+@@ -677,6 +745,7 @@ impl PluginHost {
              .map(|text| text.lines().map(str::trim).filter(|l| !l.is_empty()).map(String::from).collect())
              .unwrap_or_default();
          let installed_root = plugins_dir(app).ok();
@@ -254,7 +255,7 @@ index 640b727..6f6c03b 100644
          let bundled = bundled_root
              .and_then(|dir| std::fs::read_dir(dir).ok())
              .into_iter()
-@@ -641,13 +710,17 @@ impl PluginHost {
+@@ -690,13 +759,17 @@ impl PluginHost {
              if only_installed && !installed_root.as_ref().is_some_and(|root| root.join(&name).is_dir()) {
                  continue;
              }
@@ -275,7 +276,7 @@ index 640b727..6f6c03b 100644
                  }
                  Err(e) => tracing::warn!("Plugins: this build's {} does not load: {e}", dir.display()),
              }
-@@ -933,6 +1006,7 @@ fn info(l: &Loaded) -> PluginInfo {
+@@ -993,6 +1066,7 @@ fn info(l: &Loaded) -> PluginInfo {
          path: l.dir.to_string_lossy().into_owned(),
          permissions: l.manifest.permissions.clone(),
          reviewed: l.reviewed,
@@ -283,16 +284,16 @@ index 640b727..6f6c03b 100644
          error: None,
      }
  }
-@@ -1428,6 +1502,8 @@ pub async fn plugin_install(app: tauri::AppHandle, id: String) -> Result<Plugins
-         let http = app.try_state::<AppState>().ok_or("no app state")?.http.clone();
+@@ -1513,6 +1587,8 @@ pub async fn plugin_install(app: tauri::AppHandle, id: String) -> Result<Plugins
          let catalog = catalog::fetch(&http).await?;
-         let entry = catalog.plugins.iter().find(|e| e.id == id).ok_or("that plugin is not in the catalog")?;
+         let id = id.trim().to_lowercase();
+         let entry = catalog.plugins.iter().find(|e| e.id == id).ok_or("No plugin by that id in the catalog or the test catalog.")?;
 +        // Clicktrough: installed again, this build's copy of it runs again.
 +        set_bundled_removed(&app, &id, false);
          install_entry(&app, &host, entry).await?;
          Ok(view(&app, &host))
      }
-@@ -1453,6 +1529,11 @@ pub fn plugin_uninstall(app: tauri::AppHandle, id: String) -> Result<PluginsView
+@@ -1538,6 +1614,11 @@ pub fn plugin_uninstall(app: tauri::AppHandle, id: String) -> Result<PluginsView
      if dir.is_dir() {
          std::fs::remove_dir_all(&dir).map_err(|e| e.to_string())?;
      }
@@ -304,7 +305,7 @@ index 640b727..6f6c03b 100644
      let host = host(&app)?;
      host.reload(&app);
      dock::sync(&app, None);
-@@ -2711,6 +2792,7 @@ mod tests {
+@@ -2822,6 +2903,7 @@ mod tests {
              path: String::new(),
              permissions: Vec::new(),
              reviewed: true,
@@ -313,10 +314,10 @@ index 640b727..6f6c03b 100644
          };
          let off = vec!["off".to_string()];
 diff --git a/src/styles.css b/src/styles.css
-index 723fa36..a024a09 100644
+index a5020a2..19de31a 100644
 --- a/src/styles.css
 +++ b/src/styles.css
-@@ -8179,6 +8179,15 @@ html.a2-offline .historyUploadBtn {
+@@ -8284,6 +8284,15 @@ html.a2-offline .historyUploadBtn {
    font-size: 11px;
    font-weight: 500;
  }

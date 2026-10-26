@@ -1,7 +1,7 @@
-From 397bf21e130d614e9f0cd39009b2415d7a84ce0c Mon Sep 17 00:00:00 2001
+From 77f8ba9f4bec2436a0af518763f092745eb31b62 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Sat, 24 Oct 2026 14:14:28 +0000
-Subject: [PATCH 10/11] Plugins: the world around the player (events:world)
+Subject: [PATCH 10/22] Plugins: the world around the player (events:world)
 
 A plugin with the permission "events:world" (a map, a pet tracker) hears
 a2.on("world") at most four times a second, and every two seconds while
@@ -33,7 +33,7 @@ Claude-Session: https://claude.ai/code/session_01RBQati3x8VviBbpY9juEWf
  create mode 100644 src-tauri/src/plugins/world.rs
 
 diff --git a/public/src/js/pluginFrame.js b/public/src/js/pluginFrame.js
-index 18195ad..37ce03e 100644
+index 7354b1b..b0945e0 100644
 --- a/public/src/js/pluginFrame.js
 +++ b/public/src/js/pluginFrame.js
 @@ -54,6 +54,8 @@
@@ -46,12 +46,12 @@ index 18195ad..37ce03e 100644
        if (ready) send(msg);
        else queue.push(msg);
 diff --git a/public/src/js/pluginSettings.js b/public/src/js/pluginSettings.js
-index 9f1eac6..0236b5e 100644
+index 5bcbca6..e31468f 100644
 --- a/public/src/js/pluginSettings.js
 +++ b/public/src/js/pluginSettings.js
-@@ -54,6 +54,9 @@
-       if (permission === "feed:boss-timers") {
-         return t("settings.plugins.permBossTimers", "Read the field boss timers players share through a2tools.app");
+@@ -57,6 +57,9 @@
+       if (permission === "fps") {
+         return t("settings.plugins.permFps", "Show the game's frame rate (on Windows, the meter asks to run as administrator for it)");
        }
 +      if (permission === "events:world") {
 +        return t("settings.plugins.permWorld", "See where you and the monsters and objects around you are (from the game data)");
@@ -60,10 +60,10 @@ index 9f1eac6..0236b5e 100644
          return t("settings.plugins.permDecoder", "Read your own game data: {name}", { name: permission.slice(8) });
        }
 diff --git a/src-tauri/src/plugins/a2.js b/src-tauri/src/plugins/a2.js
-index bfb9e3a..41ebc2b 100644
+index d5631b6..2d5f5c0 100644
 --- a/src-tauri/src/plugins/a2.js
 +++ b/src-tauri/src/plugins/a2.js
-@@ -24,6 +24,13 @@
+@@ -46,6 +46,13 @@
  //                                              var(--a2-bg), var(--a2-panel); and selects, checkboxes, radios,
  //                                              sliders and scrollbars are styled to match unless the plugin styles them itself
  //   a2.on("compact", (on) => ...)              the window's fold button: show only the essentials
@@ -78,19 +78,19 @@ index bfb9e3a..41ebc2b 100644
  // Keep the page's background transparent: the window paints the panel at the
  // opacity the user picks.
 diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
-index 3a50c63..31fd104 100644
+index 51ec65e..3033be7 100644
 --- a/src-tauri/src/plugins/mod.rs
 +++ b/src-tauri/src/plugins/mod.rs
-@@ -16,6 +16,8 @@ pub mod catalog;
- pub mod decoder;
+@@ -17,6 +17,8 @@ pub mod decoder;
  pub mod dock;
+ pub mod fps;
  pub mod widgets;
 +// Clicktrough: the world around the player (`events:world`).
 +pub mod world;
  #[cfg(feature = "online")]
  pub mod boss_live;
  /// Without the network there is nothing to follow.
-@@ -372,6 +374,16 @@ pub struct PluginHost {
+@@ -373,6 +375,16 @@ pub struct PluginHost {
      closed: Mutex<HashSet<String>>,
  }
  
@@ -107,7 +107,7 @@ index 3a50c63..31fd104 100644
  impl Default for PluginHost {
      fn default() -> Self {
          let run = std::time::SystemTime::now()
-@@ -563,6 +575,8 @@ impl PluginHost {
+@@ -612,6 +624,8 @@ impl PluginHost {
              }
          }
          let any_decoders = loaded.iter().any(|l| !l.decoders.is_empty());
@@ -116,7 +116,7 @@ index 3a50c63..31fd104 100644
          tracing::info!("Plugins: {} loaded (developer mode {})", loaded.len(), if dev { "on" } else { "off" });
          *self.loaded.write().unwrap_or_else(|p| p.into_inner()) = loaded;
          *self.errors.write().unwrap_or_else(|p| p.into_inner()) = errors;
-@@ -595,6 +609,18 @@ impl PluginHost {
+@@ -645,6 +659,18 @@ impl PluginHost {
                          ready
                      };
                      host.flush(&app, ready);
@@ -135,7 +135,7 @@ index 3a50c63..31fd104 100644
                      // The character as the meter learns it (a login, a switch,
                      // or the meter starting mid-game): open plugins hear it then,
                      // not only when their window opens.
-@@ -646,8 +672,9 @@ impl PluginHost {
+@@ -706,8 +732,9 @@ impl PluginHost {
                  .ok();
          }
  
@@ -147,7 +147,7 @@ index 3a50c63..31fd104 100644
              let host = Arc::clone(self);
              let app = app.clone();
              crate::capture::frame_tap::set(Some(Arc::new(move |packet: &[u8]| host.on_frame(&app, packet))));
-@@ -664,6 +691,16 @@ impl PluginHost {
+@@ -724,6 +751,16 @@ impl PluginHost {
          let at = len as usize;
          let Some(opcode) = packet.get(at..at + 2) else { return };
          let body = &packet[at + 2..];
@@ -164,10 +164,10 @@ index 3a50c63..31fd104 100644
          let loaded = self.loaded.read().unwrap_or_else(|p| p.into_inner());
          for plugin in loaded.iter() {
              for d in plugin.decoders.iter().filter(|d| d.opcode == opcode) {
-@@ -1045,6 +1082,7 @@ fn describe_permission(t: &PromptTexts, permission: &str) -> String {
-         "window" => t.perm_window.clone(),
+@@ -1125,6 +1162,7 @@ fn describe_permission(t: &PromptTexts, permission: &str) -> String {
          "widgets" => t.perm_widgets.clone(),
          "events:character" => t.perm_character.clone(),
+         "fps" => t.perm_fps.clone(),
 +        "events:world" => "See where you and the monsters and objects around you are (from the game data)".into(),
          p => match p.strip_prefix("decoder:") {
              Some(name) => t.perm_decoder.replace("{name}", name),

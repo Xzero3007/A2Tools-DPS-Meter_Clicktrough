@@ -1,7 +1,7 @@
-From b3af6c380036cec7a5f6b4923731b9676036bd30 Mon Sep 17 00:00:00 2001
+From e8699333ca46e82773c763163e85ce2c5732c476 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Mon, 26 Oct 2026 00:05:23 +0000
-Subject: [PATCH 19/20] Updates: the green button looks again every 20 minutes
+Subject: [PATCH 19/22] Updates: the green button looks again every 20 minutes
 
 The meter looked for an update at start and then every 6 hours, and a
 check that failed at start (the bridge not up yet, no network) waited the

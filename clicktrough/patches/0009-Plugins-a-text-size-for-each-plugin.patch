@@ -1,7 +1,7 @@
-From e77d39f993ac77c142dd7e5a2b63a58367266164 Mon Sep 17 00:00:00 2001
+From 20a247ac9c0b9ef441957b6e79caf16df32a5d8f Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Sat, 24 Oct 2026 12:42:42 +0000
-Subject: [PATCH 9/9] Plugins: a text size for each plugin
+Subject: [PATCH 09/22] Plugins: a text size for each plugin
 
 A plugin's text could be as large as it made it, larger than the
 meter's. Two buttons in the dock's panel bar and in a plugin's own
@@ -120,7 +120,7 @@ index 7c8512f..02d2bd3 100644
  
  /* Stacked: every shown plugin, one under another, the dock scrolling. */
 diff --git a/public/src/js/pluginDock.js b/public/src/js/pluginDock.js
-index 8028b9d..a185c41 100644
+index 34f4439..48c3d10 100644
 --- a/public/src/js/pluginDock.js
 +++ b/public/src/js/pluginDock.js
 @@ -180,6 +180,20 @@
@@ -153,7 +153,7 @@ index 8028b9d..a185c41 100644
          stage.appendChild(d.panel);
          d.plugin.start().catch((e) => {
 diff --git a/public/src/js/pluginFrame.js b/public/src/js/pluginFrame.js
-index 22463c1..18195ad 100644
+index 88f60ba..7354b1b 100644
 --- a/public/src/js/pluginFrame.js
 +++ b/public/src/js/pluginFrame.js
 @@ -24,6 +24,20 @@
@@ -177,7 +177,7 @@ index 22463c1..18195ad 100644
      const send = (msg) => frame?.contentWindow?.postMessage({ a2: 1, ...msg }, "*");
  
      // Decoded events are numbered for the meter's run. The page remembers the
-@@ -101,7 +115,7 @@
+@@ -111,7 +125,7 @@
          const h = Number(height);
          const fitted = Number.isFinite(h) && h > 0;
          onFit(fitted);
@@ -186,7 +186,7 @@ index 22463c1..18195ad 100644
        },
        "window.hide": () => {
          if (!allowed("window")) throw new Error('the plugin lacks the "window" permission');
-@@ -225,6 +239,16 @@
+@@ -236,6 +250,16 @@
        deliver,
        receive,
        start,
@@ -284,10 +284,10 @@ index 935f466..395cd85 100644
    const compact = document.querySelector(".pluginCompact");
    const applyOpacity = () => document.body.style.setProperty("--panel-alpha", String(panel.opacity / 100));
 diff --git a/src/data/i18n/ui/de.json b/src/data/i18n/ui/de.json
-index de3d05c..39ee1fe 100644
+index b243d34..2b7ad38 100644
 --- a/src/data/i18n/ui/de.json
 +++ b/src/data/i18n/ui/de.json
-@@ -794,6 +794,8 @@
+@@ -818,6 +818,8 @@
      "failed": "Konnte nicht aktualisiert werden:"
    },
    "pluginDock": {
@@ -297,10 +297,10 @@ index de3d05c..39ee1fe 100644
      "tabs": "Plugins als Tabs zeigen",
      "stack": "Plugins untereinander zeigen",
 diff --git a/src/data/i18n/ui/en.json b/src/data/i18n/ui/en.json
-index 54c2f41..f30d05d 100644
+index 3754043..2bca3f2 100644
 --- a/src/data/i18n/ui/en.json
 +++ b/src/data/i18n/ui/en.json
-@@ -806,6 +806,8 @@
+@@ -830,6 +830,8 @@
      "failed": "Couldn't update:"
    },
    "pluginDock": {
@@ -310,10 +310,10 @@ index 54c2f41..f30d05d 100644
      "tabs": "Show the plugins as tabs",
      "stack": "Stack the plugins",
 diff --git a/src/data/i18n/ui/es.json b/src/data/i18n/ui/es.json
-index 4007aa7..75bd7dc 100644
+index 0a5a948..9148d2f 100644
 --- a/src/data/i18n/ui/es.json
 +++ b/src/data/i18n/ui/es.json
-@@ -794,6 +794,8 @@
+@@ -818,6 +818,8 @@
      "failed": "No se pudo actualizar:"
    },
    "pluginDock": {
@@ -323,10 +323,10 @@ index 4007aa7..75bd7dc 100644
      "tabs": "Mostrar los plugins en pestañas",
      "stack": "Apilar los plugins",
 diff --git a/src/data/i18n/ui/fr.json b/src/data/i18n/ui/fr.json
-index 3f4ac38..66f9b2c 100644
+index 9a85fbb..f613d76 100644
 --- a/src/data/i18n/ui/fr.json
 +++ b/src/data/i18n/ui/fr.json
-@@ -794,6 +794,8 @@
+@@ -818,6 +818,8 @@
      "failed": "Échec de la mise à jour :"
    },
    "pluginDock": {
@@ -336,10 +336,10 @@ index 3f4ac38..66f9b2c 100644
      "tabs": "Afficher les plugins en onglets",
      "stack": "Empiler les plugins",
 diff --git a/src/data/i18n/ui/ja.json b/src/data/i18n/ui/ja.json
-index b4f1afb..3f61e22 100644
+index 70a2b4b..83d1f0b 100644
 --- a/src/data/i18n/ui/ja.json
 +++ b/src/data/i18n/ui/ja.json
-@@ -794,6 +794,8 @@
+@@ -818,6 +818,8 @@
      "failed": "更新できませんでした："
    },
    "pluginDock": {
@@ -349,10 +349,10 @@ index b4f1afb..3f61e22 100644
      "tabs": "プラグインをタブで表示",
      "stack": "プラグインを縦に並べる",
 diff --git a/src/data/i18n/ui/ko.json b/src/data/i18n/ui/ko.json
-index 061655a..a1050a6 100644
+index 2b5babe..0ab9ebf 100644
 --- a/src/data/i18n/ui/ko.json
 +++ b/src/data/i18n/ui/ko.json
-@@ -801,6 +801,8 @@
+@@ -825,6 +825,8 @@
      "failed": "업데이트하지 못했습니다:"
    },
    "pluginDock": {
@@ -362,10 +362,10 @@ index 061655a..a1050a6 100644
      "tabs": "플러그인을 탭으로 보기",
      "stack": "플러그인을 세로로 쌓기",
 diff --git a/src/data/i18n/ui/pt.json b/src/data/i18n/ui/pt.json
-index a961f2c..e7e398d 100644
+index 3e3bd9a..c721c57 100644
 --- a/src/data/i18n/ui/pt.json
 +++ b/src/data/i18n/ui/pt.json
-@@ -794,6 +794,8 @@
+@@ -818,6 +818,8 @@
      "failed": "Não foi possível atualizar:"
    },
    "pluginDock": {
@@ -375,10 +375,10 @@ index a961f2c..e7e398d 100644
      "tabs": "Mostrar os plugins em abas",
      "stack": "Empilhar os plugins",
 diff --git a/src/data/i18n/ui/ru.json b/src/data/i18n/ui/ru.json
-index 99c971c..c9e7883 100644
+index 52dc456..b42eda4 100644
 --- a/src/data/i18n/ui/ru.json
 +++ b/src/data/i18n/ui/ru.json
-@@ -799,6 +799,8 @@
+@@ -823,6 +823,8 @@
      "failed": "Не удалось обновить:"
    },
    "pluginDock": {
@@ -388,10 +388,10 @@ index 99c971c..c9e7883 100644
      "tabs": "Показывать плагины вкладками",
      "stack": "Показывать плагины друг под другом",
 diff --git a/src/data/i18n/ui/zh-Hans.json b/src/data/i18n/ui/zh-Hans.json
-index 62e00a2..0d4f016 100644
+index fc1a94f..53117b6 100644
 --- a/src/data/i18n/ui/zh-Hans.json
 +++ b/src/data/i18n/ui/zh-Hans.json
-@@ -801,6 +801,8 @@
+@@ -825,6 +825,8 @@
      "failed": "无法更新："
    },
    "pluginDock": {
@@ -401,10 +401,10 @@ index 62e00a2..0d4f016 100644
      "tabs": "以标签页显示插件",
      "stack": "堆叠显示插件",
 diff --git a/src/data/i18n/ui/zh-Hant.json b/src/data/i18n/ui/zh-Hant.json
-index ff0e211..926c85b 100644
+index 7e81776..a526cac 100644
 --- a/src/data/i18n/ui/zh-Hant.json
 +++ b/src/data/i18n/ui/zh-Hant.json
-@@ -801,6 +801,8 @@
+@@ -825,6 +825,8 @@
      "failed": "無法更新："
    },
    "pluginDock": {

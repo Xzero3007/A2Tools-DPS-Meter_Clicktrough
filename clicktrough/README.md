@@ -35,9 +35,8 @@ released in a version yet. They go before the patches. Once a new version of
 the original contains the commit (it is on the first line of each patch), the
 build leaves it out; the file can be deleted then.
 
-| Fix | What it does |
-|---|---|
-| 0001–0004 (taengu, 2026-10-24) | **Stuck tooltip on the meter**: the box that opens when you hover a row (damage, DPS, skills) stayed up on Linux/Wayland when the meter missed the pointer leaving the row, e.g. because it went straight into the game. It now closes as soon as the pointer leaves the window, after 4 s without pointer movement over the meter, and when its row goes away (new fight, reset, meter folded). |
+None at the moment: the stuck-tooltip fixes taken early (2026-10-24) are in
+the original's 2.0.79.
 
 ### Changed plugins
 

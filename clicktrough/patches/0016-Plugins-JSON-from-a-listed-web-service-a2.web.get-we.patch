@@ -1,7 +1,7 @@
-From f228b7f679f77a9df033009454e284e266cc4e40 Mon Sep 17 00:00:00 2001
+From e9c335725c4a696a10b656c7a252bb0a7f602c93 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Sat, 24 Oct 2026 22:44:44 +0000
-Subject: [PATCH] Plugins: JSON from a listed web service (a2.web.get,
+Subject: [PATCH 16/22] Plugins: JSON from a listed web service (a2.web.get,
  web:<host>)
 
 A plugin's page has no network at all, and some data plugins want is
@@ -37,10 +37,10 @@ Claude-Session: https://claude.ai/code/session_01RBQati3x8VviBbpY9juEWf
  5 files changed, 240 insertions(+), 4 deletions(-)
 
 diff --git a/public/src/js/pluginFrame.js b/public/src/js/pluginFrame.js
-index 99e60dc..fc46c94 100644
+index 9403f8f..682be24 100644
 --- a/public/src/js/pluginFrame.js
 +++ b/public/src/js/pluginFrame.js
-@@ -158,6 +158,13 @@
+@@ -168,6 +168,13 @@
        // Clicktrough: one of the plugin's own files as a data: URL (WebKitGTK
        // 2.54 lets a sandboxed frame load none from the plugin scheme).
        file: ([path]) => call("plugin_file", { path: String(path) }),
@@ -55,10 +55,10 @@ index 99e60dc..fc46c94 100644
        share: ([value]) => {
          if (!allowed("share")) throw new Error('the plugin lacks the "share" permission');
 diff --git a/public/src/js/pluginSettings.js b/public/src/js/pluginSettings.js
-index 70f1f6c..b7465d4 100644
+index 7987f66..83faa6c 100644
 --- a/public/src/js/pluginSettings.js
 +++ b/public/src/js/pluginSettings.js
-@@ -63,6 +63,9 @@
+@@ -66,6 +66,9 @@
        if (permission === "events:shared") {
          return t("settings.plugins.permShared", "See what other plugins share (e.g. the pets they track)");
        }
@@ -69,10 +69,10 @@ index 70f1f6c..b7465d4 100644
          return t("settings.plugins.permDecoder", "Read your own game data: {name}", { name: permission.slice(8) });
        }
 diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
-index ba19a38..e26e137 100644
+index 9e2b0b0..ff78679 100644
 --- a/src-tauri/src/app.rs
 +++ b/src-tauri/src/app.rs
-@@ -4030,6 +4030,7 @@ pub fn run() {
+@@ -4244,6 +4244,7 @@ pub fn run() {
              crate::plugins::plugin_hello,
              crate::plugins::plugin_share,
              crate::plugins::plugin_file,
@@ -81,10 +81,10 @@ index ba19a38..e26e137 100644
              crate::plugins::widgets::plugin_widget_resize,
              open_settings_at,
 diff --git a/src-tauri/src/plugins/a2.js b/src-tauri/src/plugins/a2.js
-index c4eab7e..a713314 100644
+index ca59ae0..da6693d 100644
 --- a/src-tauri/src/plugins/a2.js
 +++ b/src-tauri/src/plugins/a2.js
-@@ -38,6 +38,11 @@
+@@ -60,6 +60,11 @@
  //                                              (permission "share"); null withdraws it
  //   a2.on("shared", ({ plugin, value }) => ...)  what another plugin shared (permission "events:shared"):
  //                                              at once, and every value shared so far at start
@@ -96,7 +96,7 @@ index c4eab7e..a713314 100644
  //
  // Keep the page's background transparent: the window paints the panel at the
  // opacity the user picks.
-@@ -190,6 +195,8 @@
+@@ -220,6 +225,8 @@
      file: (path) => call("file", [String(path)]),
      // Clicktrough: a value for other plugins (permission "share").
      share: (value) => call("share", [value ?? null]),
@@ -106,10 +106,10 @@ index c4eab7e..a713314 100644
      // Meter 2.0.72 on: the server's Abyss siege (artifact holders, cores).
      abyssSiege: (server) => call("abyssSiege", [Number(server)]),
 diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
-index b67e933..71a241d 100644
+index 6031592..a077ff4 100644
 --- a/src-tauri/src/plugins/mod.rs
 +++ b/src-tauri/src/plugins/mod.rs
-@@ -1169,9 +1169,10 @@ fn describe_permission(t: &PromptTexts, permission: &str) -> String {
+@@ -1249,9 +1249,10 @@ fn describe_permission(t: &PromptTexts, permission: &str) -> String {
          "events:world" => "See where you and the monsters and objects around you are (from the game data)".into(),
          "share" => "Share what it follows with other plugins (e.g. the pets it tracks, for a map)".into(),
          "events:shared" => "See what other plugins share (e.g. the pets they track)".into(),
@@ -123,7 +123,7 @@ index b67e933..71a241d 100644
          },
      }
  }
-@@ -2051,6 +2052,181 @@ async fn feed_file(_app: &tauri::AppHandle, _feed: &'static str, _server: u32) -
+@@ -2162,6 +2163,181 @@ async fn feed_file(_app: &tauri::AppHandle, _feed: &'static str, _server: u32) -
      Err("this meter is built without network features".into())
  }
  
@@ -305,7 +305,7 @@ index b67e933..71a241d 100644
  #[tauri::command]
  pub fn plugin_storage_get(app: tauri::AppHandle, window: tauri::WebviewWindow, plugin: Option<String>, key: String) -> Result<Option<String>, String> {
      let id = window_plugin(&window, plugin.as_deref())?;
-@@ -2341,7 +2517,49 @@ fn percent_decode(s: &str) -> String {
+@@ -2452,7 +2628,49 @@ fn percent_decode(s: &str) -> String {
  
  #[cfg(test)]
  mod tests {

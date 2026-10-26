@@ -73,8 +73,6 @@ package.
   Available installs any of them as this repo's build took them (tagged
   Clicktrough), test plugins too, such as Enhanced Boss Telegraph; a watch
   opens an issue when the original has a new plugin and builds it in.
-- **No stuck tooltip**: the box that opens when you hover a row closes
-  reliably on Linux (the original's fix, here before its next version).
 - **Updates come from this repo**, so an official update doesn't replace the
   changes again; the green button looks for one every 20 minutes. Plugin
   updates too come only with a release here, never straight from the

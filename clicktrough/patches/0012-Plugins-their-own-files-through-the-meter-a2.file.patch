@@ -1,7 +1,7 @@
-From 95c1b92ebe3451cd30c579993d4d44e07fd15ee0 Mon Sep 17 00:00:00 2001
+From 4792919a52e0174b4c94e77ec4f0e32d7cb42978 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Sat, 24 Oct 2026 17:16:33 +0000
-Subject: [PATCH] Plugins: their own files through the meter (a2.file)
+Subject: [PATCH 12/22] Plugins: their own files through the meter (a2.file)
 
 WebKitGTK 2.54 refuses every file a sandboxed plugin frame asks for from
 the plugin scheme; the meter inlines what a page names at the start, but
@@ -23,10 +23,10 @@ Claude-Session: https://claude.ai/code/session_01RBQati3x8VviBbpY9juEWf
  6 files changed, 84 insertions(+), 1 deletion(-)
 
 diff --git a/public/src/js/pluginFrame.js b/public/src/js/pluginFrame.js
-index 72bc462..99e60dc 100644
+index a021e56..9403f8f 100644
 --- a/public/src/js/pluginFrame.js
 +++ b/public/src/js/pluginFrame.js
-@@ -155,6 +155,9 @@
+@@ -165,6 +165,9 @@
          if (!allowed("widgets")) throw new Error('the plugin lacks the "widgets" permission');
          return call("plugin_widget_place", { name: String(name), x: Math.round(Number(at?.x)), y: Math.round(Number(at?.y)) });
        },
@@ -50,10 +50,10 @@ index ebc858a..a6f8d8e 100644
  
    window.addEventListener("message", async (event) => {
 diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
-index dc91f9a..6e25dc2 100644
+index aabda3c..15b1530 100644
 --- a/src-tauri/src/app.rs
 +++ b/src-tauri/src/app.rs
-@@ -3985,6 +3985,8 @@ pub fn run() {
+@@ -4199,6 +4199,8 @@ pub fn run() {
              crate::plugins::plugin_set_hide,
              crate::plugins::plugin_hello,
              crate::plugins::plugin_share,
@@ -63,10 +63,10 @@ index dc91f9a..6e25dc2 100644
              take_settings_section,
              crate::plugins::dock::dock_hello,
 diff --git a/src-tauri/src/plugins/a2.js b/src-tauri/src/plugins/a2.js
-index d10fc18..2b6413d 100644
+index 2f638f4..5cd33f1 100644
 --- a/src-tauri/src/plugins/a2.js
 +++ b/src-tauri/src/plugins/a2.js
-@@ -31,6 +31,9 @@
+@@ -53,6 +53,9 @@
  //                                              objects: [[entity, objectId, x, y]] }; world units are cm.
  //                                              `me` is exact for 4 s after a report (an action pose, an effect,
  //                                              a teleport), else the middle of the entities around (~10 m off)
@@ -76,7 +76,7 @@ index d10fc18..2b6413d 100644
  //   await a2.share(value)                      Clicktrough: share a value (JSON, up to 64 KB) with other plugins
  //                                              (permission "share"); null withdraws it
  //   a2.on("shared", ({ plugin, value }) => ...)  what another plugin shared (permission "events:shared"):
-@@ -177,6 +180,8 @@
+@@ -207,6 +210,8 @@
        set: (key, value) => call("storage.set", [key, JSON.stringify(value)]),
      }),
      notify: (text) => call("notify", [String(text)]),
@@ -86,10 +86,10 @@ index d10fc18..2b6413d 100644
      share: (value) => call("share", [value ?? null]),
      bossTimers: (server) => call("bossTimers", [Number(server)]),
 diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
-index 05675cf..88c9044 100644
+index 0ececa4..c2ec84b 100644
 --- a/src-tauri/src/plugins/mod.rs
 +++ b/src-tauri/src/plugins/mod.rs
-@@ -413,6 +413,51 @@ pub fn plugin_share(app: tauri::AppHandle, window: tauri::WebviewWindow, plugin:
+@@ -414,6 +414,51 @@ pub fn plugin_share(app: tauri::AppHandle, window: tauri::WebviewWindow, plugin:
      Ok(())
  }
  
@@ -141,7 +141,7 @@ index 05675cf..88c9044 100644
  fn with_world<T>(f: impl FnOnce(&mut world::World) -> T) -> T {
      let mut slot = WORLD.lock().unwrap_or_else(|p| p.into_inner());
      f(slot.get_or_insert_with(world::World::default))
-@@ -2296,7 +2341,7 @@ fn percent_decode(s: &str) -> String {
+@@ -2407,7 +2452,7 @@ fn percent_decode(s: &str) -> String {
  #[cfg(test)]
  mod tests {
      use super::{base64, content_policy, inline_page, inlined_policy, with_meter_fonts, prompt_texts, should_start, take_ready};
@@ -150,7 +150,7 @@ index 05675cf..88c9044 100644
      use std::collections::{HashMap, HashSet};
      use std::time::{Duration, Instant};
  
-@@ -2448,6 +2493,24 @@ mod tests {
+@@ -2559,6 +2604,24 @@ mod tests {
          let _ = std::fs::remove_dir_all(&dir);
      }
  

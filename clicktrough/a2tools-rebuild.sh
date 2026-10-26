@@ -58,6 +58,7 @@ fail() {
 }
 
 for p in "$here"/backports/*.patch; do
+  [ -e "$p" ] || continue
   sha=$(sed -n '1s/^From \([0-9a-f]\{40\}\) .*/\1/p' "$p")
   if [ -n "$sha" ] && git merge-base --is-ancestor "$sha" HEAD 2>/dev/null; then
     continue

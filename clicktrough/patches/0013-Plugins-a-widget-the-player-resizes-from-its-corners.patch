@@ -1,7 +1,7 @@
-From 2c6ce17f21bce4d1276e3227884ae29656fa6e68 Mon Sep 17 00:00:00 2001
+From 8f0c0d44ab78e59bb029c0f586af866f2bad53df Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Sat, 24 Oct 2026 18:35:33 +0000
-Subject: [PATCH] Plugins: a widget the player resizes from its corners
+Subject: [PATCH 13/22] Plugins: a widget the player resizes from its corners
  (a2.widget.resize)
 
 A widget could only be resized by its plugin opening it again at a new
@@ -54,10 +54,10 @@ index a6f8d8e..bb615e5 100644
      }
    });
 diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
-index 6e25dc2..95ee7a3 100644
+index 15b1530..614f80e 100644
 --- a/src-tauri/src/app.rs
 +++ b/src-tauri/src/app.rs
-@@ -3987,6 +3987,7 @@ pub fn run() {
+@@ -4201,6 +4201,7 @@ pub fn run() {
              crate::plugins::plugin_share,
              crate::plugins::plugin_file,
              crate::plugins::widgets::plugin_widget_file,
@@ -66,10 +66,10 @@ index 6e25dc2..95ee7a3 100644
              take_settings_section,
              crate::plugins::dock::dock_hello,
 diff --git a/src-tauri/src/plugins/a2.js b/src-tauri/src/plugins/a2.js
-index 2b6413d..c4eab7e 100644
+index 5cd33f1..ca59ae0 100644
 --- a/src-tauri/src/plugins/a2.js
 +++ b/src-tauri/src/plugins/a2.js
-@@ -81,6 +81,12 @@
+@@ -111,6 +111,12 @@
  //   a2.widget.areas([{ x, y, width, height }, ...])  the same as several parts (up to 64), so the
  //                                              gaps between them let clicks through too (meter 2.0.77 on)
  //   a2.widget.post(data)                       to the plugin's page ("widget-message")
@@ -82,7 +82,7 @@ index 2b6413d..c4eab7e 100644
  //   a2.on("widget", (data) => ...)             what the plugin sent it
  //   a2.on("locked", (locked) => ...)           whether the widgets are locked, at start and on change
  //
-@@ -210,6 +216,8 @@
+@@ -243,6 +249,8 @@
        area: (r) => call("widget.area", [r || {}]),
        areas: (rs) => call("widget.areas", [Array.isArray(rs) ? rs : []]),
        post: (data) => call("widget.post", [data]),

@@ -1,7 +1,7 @@
-From 2462ad709a5b16afdac88d35e429bd4682caeb27 Mon Sep 17 00:00:00 2001
+From f91d6f78e38fc61b63fb48cf729623dbec978106 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Sat, 24 Oct 2026 20:13:41 +0000
-Subject: [PATCH 15/15] Meter: the plugins button turns the plugins' widgets
+Subject: [PATCH 15/22] Meter: the plugins button turns the plugins' widgets
  off too
 
 The puzzle button in the meter's header hid only the plugin window; a
@@ -22,7 +22,7 @@ Claude-Session: https://claude.ai/code/session_01RBQati3x8VviBbpY9juEWf
  4 files changed, 89 insertions(+), 6 deletions(-)
 
 diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
-index 8e01728..ba19a38 100644
+index ba476a1..9e2b0b0 100644
 --- a/src-tauri/src/app.rs
 +++ b/src-tauri/src/app.rs
 @@ -223,8 +223,9 @@ fn hide_with_meter(app: &tauri::AppHandle, hidden: &mut std::collections::HashSe
@@ -38,7 +38,7 @@ index 8e01728..ba19a38 100644
          }
          if !platform::window::reveal_in_place(&window) {
 diff --git a/src-tauri/src/plugins/dock.rs b/src-tauri/src/plugins/dock.rs
-index efd1162..f19bd72 100644
+index 8f19792..bfb9032 100644
 --- a/src-tauri/src/plugins/dock.rs
 +++ b/src-tauri/src/plugins/dock.rs
 @@ -103,6 +103,12 @@ pub fn layout(app: &tauri::AppHandle) -> Value {
@@ -84,10 +84,10 @@ index efd1162..f19bd72 100644
      status(&app)
  }
 diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
-index 88c9044..b67e933 100644
+index c2ec84b..6031592 100644
 --- a/src-tauri/src/plugins/mod.rs
 +++ b/src-tauri/src/plugins/mod.rs
-@@ -165,8 +165,9 @@ pub fn sync_game_hiding(app: &tauri::AppHandle) {
+@@ -166,8 +166,9 @@ pub fn sync_game_hiding(app: &tauri::AppHandle) {
                  crate::platform::window::hide_in_place(&window);
              }
          } else if hidden.remove(&label) {
