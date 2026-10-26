@@ -87,6 +87,7 @@ done
 for d in "$plugins_src"/plugins/*/; do
   id=$(basename "$d")
   [ -f "$d/manifest.json" ] || continue
+  [ -e "$d/.unpublished" ] && continue
   [ -e "src/data/ct-plugins/$id" ] && continue
   [ -e "$here/own-plugins/$id" ] && continue
   cp -r "$d" "src/data/ct-plugins/$id"

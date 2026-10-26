@@ -1,4 +1,4 @@
-From 6b53f07ae1c22e263323db9c6ad59c5e51615707 Mon Sep 17 00:00:00 2001
+From d6848dfc7de58d62431f01028bdf0067d18e03e7 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Sat, 24 Oct 2026 11:46:50 +0000
 Subject: [PATCH] Event Timers: the folded view side by side
@@ -20,12 +20,12 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_01RBQati3x8VviBbpY9juEWf
 ---
  plugins/event-timers/index.html | 16 ++++--
- plugins/event-timers/plugin.js  | 89 +++++++++++++++++++++++++++------
+ plugins/event-timers/plugin.js  | 88 +++++++++++++++++++++++++++------
  plugins/event-timers/style.css  | 59 ++++++++++++++++++++++
- 3 files changed, 146 insertions(+), 18 deletions(-)
+ 3 files changed, 145 insertions(+), 18 deletions(-)
 
 diff --git a/plugins/event-timers/index.html b/plugins/event-timers/index.html
-index 8e34ef1..deceb4a 100644
+index c697358..a625ede 100644
 --- a/plugins/event-timers/index.html
 +++ b/plugins/event-timers/index.html
 @@ -25,9 +25,18 @@
@@ -50,7 +50,7 @@ index 8e34ef1..deceb4a 100644
        <div class="hidden"></div>
      </section>
      <section class="view bosses" hidden>
-@@ -65,6 +74,7 @@
+@@ -71,6 +80,7 @@
        <label class="setting"><span class="zoneLabel">Show times in</span> <select class="zoneSelect"></select></label>
        <label class="setting"><span class="scaleLabel">Text size</span> <select class="scaleSelect"></select></label>
        <label class="setting"><span class="foldedBossLabel">Folded: bosses due within</span> <select class="foldedBossSelect"></select></label>
@@ -59,7 +59,7 @@ index 8e34ef1..deceb4a 100644
      <div class="modal" role="dialog" aria-modal="true" hidden>
        <div class="modalBox">
 diff --git a/plugins/event-timers/plugin.js b/plugins/event-timers/plugin.js
-index 44b502e..16d9e5f 100644
+index 06c9369..e96fa6e 100644
 --- a/plugins/event-timers/plugin.js
 +++ b/plugins/event-timers/plugin.js
 @@ -39,6 +39,14 @@ const els = {
@@ -77,7 +77,7 @@ index 44b502e..16d9e5f 100644
    foldedBossLabel: $(".foldedBossLabel"),
    foldedBossSelect: $(".foldedBossSelect"),
    hidden: $(".hidden"),
-@@ -346,19 +354,33 @@ const MORE_UI = {
+@@ -357,19 +365,33 @@ const MORE_UI = {
          bossSoon: (name, n) => `${name} ${n} 分钟后出现`, bossNow: (name) => `${name} 已出现` },
  };
  
@@ -122,17 +122,16 @@ index 44b502e..16d9e5f 100644
  const foldedWords = () => FOLDED_UI[language] || FOLDED_UI.en;
  const foldedMinutes = () =>
    FOLDED_BOSS_MINUTES.includes(prefs.foldedBossMinutes) ? prefs.foldedBossMinutes : DEFAULT_FOLDED_BOSS_MINUTES;
-@@ -408,7 +430,8 @@ let gameRunning = null;
- // volume: the alerts' loudness, 0-100 %.
+@@ -457,7 +479,7 @@ let gameRunning = null;
+ // voiceRate.
  let prefs = { region: "auto", hidden: [], alerts: {}, leads: {}, closedLeads: {}, sound: "chime", repeat: 1, volume: 100, pop: false,
    tab: "events", display: "system", lastServer: 0, scale: 1, defaultLead: DEFAULT_LEAD, defaultClosedLead: DEFAULT_CLOSED_LEAD,
--  alertColor: "orange", alsoAtStart: false, folded: {}, foldedBossMinutes: DEFAULT_FOLDED_BOSS_MINUTES };
-+  alertColor: "orange", alsoAtStart: false, folded: {}, foldedBossMinutes: DEFAULT_FOLDED_BOSS_MINUTES,
-+  foldedLayout: "stacked" };
+-  alertColor: "orange", alsoAtStart: false, folded: {}, speak: false, voiceName: "", voiceType: "any", voiceRate: 1, foldedBossMinutes: DEFAULT_FOLDED_BOSS_MINUTES };
++  alertColor: "orange", alsoAtStart: false, folded: {}, speak: false, voiceName: "", voiceType: "any", voiceRate: 1, foldedBossMinutes: DEFAULT_FOLDED_BOSS_MINUTES, foldedLayout: "stacked" };
  // The world boss timers: { server, bosses, at, error }, from the feed and the
  // player's own map, the newest report of each boss kept.
  let feed = null;
-@@ -629,6 +652,10 @@ function renderStatic() {
+@@ -678,6 +700,10 @@ function renderStatic() {
    els.foldedBossLabel.textContent = foldedWords().foldedBosses;
    els.foldedBossSelect.replaceChildren(...FOLDED_BOSS_MINUTES.map((m) => option(m, m ? minutesText(m) : a.off)));
    els.foldedBossSelect.value = String(foldedMinutes());
@@ -143,7 +142,7 @@ index 44b502e..16d9e5f 100644
    els.soundLabel.textContent = a.sound;
    els.testAlert.textContent = words.testAlert;
    els.alertOptionsBtn.textContent = words.alertOptions;
-@@ -1027,6 +1054,10 @@ function renderFoldedBosses(now) {
+@@ -1077,6 +1103,10 @@ function renderFoldedBosses(now) {
    if (!document.body.classList.contains("compact") || !minutes) {
      els.foldedBoss.replaceChildren();
      els.foldedBossHead.hidden = true;
@@ -154,7 +153,7 @@ index 44b502e..16d9e5f 100644
      return;
    }
    const limit = minutes * 60_000;
-@@ -1040,7 +1071,7 @@ function renderFoldedBosses(now) {
+@@ -1090,7 +1120,7 @@ function renderFoldedBosses(now) {
      if (!next || next.start - now > limit) continue;
      const running = next.start <= now;
      items.push({
@@ -163,7 +162,7 @@ index 44b502e..16d9e5f 100644
        li: row({
          id: ev.id, name: eventName(ev), where: ev.where.map(text).join(", "), running,
          soon: next.start - now <= SOON_MS,
-@@ -1070,12 +1101,32 @@ function renderFoldedBosses(now) {
+@@ -1120,12 +1150,32 @@ function renderFoldedBosses(now) {
      const li = row({ id: `field:${b.id}`, name, where: text(b.where), countdown, at, up, soon: inWindow || next - now <= SOON_MS });
      if (up && t.hp != null && t.hpAt) li.style.setProperty("--hp", `${Math.max(0, Math.min(100, t.hp))}%`);
      li.classList.toggle("hasHp", up && t.hp != null && !!t.hpAt);
@@ -198,7 +197,7 @@ index 44b502e..16d9e5f 100644
  }
  
  function render() {
-@@ -1871,6 +1922,14 @@ els.foldedBossSelect.addEventListener("change", () => {
+@@ -1999,6 +2049,14 @@ els.foldedBossSelect.addEventListener("change", () => {
    savePrefs();
    render();
  });
@@ -214,7 +213,7 @@ index 44b502e..16d9e5f 100644
    prefs.region = els.regionSelect.value;
    savePrefs();
 diff --git a/plugins/event-timers/style.css b/plugins/event-timers/style.css
-index 1abd170..872f049 100644
+index bd425c5..41afcd7 100644
 --- a/plugins/event-timers/style.css
 +++ b/plugins/event-timers/style.css
 @@ -43,6 +43,65 @@ body.compact .eventList li.keepFolded {

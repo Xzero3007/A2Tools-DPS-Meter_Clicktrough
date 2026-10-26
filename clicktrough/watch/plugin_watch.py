@@ -10,8 +10,10 @@ seen so far. Writes the new known.json there and, when a plugin came or went,
 first run (no known.json) lists every plugin there is, so the watch shows it
 works.
 
-Prints publish=true|false and report=true|false for $GITHUB_OUTPUT: publish
-when known.json changed, report when there is an issue to open. The catalog
+Prints publish=true|false, report=true|false and build=true|false for
+$GITHUB_OUTPUT: publish when known.json changed, report when there is an
+issue to open, build when a plugin came to the original's repo (the release
+workflow then ships it). The catalog
 not answering is no change: its part of known.json stays as it was.
 
     --catalog-file <file>   read the catalog from a file (testing)
@@ -45,6 +47,10 @@ def read_repo(root):
             "author": str(m.get("author") or ""),
             "permissions": [str(p) for p in m.get("permissions") or []],
             "folder": manifest.parent.name,
+            # The author's markers: a test plugin (its own catalog, read by
+            # meters from 2.0.78), or one held back (not published).
+            "test": (manifest.parent / ".test").exists(),
+            "unpublished": (manifest.parent / ".unpublished").exists(),
         }
     return plugins
 
@@ -89,16 +95,22 @@ def describe(pid, repo, catalog):
         lines.append("- **Asks for:** " + ", ".join(f"`{x}`" for x in p["permissions"]))
     if r:
         lines.append(f"- **In the original's repo:** [plugins/{r['folder']}]({REPO_URL}/tree/main/plugins/{r['folder']})")
-    if catalog is None:
+    if r and r["test"]:
+        lines.append("- **A test plugin:** the author publishes it in a test catalog only meters from 2.0.78 read, not in the catalog")
+    elif r and r["unpublished"]:
+        lines.append("- **Held back by the author** (not published)")
+    elif catalog is None:
         lines.append("- **In the catalog:** unknown (the catalog didn't answer)")
     elif c:
-        lines.append(f"- **In the catalog:** yes, {c['version']}: Settings → Plugins can install it")
+        lines.append(f"- **In the catalog:** yes, {c['version']}")
     else:
         lines.append("- **In the catalog:** not yet (the author hasn't published it there)")
-    if r:
+    if r and r["unpublished"]:
+        lines.append("- **In this repo's build:** not shipped while the author holds it back.")
+    elif r:
         lines.append(
-            "- **In this repo's build:** the next Clicktrough release ships it as the build takes it; "
-            "installed from the catalog, the meter runs that copy, and its updates come with this repo's releases."
+            "- **In this repo's build:** the next Clicktrough release ships it (this watch starts that build now); "
+            "then Settings → Plugins → Available installs it, tagged Clicktrough, and its updates come with this repo's releases."
         )
     else:
         source = f" (source: {c['source']})" if c and c["source"] else ""
@@ -190,7 +202,9 @@ def main(argv):
         (out_dir / "title.txt").write_text(title + "\n", encoding="utf-8")
         (out_dir / "issue.md").write_text("\n".join(body).strip() + "\n", encoding="utf-8")
 
+    new_in_repo = any(x in repo for x in came) and not first
     print(f"publish={'true' if changed else 'false'}")
+    print(f"build={'true' if new_in_repo else 'false'}")
     print(f"report={'true' if report else 'false'}")
     return 0
 

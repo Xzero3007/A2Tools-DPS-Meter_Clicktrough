@@ -18,8 +18,10 @@ name: Clicktrough release
 # installed meter stays as it is, and an issue opens.
 on:
   schedule:
-    # Every two hours, check whether the original has a new version.
-    - cron: "23 */2 * * *"
+    # Hourly, check whether the original has a new version or new plugins
+    # (GitHub runs scheduled workflows late and drops many: every 4 to 5
+    # hours here at two-hourly). Nothing new: done in seconds.
+    - cron: "23 * * * *"
   push:
     branches: [main]
     paths:
@@ -178,6 +180,8 @@ jobs:
           for d in plugins-up/plugins/*/; do
             id=$(basename "$d")
             [ -f "$d/manifest.json" ] || continue
+            # Held back by the author: not shipped either.
+            [ -e "$d/.unpublished" ] && continue
             [ -e "src/src/data/ct-plugins/$id" ] && continue
             [ -e "fork/clicktrough/own-plugins/$id" ] && continue
             cp -r "$d" "src/src/data/ct-plugins/$id"

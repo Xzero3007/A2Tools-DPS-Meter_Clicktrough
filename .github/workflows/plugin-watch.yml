@@ -1,4 +1,4 @@
-# Clicktrough: a watch on the original's plugins. Every three hours it reads
+# Clicktrough: a watch on the original's plugins. Every hour it reads
 # taengu/A2Tools-Plugins and the meter's plugin catalog and opens an issue
 # here (label plugin-watch) when a plugin came that wasn't there before, one
 # of the repo reached the catalog, or one is gone. What it has seen is kept on
@@ -8,7 +8,9 @@ name: Plugin watch
 
 on:
   schedule:
-    - cron: "37 */3 * * *"
+    # Hourly: GitHub runs scheduled workflows late and drops many (every 4 to
+    # 5 hours here), so more chances.
+    - cron: "37 * * * *"
   push:
     branches: [main]
     paths:
@@ -19,6 +21,7 @@ on:
 permissions:
   contents: write
   issues: write
+  actions: write
 
 concurrency:
   group: plugin-watch
@@ -54,6 +57,9 @@ jobs:
           gh label create plugin-watch -R "$GITHUB_REPOSITORY" --color 8250df \
             --description "New plugins in the original" 2>/dev/null || true
           gh issue create -R "$GITHUB_REPOSITORY" --title "$(cat out/title.txt)" --body-file out/issue.md --label plugin-watch
+      - name: Build the new plugins into a release now
+        if: steps.watch.outputs.build == 'true'
+        run: gh workflow run clicktrough-release.yml -R "$GITHUB_REPOSITORY" --ref main
       - name: Keep what was seen
         if: steps.watch.outputs.publish == 'true'
         run: |

@@ -1,4 +1,4 @@
-From 07e051b09bf6f78c0204a045e61fc4b35c400795 Mon Sep 17 00:00:00 2001
+From 299925ee39a30b1558b172b43ce4f254b6958c62 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Sat, 24 Oct 2026 18:16:14 +0000
 Subject: [PATCH] Event Timers: a world boss in its window is soon, not now
@@ -16,10 +16,10 @@ Claude-Session: https://claude.ai/code/session_01RBQati3x8VviBbpY9juEWf
  1 file changed, 4 insertions(+), 2 deletions(-)
 
 diff --git a/plugins/event-timers/plugin.js b/plugins/event-timers/plugin.js
-index 9cbf4b3..14547de 100644
+index 895597a..221a491 100644
 --- a/plugins/event-timers/plugin.js
 +++ b/plugins/event-timers/plugin.js
-@@ -1144,10 +1144,12 @@ function renderFoldedBosses(now) {
+@@ -1193,10 +1193,12 @@ function renderFoldedBosses(now) {
      const li = row({ id: `field:${b.id}`, name, where: text(b.where), countdown, at, up, soon: inWindow || next - now <= SOON_MS });
      if (up && t.hp != null && t.hpAt) li.style.setProperty("--hp", `${Math.max(0, Math.min(100, t.hp))}%`);
      li.classList.toggle("hasHp", up && t.hp != null && !!t.hpAt);

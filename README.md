@@ -68,7 +68,11 @@ package.
   farm), pet mobs near you with how far and which way, and a Black Cloud
   Merchant shopping list (data from
   [PetTracker](https://github.com/0Fox2Give/PetTracker)); the Merchant tab
-  optionally in columns. Pet Soul Tracker itself can then be turned off.
+  optionally in columns. Pet Soul Tracker itself can then be removed.
+- **Every plugin of the original, from this repo**: Settings → Plugins →
+  Available installs any of them as this repo's build took them (tagged
+  Clicktrough), test plugins too, such as Enhanced Boss Telegraph; a watch
+  opens an issue when the original has a new plugin and builds it in.
 - **No stuck tooltip**: the box that opens when you hover a row closes
   reliably on Linux (the original's fix, here before its next version).
 - **Updates come from this repo**, so an official update doesn't replace the
