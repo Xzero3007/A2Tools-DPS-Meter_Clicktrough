@@ -1,0 +1,66 @@
+# Clicktrough: a watch on the original's plugins. Every three hours it reads
+# taengu/A2Tools-Plugins and the meter's plugin catalog and opens an issue
+# here (label plugin-watch) when a plugin came that wasn't there before, one
+# of the repo reached the catalog, or one is gone. What it has seen is kept on
+# the branch plugin-watch (known.json, one commit, replaced each time).
+# See clicktrough/watch/plugin_watch.py.
+name: Plugin watch
+
+on:
+  schedule:
+    - cron: "37 */3 * * *"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/plugin-watch.yml"
+      - "clicktrough/watch/plugin_watch.py"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: plugin-watch
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PLUGINS: https://github.com/taengu/A2Tools-Plugins.git
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: src
+          sparse-checkout: clicktrough/watch
+      - name: The original's plugins and what was seen so far
+        run: |
+          set -euo pipefail
+          git clone -q --depth 1 "$PLUGINS" plugins-up
+          git clone -q --depth 1 --branch plugin-watch \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" state 2>/dev/null \
+            || mkdir -p state
+          rm -rf state/.git
+      - name: Compare
+        id: watch
+        run: python3 -I src/clicktrough/watch/plugin_watch.py plugins-up state out >> "$GITHUB_OUTPUT"
+      - name: Open an issue
+        if: steps.watch.outputs.report == 'true'
+        run: |
+          set -euo pipefail
+          gh label create plugin-watch -R "$GITHUB_REPOSITORY" --color 8250df \
+            --description "New plugins in the original" 2>/dev/null || true
+          gh issue create -R "$GITHUB_REPOSITORY" --title "$(cat out/title.txt)" --body-file out/issue.md --label plugin-watch
+      - name: Keep what was seen
+        if: steps.watch.outputs.publish == 'true'
+        run: |
+          set -euo pipefail
+          cd state
+          git init -q -b plugin-watch
+          git add -A
+          git -c user.name="github-actions[bot]" -c user.email="41898099+github-actions[bot]@users.noreply.github.com" \
+            commit -q -m "Plugin watch $(date -u +%Y-%m-%dT%H:%MZ)"
+          git push -q -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" plugin-watch

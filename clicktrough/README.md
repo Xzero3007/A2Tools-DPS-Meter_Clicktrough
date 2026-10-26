@@ -89,7 +89,15 @@ It asks for the password as usual.
   places), **nothing** is published: your meter stays on the last working
   version, and an issue opens. Then the patch gets adapted; a new state in
   `clicktrough/` builds right away.
-* Plugins from the official catalogue keep updating from there.
+* Plugin updates come only with these releases (patch 0020): the build ships
+  the original's plugins, and a change to any of them makes a new release.
+* Every three hours the [Plugin watch](../.github/workflows/plugin-watch.yml)
+  workflow reads the original's plugins ([taengu/A2Tools-Plugins](https://github.com/taengu/A2Tools-Plugins)
+  and the meter's catalog) and opens an issue (label `plugin-watch`) when a
+  new plugin comes, one of the repo reaches the catalog, or one is gone: name,
+  version, what it does and asks for, and whether Settings can install it.
+  What it has seen stays on the branch `plugin-watch`
+  (`clicktrough/watch/plugin_watch.py`).
 
 Build by hand: Actions → Clicktrough release → Run workflow (optionally with a
 version, e.g. `v2.0.77`).
