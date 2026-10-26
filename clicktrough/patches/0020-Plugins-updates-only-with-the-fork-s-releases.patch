@@ -1,0 +1,102 @@
+From cac0c00d5555c948ebc303198a4e651f39f68929 Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Mon, 26 Oct 2026 00:05:23 +0000
+Subject: [PATCH 20/20] Plugins: updates only with the fork's releases
+
+The catalog offered the original's newer plugin versions (the green
+button, Settings' Update): versions the fork has not gone through. Now it
+offers none; the fork's build ships the original's other plugins as it
+took them (data/ct-plugins, listed in installed-only.txt), and each runs
+from there only where it is installed, in place of the installed copy, as
+a reviewed plugin. A new version comes with the next release of the fork.
+Installing a plugin from the catalog still works (and runs the fork's copy
+where the build has one).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01RBQati3x8VviBbpY9juEWf
+---
+ src-tauri/src/plugins/mod.rs | 35 ++++++++++++++++++++++++++++++-----
+ 1 file changed, 30 insertions(+), 5 deletions(-)
+
+diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
+index 2ea7669..640b727 100644
+--- a/src-tauri/src/plugins/mod.rs
++++ b/src-tauri/src/plugins/mod.rs
+@@ -617,10 +617,18 @@ impl PluginHost {
+         // Clicktrough fork's patched copies of reviewed plugins), with or
+         // without developer mode: they win over the installed copy, as a
+         // developer folder does, and a developer folder over them.
+-        let bundled = state
+-            .i18n_data_dir
++        let bundled_root = state.i18n_data_dir.as_ref().map(|data| data.join("ct-plugins"));
++        // The original's other plugins, as the fork's build took them
++        // (`installed-only.txt`, an id a line): each runs from here only
++        // where it is installed, in place of the installed copy, so its
++        // updates come with the fork's releases and not from the catalog.
++        let installed_only: Vec<String> = bundled_root
+             .as_ref()
+-            .map(|data| data.join("ct-plugins"))
++            .and_then(|root| std::fs::read_to_string(root.join("installed-only.txt")).ok())
++            .map(|text| text.lines().map(str::trim).filter(|l| !l.is_empty()).map(String::from).collect())
++            .unwrap_or_default();
++        let installed_root = plugins_dir(app).ok();
++        let bundled = bundled_root
+             .and_then(|dir| std::fs::read_dir(dir).ok())
+             .into_iter()
+             .flatten()
+@@ -628,11 +636,18 @@ impl PluginHost {
+             .map(|entry| entry.path())
+             .filter(|path| path.is_dir() && path.file_name().is_some_and(|n| !n.to_string_lossy().starts_with('.')));
+         for dir in bundled {
++            let name = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
++            let only_installed = installed_only.iter().any(|id| id == &name);
++            if only_installed && !installed_root.as_ref().is_some_and(|root| root.join(&name).is_dir()) {
++                continue;
++            }
+             match load_folder(&dir) {
+                 Ok(l) if loaded.iter().any(|x: &Loaded| x.manifest.id == l.manifest.id) => {}
+                 Ok(l) => {
+                     tracing::info!("Plugins: {} {} runs from this build's own copy", l.manifest.id, l.manifest.version);
+-                    loaded.push(l);
++                    // One the player installed: a reviewed plugin, the
++                    // version this build brings.
++                    loaded.push(Loaded { reviewed: only_installed || l.reviewed, ..l });
+                 }
+                 Err(e) => tracing::warn!("Plugins: this build's {} does not load: {e}", dir.display()),
+             }
+@@ -648,7 +663,7 @@ impl PluginHost {
+         for dir in installed {
+             match load_folder(&dir) {
+                 Ok(l) if loaded.iter().any(|x: &Loaded| x.manifest.id == l.manifest.id) => {
+-                    tracing::info!("Plugins: {} runs from its developer folder, not the installed copy", l.manifest.id);
++                    tracing::info!("Plugins: {} runs from its developer folder or this build's copy, not the installed copy", l.manifest.id);
+                 }
+                 Ok(l) => loaded.push(Loaded { reviewed: true, ..l }),
+                 Err(e) => tracing::warn!("Plugins: installed {} does not load: {e}", dir.display()),
+@@ -1038,6 +1053,12 @@ fn refresh_windows(app: &tauri::AppHandle, host: &PluginHost) {
+ /// to install.
+ #[cfg(feature = "online")]
+ fn newer_entries(catalog: catalog::Catalog, host: &PluginHost) -> Vec<(PluginAvailable, catalog::Entry)> {
++    // Clicktrough: this build brings its plugins' updates in its own package
++    // (the fork's releases, made from the original's plugins as the fork
++    // took them), so the catalog offers none: no update comes past the fork.
++    if UPDATES_FROM_THIS_BUILD_ONLY {
++        return Vec::new();
++    }
+     let installed: Vec<PluginInfo> = host.list().into_iter().filter(|p| p.reviewed && p.error.is_none()).collect();
+     installed
+         .into_iter()
+@@ -1057,6 +1078,10 @@ fn newer_entries(catalog: catalog::Catalog, host: &PluginHost) -> Vec<(PluginAva
+         .collect()
+ }
+ 
++/// Clicktrough: plugin updates only with the fork's releases (`newer_entries`).
++#[cfg(feature = "online")]
++const UPDATES_FROM_THIS_BUILD_ONLY: bool = true;
++
+ /// The catalog's newer versions of installed plugins.
+ #[cfg(feature = "online")]
+ async fn available_updates(app: &tauri::AppHandle, host: &PluginHost) -> Result<Vec<PluginAvailable>, String> {
+-- 
+2.43.0
+

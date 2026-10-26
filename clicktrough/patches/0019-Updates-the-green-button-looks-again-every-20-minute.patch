@@ -1,0 +1,145 @@
+From b3af6c380036cec7a5f6b4923731b9676036bd30 Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Mon, 26 Oct 2026 00:05:23 +0000
+Subject: [PATCH 19/20] Updates: the green button looks again every 20 minutes
+
+The meter looked for an update at start and then every 6 hours, and a
+check that failed at start (the bridge not up yet, no network) waited the
+same 6 hours. The fork releases a new build several times a day and the
+meter stays open for hours, so the green button seldom showed: updates
+came through Settings. Now it looks every 20 minutes, and a minute after
+a failed check.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01RBQati3x8VviBbpY9juEWf
+---
+ public/src/js/checkRelease.js | 13 ++++--
+ tests/update-check.test.mjs   | 79 +++++++++++++++++++++++++++++++++++
+ 2 files changed, 89 insertions(+), 3 deletions(-)
+ create mode 100644 tests/update-check.test.mjs
+
+diff --git a/public/src/js/checkRelease.js b/public/src/js/checkRelease.js
+index 4c069ea..36feb5f 100644
+--- a/public/src/js/checkRelease.js
++++ b/public/src/js/checkRelease.js
+@@ -108,22 +108,29 @@
+ 
+   // At start nothing pops up: an update this install can take shows the
+   // green button in the meter's title (`onAvailable`), which asks. Then
+-  // again every 6 hours, for a meter left running for days.
+-  const RECHECK_MS = 6 * 60 * 60 * 1000;
++  // again every 20 minutes: the fork releases a new build several times a
++  // day, and the meter stays open for hours. A check that failed (the
++  // meter's bridge not up yet at start, no network) is tried again after a
++  // minute rather than at the next round.
++  const RECHECK_MS = 20 * 60 * 1000;
++  const RETRY_FAILED_MS = 60 * 1000;
+   const start = (onAvailable) => {
+     const run = async () => {
++      let next = RECHECK_MS;
+       try {
+         const found = await check({ ask: false });
+         if (found.state === "offer") onAvailable?.(found.latest);
++        if (found.state === "failed") next = RETRY_FAILED_MS;
+       } catch (e) {
+         console.error("[A2Tools] Update check error:", e);
++        next = RETRY_FAILED_MS;
+       }
++      setTimeout(run, next);
+     };
+     setTimeout(() => {
+       if (once) return;
+       once = true;
+       run();
+-      setInterval(run, RECHECK_MS);
+     }, START_DELAY);
+   };
+ 
+diff --git a/tests/update-check.test.mjs b/tests/update-check.test.mjs
+new file mode 100644
+index 0000000..9f9e459
+--- /dev/null
++++ b/tests/update-check.test.mjs
+@@ -0,0 +1,79 @@
++// Clicktrough: the green button's update check (checkRelease.js) looks again
++// every 20 minutes, and a minute after a check that failed, so a build the
++// fork releases while the meter runs shows without a restart.
++import assert from "node:assert/strict";
++import { readFileSync } from "node:fs";
++import test from "node:test";
++import vm from "node:vm";
++
++const source = readFileSync(new URL("../public/src/js/checkRelease.js", import.meta.url), "utf8");
++// The build's own revision (the fork's release workflow sets it): the ones
++// offered are newer.
++const OWN = Number(/const CT_REVISION = (\d+);/.exec(source)[1]);
++const tick = () => new Promise((resolve) => setImmediate(resolve));
++
++function meter({ manifest }) {
++  const timers = [];
++  let fetches = 0;
++  const window = {
++    dpsData: { getVersion: () => "2.0.77" },
++    javaBridge: { openBrowser() {} },
++    __TAURI__: {
++      core: {
++        invoke: async (cmd) => {
++          if (cmd === "fetch_url") {
++            fetches++;
++            const m = manifest();
++            if (!m) throw new Error("offline");
++            return JSON.stringify(m);
++          }
++          if (cmd === "show_update_window") return true;
++          throw new Error(cmd);
++        },
++      },
++    },
++  };
++  const context = {
++    window,
++    console: { log() {}, error() {} },
++    setTimeout: (fn, ms) => { timers.push({ fn, ms }); return timers.length; },
++    setInterval: () => { throw new Error("no setInterval: each round sets the next"); },
++    JSON,
++    Number,
++    String,
++    Promise,
++  };
++  vm.runInNewContext(source, context);
++  return {
++    checker: window.ReleaseChecker,
++    timers,
++    get fetches() { return fetches; },
++    // Run the oldest waiting timer and let its check finish.
++    async next() {
++      const t = timers.shift();
++      await t.fn();
++      for (let i = 0; i < 5; i++) await tick();
++      return t.ms;
++    },
++  };
++}
++
++test("a failed check is tried again after a minute; then every 20 minutes", async () => {
++  let online = false;
++  let revision = OWN + 1;
++  const m = meter({ manifest: () => (online ? { version: "2.0.77", archUrl: "https://x/a.pkg", revision } : null) });
++  const seen = [];
++  m.checker.start((latest) => seen.push(latest));
++  assert.equal(await m.next(), 800, "the first check, shortly after start");
++  assert.equal(m.fetches, 1);
++  assert.deepEqual(seen, []);
++  assert.equal(m.timers[0].ms, 60 * 1000, "failed: again in a minute");
++  online = true;
++  await m.next();
++  assert.deepEqual(seen, [`v2.0.77 (Clicktrough ${OWN + 1})`], "the green button shows");
++  assert.equal(m.timers[0].ms, 20 * 60 * 1000, "found: the next look in 20 minutes");
++  revision = OWN + 2;
++  await m.next();
++  assert.deepEqual(seen.at(-1), `v2.0.77 (Clicktrough ${OWN + 2})`, "a newer build while the meter runs");
++  assert.equal(m.timers.length, 1, "one round waiting at a time");
++});
+-- 
+2.43.0
+

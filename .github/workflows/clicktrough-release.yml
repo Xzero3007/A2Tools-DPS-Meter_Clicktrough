@@ -70,17 +70,13 @@ jobs:
             tag=$(git ls-remote --tags --refs "$UPSTREAM" 'v*' | sed 's#.*refs/tags/##' \
               | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n1)
           fi
-          # The changed plugins: their state in the original (tree hash per folder).
-          plugins_commit=""
-          plugins_state=""
-          if compgen -G "clicktrough/plugins/*/*.patch" >/dev/null; then
-            git clone -q --depth 1 --filter=blob:none --no-checkout "$PLUGINS" plugins-up
-            plugins_commit=$(git -C plugins-up rev-parse HEAD)
-            for d in clicktrough/plugins/*/; do
-              id=$(basename "$d")
-              plugins_state="$plugins_state $id:$(git -C plugins-up rev-parse "HEAD:plugins/$id")"
-            done
-          fi
+          # The original's plugins: the changed ones and the others the
+          # build ships (each runs where it is installed, patch 0020); their
+          # state there (tree hash per folder), so a new version of any of
+          # them makes a new release, the only way plugin updates come.
+          git clone -q --depth 1 --filter=blob:none --no-checkout "$PLUGINS" plugins-up
+          plugins_commit=$(git -C plugins-up rev-parse HEAD)
+          plugins_state=$(git -C plugins-up ls-tree HEAD plugins/ | awk '{print $4 ":" $3}' | tr '\n' ' ')
           echo "plugins_commit=$plugins_commit" >> "$GITHUB_OUTPUT"
           # One release per version of the original, state of the patches,
           # of the changed plugins and of the own plugins.
@@ -155,23 +151,38 @@ jobs:
           # resets pkgrel to 1 itself when pkgver() gives a new version.)
           sed -i "s/printf '%s.r%s.g%s'/printf '%s.r%s.ct${REVISION}.g%s'/" packaging/arch/PKGBUILD
           grep -q "ct${REVISION}.g%s" packaging/arch/PKGBUILD
-      - name: Patch and ship the changed plugins
+      - name: Patch and ship the original's plugins
         if: needs.plan.outputs.plugins_commit != ''
         run: |
           exec > >(tee -a "$GITHUB_WORKSPACE/ct-build.log") 2>&1
-          echo "== Patch and ship the changed plugins"
+          echo "== Patch and ship the original's plugins"
           set -euo pipefail
           git clone -q --filter=blob:none "$PLUGINS" plugins-up
           git -C plugins-up checkout -q --detach "$PLUGINS_COMMIT"
+          mkdir -p src/src/data/ct-plugins
           for d in fork/clicktrough/plugins/*/; do
+            [ -d "$d" ] || continue
             id=$(basename "$d")
             # -3: a change upstream next to a patched line merges instead of
             # failing the build (only a real conflict still stops it).
             git -C plugins-up -c user.name="Clicktrough" -c user.email="clicktrough@users.noreply.github.com" \
               am -3 "$GITHUB_WORKSPACE/fork/clicktrough/plugins/$id/"*.patch
-            mkdir -p src/src/data/ct-plugins
             cp -r "plugins-up/plugins/$id" "src/src/data/ct-plugins/$id"
             echo "$id $(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "plugins-up/plugins/$id/manifest.json" | head -n1)"
+          done
+          # The original's other plugins as they are there: each runs from
+          # this build only where it is installed (installed-only.txt, patch
+          # 0020), so their updates come with this repo's releases and never
+          # past them. Not one with the id of an own plugin.
+          : > src/src/data/ct-plugins/installed-only.txt
+          for d in plugins-up/plugins/*/; do
+            id=$(basename "$d")
+            [ -f "$d/manifest.json" ] || continue
+            [ -e "src/src/data/ct-plugins/$id" ] && continue
+            [ -e "fork/clicktrough/own-plugins/$id" ] && continue
+            cp -r "$d" "src/src/data/ct-plugins/$id"
+            echo "$id" >> src/src/data/ct-plugins/installed-only.txt
+            echo "$id $(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$d/manifest.json" | head -n1) (where installed)"
           done
       - name: Ship the own plugins
         run: |

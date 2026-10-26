@@ -66,23 +66,32 @@ for p in "$here"/backports/*.patch; do
 done
 git "${who[@]}" am -q "${patches[@]}" || fail "A patch"
 
-# Plugins: the changed ones from A2Tools-Plugins and this repo's own.
-plugin_dirs=("$here"/plugins/*/)
-if [ ${#plugin_dirs[@]} -gt 0 ]; then
-  if [ ! -d "$plugins_src/.git" ]; then
-    git clone https://github.com/taengu/A2Tools-Plugins.git "$plugins_src"
-  fi
-  git -C "$plugins_src" am --abort >/dev/null 2>&1 || true
-  git -C "$plugins_src" fetch -q origin
-  git -C "$plugins_src" reset -q --hard
-  git -C "$plugins_src" checkout -q --detach origin/HEAD
-  for d in "${plugin_dirs[@]}"; do
-    id=$(basename "$d")
-    git -C "$plugins_src" "${who[@]}" am -3 -q "$d"*.patch || fail "The plugin patch for $id"
-    mkdir -p src/data/ct-plugins
-    cp -r "$plugins_src/plugins/$id" "src/data/ct-plugins/$id"
-  done
+# Plugins: the changed ones from A2Tools-Plugins, the others from there
+# (each runs where it is installed: patch 0020, installed-only.txt) and this
+# repo's own.
+if [ ! -d "$plugins_src/.git" ]; then
+  git clone https://github.com/taengu/A2Tools-Plugins.git "$plugins_src"
 fi
+git -C "$plugins_src" am --abort >/dev/null 2>&1 || true
+git -C "$plugins_src" fetch -q origin
+git -C "$plugins_src" reset -q --hard
+git -C "$plugins_src" checkout -q --detach origin/HEAD
+mkdir -p src/data/ct-plugins
+for d in "$here"/plugins/*/; do
+  [ -d "$d" ] || continue
+  id=$(basename "$d")
+  git -C "$plugins_src" "${who[@]}" am -3 -q "$d"*.patch || fail "The plugin patch for $id"
+  cp -r "$plugins_src/plugins/$id" "src/data/ct-plugins/$id"
+done
+: > src/data/ct-plugins/installed-only.txt
+for d in "$plugins_src"/plugins/*/; do
+  id=$(basename "$d")
+  [ -f "$d/manifest.json" ] || continue
+  [ -e "src/data/ct-plugins/$id" ] && continue
+  [ -e "$here/own-plugins/$id" ] && continue
+  cp -r "$d" "src/data/ct-plugins/$id"
+  echo "$id" >> src/data/ct-plugins/installed-only.txt
+done
 for d in "$here"/own-plugins/*/; do
   [ -f "$d/manifest.json" ] || continue
   id=$(basename "$d")
