@@ -233,11 +233,12 @@
     }
 
     // A pet's spawn point or a pet monster there now ("live"), by how it
-    // stands: "fav" (a favourite: a gold star), "farm" (being farmed: a red
-    // target, thick white ring and dot), "need" (not at level 3 yet: red, a white ring),
+    // stands, filled in its genus colour (red when not known): "fav" (a
+    // favourite: a gold star), "farm" (being farmed: a target, thick white
+    // ring and dot), "need" (not at level 3 yet: a white ring),
     // "max" (level 3: small and grey), "plain" (levels not known: small and
     // white). Each with a dark edge, so it shows on sand as on grass.
-    function pet(sx, sy, r, look, live) {
+    function pet(sx, sy, r, look, live, color = PET_RED) {
       if (look === "fav") {
         const R = r * 1.8;
         if (live) circle(sx, sy, R + 3, null, "rgba(255,255,255,0.9)", 2);
@@ -254,7 +255,7 @@
         ctx.strokeStyle = "rgba(0,0,0,0.8)";
         ctx.fill();
         ctx.stroke();
-        circle(sx, sy, R * 0.3, PET_RED, null);
+        circle(sx, sy, R * 0.3, color || PET_RED, null);
         return;
       }
       if (look === "max") {
@@ -269,7 +270,7 @@
       const farm = look === "farm";
       if (live) circle(sx, sy, r + (farm ? 6.5 : 5), null, "rgba(255,255,255,0.75)", 1.5);
       circle(sx, sy, r + (farm ? 2.6 : 1.9), null, "rgba(0,0,0,0.6)", 1.2);
-      circle(sx, sy, r + (farm ? 1.2 : 0.8), PET_RED, "#ffffff", farm ? 2.6 : 1.8);
+      circle(sx, sy, r + (farm ? 1.2 : 0.8), color || PET_RED, "#ffffff", farm ? 2.6 : 1.8);
       // Being farmed: a white dot in the middle too (a target).
       if (farm) circle(sx, sy, Math.max(1.5, r * 0.4), "#ffffff", null);
     }
@@ -344,10 +345,10 @@
           break;
         }
         case "petSpawn":
-          pet(sx, sy, r, m.look || "need", false);
+          pet(sx, sy, r, m.look || "need", false, m.color);
           break;
         case "petLive":
-          pet(sx, sy, r, m.look || "need", true);
+          pet(sx, sy, r, m.look || "need", true, m.color);
           break;
         case "monster":
           circle(sx, sy, r, "rgba(220,220,220,0.75)", "rgba(0,0,0,0.5)", 1);

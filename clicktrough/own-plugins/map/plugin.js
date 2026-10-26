@@ -12,7 +12,7 @@
   let settings = {
     layers: { pets: true, monsters: false, gather: false, cubes: true, monoliths: false, kibelisks: false, places: false },
     gatherKinds: {},
-    petsMode: "tracked",
+    petsMode: "tracked", // "tracked" (Pet Finder's favourites and farmed), "needed" (and every pet not at level 3), "all"
     nextFor: "all", // the next pet: "all" (pinned, then farmed, then needed), "chosen" (pinned and farmed), "off"
     follow: true,
     zoom: null, // screen px per map px while following
@@ -29,8 +29,10 @@
   let world = null;
   let shared = {};
   let tracked = new Map();
-  // The pets not at level 3 yet (Pet Finder's), or null.
+  // The pets not at level 3 yet (Pet Finder's), or null; and the souls each
+  // still needs (id -> count), or null.
   let needed = null;
+  let souls = null;
   let heading = 0;
   let headingFrom = null;
   let compact = false;
@@ -169,6 +171,8 @@
     const region = me && inZone ? M.regionAt(inZone, me.x, me.y) : null;
     renderHeader(key, onThisMap, where, region);
     renderStatus(built, onThisMap);
+    renderNear(key, onThisMap);
+    shareNearest(key, onThisMap);
     renderFocus(key);
     // The overlay follows you on your own map, whichever one this window shows.
     const own = inZone || key;
@@ -185,7 +189,11 @@
     else if (!where) note = `No map for ${zoneName || `zone ${zone}`}`;
     else if (!onThisMap) note = `You are in ${titleOf(where.key)}${where.guess ? "?" : ""}`;
     else {
-      note = world.me.exact ? "Your position" : "Your position (about, from what's around you)";
+      // Not exact: how long ago it last was (an action, an effect, a
+      // teleport or a loading screen places you exactly).
+      const fixAge = world.fix && Number.isFinite(world.fix.at) ? Math.max(0, Math.round((Date.now() - world.fix.at) / 1000)) : null;
+      const since = fixAge == null ? "" : fixAge < 90 ? `; exact ${fixAge} s ago` : `; exact ${Math.round(fixAge / 60)} min ago`;
+      note = world.me.exact ? "Your position" : `Your position (about, from what's around you${since})`;
       if (region) note += ` · ${region}`;
       if (where.guess) note += " · map as last time (the zone comes with your next teleport)";
     }
@@ -214,6 +222,53 @@
     const mine = learnedCount(currentKey());
     if (mine) parts.push(`${mine} spot${mine === 1 ? "" : "s"} your meter saw`);
     $(".counts").textContent = parts.join(" · ");
+  }
+
+  // ---------- the nearest monsters with souls you still need ----------
+  // Up to four kinds, the nearest first, as the Pet Soul Tracker's map lists
+  // them: in range, else the nearest spawn points of the map. A click shows
+  // the kind's spawn points (the focus).
+  let nearShown = "";
+  function renderNear(key, onThisMap) {
+    const list = $(".nearKinds");
+    const kinds = settings.layers.pets && onThisMap ? M.nearestKinds({ key, world, tracked, needed, souls }) : [];
+    list.hidden = !kinds.length;
+    // Drawn again only when it changed (metres rounded): a row replaced
+    // under the pointer loses its click.
+    const shown = JSON.stringify(kinds.map((k) => [k.npc, k.count, Math.round(k.metres), M.arrow(k.bearing), k.souls, k.live]));
+    if (shown === nearShown) return;
+    nearShown = shown;
+    list.replaceChildren(...kinds.map((k) => {
+      const li = document.createElement("li");
+      li.className = k.live ? "live" : "spawn";
+      const dot = Object.assign(document.createElement("span"), { className: "dot" });
+      dot.style.background = k.genus?.color || K.PET_RED;
+      const span = (cls, text) => Object.assign(document.createElement("span"), { className: cls, textContent: text });
+      li.append(
+        dot,
+        span("mob", k.name),
+        span("lv", k.level != null ? `Lv ${k.level}` : ""),
+        span("n", k.live ? `×${k.count}` : ""),
+        span("pet", `${k.petName}${k.souls != null ? ` (${k.souls} soul${k.souls === 1 ? "" : "s"})` : ""}`),
+        span("far", `${M.arrow(k.bearing)} ${Math.round(k.metres)} m${k.live ? "" : " (spawn)"}`),
+      );
+      li.title = `${k.name}${k.level != null ? `, level ${k.level}` : ""}: souls for ${k.petName}${k.genus ? ` (${k.genus.name})` : ""}`
+        + `${k.souls != null ? `, ${k.souls} still needed to level 3` : ""}. ${k.live ? `${k.count} in range` : "None in range: the nearest spawn point"}. Click: its spawn points.`;
+      li.addEventListener("click", () => setFocus({ type: "npc", ids: [k.npc], label: k.name }, { map: key }));
+      return li;
+    }));
+  }
+
+  // For Pet Finder's "Nearest": each pet's nearest spawn point on the map
+  // you're on (a2.share), again once you've moved 40 m or changed map.
+  let nearestShared = null;
+  function shareNearest(key, onThisMap) {
+    if (typeof a2.share !== "function") return;
+    const me = world?.me;
+    if (!me || !onThisMap) return;
+    if (nearestShared && nearestShared.map === key && Math.hypot(me.x - nearestShared.x, me.y - nearestShared.y) < 4000) return;
+    nearestShared = { map: key, x: me.x, y: me.y };
+    a2.share({ source: "Map", map: key, at: Date.now(), nearest: M.nearestByPet(key, me) }).catch(() => {});
   }
 
   // ---------- the focus (the search, or a map link in another plugin) ----------
@@ -436,7 +491,7 @@
     for (const chip of document.querySelectorAll(".layers .chip[data-layer]")) {
       chip.setAttribute("aria-pressed", String(!!settings.layers[chip.dataset.layer]));
     }
-    $(".petsMode").setAttribute("aria-pressed", String(settings.petsMode === "all"));
+    $(".petsMode").value = ["tracked", "needed", "all"].includes(settings.petsMode) ? settings.petsMode : "tracked";
     $(".petsMode").hidden = !settings.layers.pets;
     $(".nextFor").value = ["all", "chosen", "off"].includes(settings.nextFor) ? settings.nextFor : "all";
     $(".nextFor").hidden = !settings.layers.pets;
@@ -488,10 +543,9 @@
       render();
     });
   }
-  $(".petsMode").addEventListener("click", () => {
-    settings.petsMode = settings.petsMode === "all" ? "tracked" : "all";
+  $(".petsMode").addEventListener("change", () => {
+    settings.petsMode = $(".petsMode").value;
     saveLater();
-    renderTools();
     render();
   });
   $(".markScale").addEventListener("change", () => {
@@ -569,6 +623,7 @@
     else shared[plugin] = value;
     tracked = M.mergeTracked(shared);
     needed = M.neededOf(shared);
+    souls = M.soulsOf(shared);
     // A map link clicked in that plugin: its pet or monster, here. Only a
     // fresh one: the value shared earlier comes again when the map starts.
     const f = value?.focus;

@@ -10,7 +10,10 @@ for all of them and for the Map plugin:
   regions), the pop-up while farming; a click on a pet shows where its souls
   drop (monsters with level, chance, zone, spawns and the nearest Kibelisk,
   and chests), and **Map** beside a monster shows its spawn points on the Map
-  plugin. ☆ makes a pet a favourite. A favourite that reaches level 3 stops
+  plugin. **Nearest** (beside the sort buttons, with the Map running) sorts
+  the pets by how far you are from the closest spawn on your map of a monster
+  that drops their souls, as the Pet Soul Tracker 0.5.0 does. ☆ makes a pet a
+  favourite. A favourite that reaches level 3 stops
   being one, so the Map no longer follows it; made one again at level 3, it
   stays.
 - **Nearby** – the pet mobs the game has shown you, grouped by pet, with your

@@ -183,7 +183,17 @@ const chestOnly = (id) => {
 };
 const genusName = (genus) => GENUS_NAMES[genus]?.[language] || GENUS_NAMES[genus]?.en || genus;
 
+// Clicktrough: metres from you to each pet's nearest spawn point on the map
+// you're on, as the Map plugin shares them (a2.on("shared"), again once
+// you've moved 40 m or changed map); pets with none there, far away.
+const FAR = 1e9;
+let mapNearest = null; // { nearest: { id: metres }, at }
+const NEAREST_FRESH_MS = 5 * 60 * 1000;
+const nearestKnown = () => !!mapNearest && Date.now() - mapNearest.at < NEAREST_FRESH_MS;
+const nearOf = (id) => (nearestKnown() ? mapNearest.nearest[id] ?? FAR : FAR);
 const SORTS = {
+  // Closest spawn on this map of a monster that drops its souls first.
+  near: (a, b) => nearOf(a.id) - nearOf(b.id),
   level: (a, b) => a.level - b.level,
   name: (a, b) => a.name.localeCompare(b.name, language),
   progress: (a, b) => a.progress - b.progress,
@@ -248,7 +258,10 @@ function render() {
     p.name.toLocaleLowerCase().includes(query) ||
     (PET_NAMES[p.id]?.en || "").toLowerCase().includes(query) ||
     p.id === query;
-  const sort = SORTS[prefs.sort] || SORTS.left;
+  // Nearest only while the Map tells where the souls are; else as before.
+  const byNear = prefs.sort === "near" && nearestKnown();
+  const sort = byNear ? SORTS.near : prefs.sort === "near" ? SORTS.left : SORTS[prefs.sort] || SORTS.left;
+  els.head.querySelector(".sortNear").hidden = !nearestKnown();
   const dir = prefs.desc ? -1 : 1;
   // Picking level 3 shows those pets even while they are otherwise hidden.
   // Clicktrough: a favourite at level 3 (made one again on purpose) stays listed.
@@ -318,11 +331,14 @@ let sharedPets = [];
 let focusRequest = null;
 function showOnMap(what) {
   focusRequest = { ...what, at: Date.now() };
-  a2.share({ source: "Pet Finder", pets: sharedPets, needed: sharedNeeded, focus: focusRequest }).catch(() => {});
+  a2.share({ source: "Pet Finder", pets: sharedPets, needed: sharedNeeded, souls: sharedSouls, focus: focusRequest }).catch(() => {});
 }
 // With them, once the pet list is read, every pet not at level 3 yet
-// (`needed`): the Map marks those apart from the ones done.
+// (`needed`): the Map marks those apart from the ones done; and the souls
+// each still needs to level 3 (`souls`, id -> count), which the Map lists
+// beside the monsters near you.
 let sharedNeeded = null;
+let sharedSouls = null;
 function shareWithMap(pinned, ids) {
   if (typeof a2.share !== "function") return;
   const pets = pinned.map((id) => ({ id: Number(id), name: petName(id), mark: "pinned" }));
@@ -332,12 +348,14 @@ function shareWithMap(pinned, ids) {
   const needed = state.syncedAt
     ? [...ids].filter((id) => PET_GENUS[id] !== "special" && levelOfPet(id) < MAX_LEVEL).map(Number).sort((a, b) => a - b)
     : null;
-  const k = JSON.stringify([pets, needed]);
+  const souls = needed ? Object.fromEntries(needed.map((id) => [id, petOf(String(id)).left])) : null;
+  const k = JSON.stringify([pets, needed, souls]);
   if (k === sharedKey) return;
   sharedKey = k;
   sharedPets = pets;
   sharedNeeded = needed;
-  a2.share({ source: "Pet Finder", pets, needed, focus: focusRequest }).catch(() => {});
+  sharedSouls = souls;
+  a2.share({ source: "Pet Finder", pets, needed, souls, focus: focusRequest }).catch(() => {});
 }
 
 // A pet's row in the chosen layout, its sources under it while open.
@@ -873,6 +891,13 @@ async function importPins() {
   savePrefs();
 }
 a2.on("shared", ({ plugin, value }) => {
+  // The Map's nearest spawn of each pet (for the Nearest sort).
+  if (plugin === "map" && value?.nearest && typeof value.nearest === "object") {
+    const before = nearestKnown();
+    mapNearest = { nearest: value.nearest, at: Date.now() };
+    if (prefs.sort === "near" || !before) render();
+    return;
+  }
   if (plugin !== "pet-souls" || prefs.pstImported || !Array.isArray(value?.pets)) return;
   const list = (prefs.pinned || []).map(String);
   for (const p of value.pets) if (p?.mark === "pinned" && !list.includes(String(p.id))) list.push(String(p.id));

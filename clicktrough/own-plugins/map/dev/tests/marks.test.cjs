@@ -94,6 +94,36 @@ test("pets by level: not at level 3 apart from level 3; a live one not at level 
   assert.match(live[0].label, /not at level 3 yet/);
 });
 
+test("pets not at level 3 in their genus colour; the needed mode shows them all; the nearest kinds", () => {
+  const npc2 = Object.keys(D.spawns.verteron).find((n) => D.npcPets[n] != null && String(D.npcPets[n]) !== pet && M.genusOf(D.npcPets[n]));
+  const pet2 = String(D.npcPets[npc2]);
+  const [ox, oy] = D.spawns.verteron[npc2];
+  const needed = M.neededOf({ "pet-finder": { pets: [], needed: [Number(pet2)] } });
+  const souls = M.soulsOf({ "pet-finder": { pets: [], needed: [Number(pet2)], souls: { [pet2]: 42 } } });
+  const tracked = M.mergeTracked({ pf: { pets: [{ id: 999999, mark: "pinned" }] } });
+  const world = { zone: 1010, me: { x: ox + 500, y: oy, exact: true }, npcs: [[7, Number(npc2), ox + 800, oy], [8, Number(npc2), ox + 3000, oy]] };
+  const spawnsOf = (mode) => M.build({ key: "verteron", world, tracked, needed, heading: 0, layers: { ...layers, monsters: false }, gatherKinds: {}, petsMode: mode })
+    .marks.filter((m) => m.kind === "petSpawn");
+  assert.equal(spawnsOf("tracked").length, 0, "favourites only: pet2 isn't one");
+  const shown = spawnsOf("needed");
+  assert.ok(shown.length > 0 && shown.every((m) => m.look === "need"), "not at level 3: shown");
+  assert.equal(shown[0].color, M.genusOf(pet2).color, "in its genus colour");
+  assert.match(shown[0].label, new RegExp(M.genusOf(pet2).name));
+  const kinds = M.nearestKinds({ key: "verteron", world, tracked, needed, souls });
+  assert.equal(kinds.length, 1);
+  assert.equal(kinds[0].npc, String(npc2));
+  assert.equal(kinds[0].count, 2);
+  assert.equal(Math.round(kinds[0].metres), 3);
+  assert.equal(kinds[0].souls, 42);
+  assert.equal(kinds[0].live, true);
+  assert.equal(kinds[0].level, D.npcLevels[npc2] ?? null);
+  // None in range: the nearest spawn points.
+  const quiet = M.nearestKinds({ key: "verteron", world: { ...world, npcs: [] }, tracked, needed, souls });
+  assert.ok(quiet.length >= 1 && quiet.every((k) => !k.live));
+  // For Pet Finder's Nearest: pet2's nearest spawn point, 5 m off.
+  assert.equal(M.nearestByPet("verteron", world.me)[pet2], 5);
+});
+
 test("the next pet: a pinned one before a farmed one before one only needed, live first within them", () => {
   // Another pet monster of Verteron, of another pet.
   const npc2 = Object.keys(D.spawns.verteron).find((n) => D.npcPets[n] != null && String(D.npcPets[n]) !== pet);

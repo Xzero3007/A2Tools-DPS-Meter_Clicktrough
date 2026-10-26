@@ -10,23 +10,35 @@ follows you over the game.
   of the monsters and players moving around you (10 to 15 m off). The map
   weighs that against your last exact place by how far each is likely off,
   and moves the arrow there smoothly, no faster than one runs, instead of
-  jumping; the ring around it is how far off it may be ("±12 m"). The header
-  names the region you are in (Safe Haven, Black Claw Village ...).
+  jumping; the ring around it is how far off it may be ("±12 m"). A Kibelisk
+  teleport places you exactly at once (patch 0023, the teleport record as
+  A2 Tools' Pet Soul Tracker 0.5.0 reads it). The header names the region you
+  are in (Safe Haven, Black Claw Village ...) and, while the place is only
+  about, how long ago it last was exact ("exact 21 s ago").
 - **Which map**: the game names your zone at login and at each teleport or
   zone change. Started after that, the meter hasn't heard it yet: the map
   then goes by what is around you (pet monsters, gathering spots, Hidden
   Cubes), else it is the map you were on last time, marked "map as last
   time" (and a "?" in the overlay) until your next teleport.
-- **Pets**: the spawn points of the pets Pet Finder follows: your
-  favourites as a **gold star** and the one you are farming as a **red
-  target** (white ring and dot). Pet Finder holds the Pet Soul Tracker's list
+- **Pets**: whose spawn points show (the selector beside the layers):
+  **favourites** (Pet Finder's ★ and the pet you are farming), **not at level
+  3** (those and every pet still needing souls, as the Pet Soul Tracker's map
+  shows them) or **all**. Your favourites show as a **gold star** and the one
+  you are farming as a **target** (white ring and dot); a pet not at level 3
+  yet is filled in its **genus colour** (Cogni violet, Fera orange, Natura
+  green, Varian cyan, as Pet Finder's list colours them). Pet Finder holds the Pet Soul Tracker's list
   now, so this is one list; while the Pet Soul Tracker still runs too, the map
   goes by Pet Finder's alone. With no pet followed, or with **All pets**,
   every pet's spawn points show: **red in a white ring** while the pet is not
   at level 3 yet, **small and grey** at level 3 (Pet Finder tells which once it
   has read your pet list; before, small and white). The pet monsters around
   you right now are the large marks with a white halo, and every one not at
-  level 3 yet shows, followed or not. A legend under the map explains them. At the bottom: the next pet to go for,
+  level 3 yet shows, followed or not. A legend under the map explains them.
+  **Under the map**, as the Pet Soul Tracker's map lists them: the nearest
+  kinds of monster that drop souls you still need, up to four: name, level,
+  how many are in range, which way and how far, the pet and the souls it still
+  needs to level 3; with none in range, the nearest spawn points. A click
+  shows that monster's spawn points. At the bottom: the next pet to go for,
   which way and how far (hover it for why it is followed), and how many pets
   this map has and how many are around you.
 - **Next**: a favourite first (however far), then the one you are farming;
@@ -97,7 +109,10 @@ Eltnen, Morheim and the Abyss's other layers have no map here yet.
 
 The meter's `events:world` (Clicktrough patch 0010) reads where you and the
 monsters, players and objects around you are from the game's own data, and the
-pets to show come from other plugins through `events:shared` (patch 0011). The
+pets to show come from other plugins through `events:shared` (patch 0011);
+the Map shares each pet's nearest spawn point on your map back (`share`),
+for Pet Finder's **Nearest** sort. The monsters' levels come from Pet
+Finder's copy of the Pet Soul Tracker's game data (GPL-3.0). The
 map pictures come through the meter (`a2.file`, patch 0012): WebKitGTK 2.54
 lets a plugin load no file of its own once its page has started. No network.
 
@@ -138,4 +153,6 @@ game material belong to their respective owners.
 Unofficial, not affiliated with NCSOFT or A2Tools. Third-party tools can put a
 game account at risk.
 
-The plugin's own code: GPL-3.0-or-later, see `LICENSE`.
+The plugin's own code: GPL-3.0-or-later, see `LICENSE`. The monsters' levels
+(`npcLevels` in `data.js`) come from A2 Tools' Pet Soul Tracker data
+(GPL-3.0, https://github.com/taengu/A2Tools-Plugins).

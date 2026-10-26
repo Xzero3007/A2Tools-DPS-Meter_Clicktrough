@@ -1,0 +1,110 @@
+From ba71c3f686619895dc6ba43446c69c6e608d24c0 Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Mon, 26 Oct 2026 08:08:12 +0000
+Subject: [PATCH] Plugins: a teleport places the player in the world at once
+
+The world plugins hear (events:world) placed the player exactly only with
+an action, an effect or a loading screen; after a Kibelisk teleport the Map
+went on guessing from what came into view. The teleport frame (23 36: a
+flag, 5 bytes, x, y, z, as A2 Tools' Pet Soul Tracker 0.5.0 reads it) is
+now an exact report too ("teleport"), and what was around the place left
+goes, but for what came with the teleport (the last 3 s).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01RBQati3x8VviBbpY9juEWf
+---
+ src-tauri/src/plugins/world.rs | 50 ++++++++++++++++++++++++++++++++++
+ 1 file changed, 50 insertions(+)
+
+diff --git a/src-tauri/src/plugins/world.rs b/src-tauri/src/plugins/world.rs
+index e4a4d2c..75fb83b 100644
+--- a/src-tauri/src/plugins/world.rs
++++ b/src-tauri/src/plugins/world.rs
+@@ -26,6 +26,10 @@
+ //! - `2A 38` / `2B 38` effect on / renewed: target varint | (on: 01) | type |
+ //!   instance varint | effect, duration, flag (u32 each) | 8 bytes | caster
+ //!   varint | ... | x, y, z f32 at the end: the caster's place
++//! - `23 36` teleport: a flag u8 | 5 bytes | x, y, z f32: where it put the
++//!   player (as A2 Tools' Pet Soul Tracker 0.5.0 reads it, GPL-3.0,
++//!   https://github.com/taengu/A2Tools-Plugins): exact at once after a
++//!   Kibelisk, not only with the next action
+ //!
+ //! World units are centimetres.
+ 
+@@ -41,6 +45,9 @@ const FIX_TRUST: Duration = Duration::from_secs(4);
+ const AROUND_FRESH: Duration = Duration::from_secs(5);
+ const AROUND_OLD: Duration = Duration::from_secs(20);
+ const AROUND_MIN: usize = 3;
++/// After a teleport, what came into range this shortly before it belongs to
++/// the new place (its spawns can come just before the frame).
++const TELEPORT_KEEP: Duration = Duration::from_secs(3);
+ /// Plugins hear the world at most this often, and at least this often while
+ /// there is something to tell.
+ pub const EMIT_EVERY: Duration = Duration::from_millis(250);
+@@ -123,6 +130,7 @@ impl World {
+     pub fn feed(&mut self, opcode: [u8; 2], body: &[u8], me: Option<i64>, now: Instant) {
+         match opcode {
+             [0x21, 0x36] => self.zone_frame(body, now),
++            [0x23, 0x36] => self.teleport(body, now),
+             [0x41, 0x36] => self.npc_spawn(body, now),
+             [0x42, 0x36] => self.npc_gone(body),
+             [0x34, 0x36] => self.env_spawn(body, now),
+@@ -156,6 +164,24 @@ impl World {
+         }
+     }
+ 
++    fn teleport(&mut self, b: &[u8], now: Instant) {
++        if b.len() < 18 {
++            return;
++        }
++        let Some((x, y)) = place_at(b, 6, 100.0, 500_000.0) else { return };
++        if !f32_at(b, 14).is_some_and(|z| z.is_finite() && z.abs() < 50_000.0) {
++            return;
++        }
++        self.fix = Some(Fix { x, y, at: now, how: "teleport" });
++        // What was around belongs to the place left, but for what came with
++        // the teleport.
++        let fresh = |at: Instant| now.saturating_duration_since(at) <= TELEPORT_KEEP;
++        self.around.retain(|_, (_, _, at)| fresh(*at));
++        self.npcs.retain(|_, n| fresh(n.at));
++        self.env.retain(|_, e| fresh(e.at));
++        self.changed = true;
++    }
++
+     fn npc_spawn(&mut self, b: &[u8], now: Instant) {
+         let mut p = 0;
+         let Some(entity) = varint(b, &mut p).filter(|e| *e > 0) else { return };
+@@ -466,6 +492,30 @@ mod tests {
+         assert!(other.fix.is_none());
+     }
+ 
++    #[test]
++    fn a_teleport_places_the_player_and_leaves_what_was_around() {
++        let mut w = World::default();
++        let t = Instant::now();
++        // A monster at the old place, then one that comes with the teleport.
++        w.feed([0x41, 0x36], &body(&[&[0x05, 0, 0, 0], &2_000_000u32.to_le_bytes(), &[0, 2], &f(10.0), &f(20.0)]), None, t);
++        let later = t + Duration::from_secs(30);
++        w.feed([0x41, 0x36], &body(&[&[0x06, 0, 0, 0], &2_000_001u32.to_le_bytes(), &[0, 2], &f(90_100.0), &f(-40_100.0)]), None, later);
++        let teleport = body(&[&[0, 1, 2, 3, 4, 5], &f(90_000.0), &f(-40_000.0), &f(1200.0)]);
++        w.feed([0x23, 0x36], &teleport, Some(7), later + Duration::from_millis(500));
++        let snap = w.snapshot(later + Duration::from_secs(1), 1_000);
++        assert_eq!(snap["me"]["x"], 90_000.0);
++        assert_eq!(snap["me"]["y"], -40_000.0);
++        assert_eq!(snap["me"]["exact"], true);
++        assert_eq!(snap["me"]["from"], "teleport");
++        let npcs = snap["npcs"].as_array().unwrap();
++        assert_eq!(npcs.len(), 1, "only the monster that came with it");
++        assert_eq!(npcs[0][1], 2_000_001);
++        // Nonsense in its place: no teleport.
++        let mut other = World::default();
++        other.feed([0x23, 0x36], &body(&[&[0; 6], &f(f32::NAN), &f(1.0), &f(1.0)]), Some(7), t);
++        assert!(other.snapshot(t, 0)["me"].is_null());
++    }
++
+     #[test]
+     fn a_zone_frame_names_the_zone_and_places_the_player() {
+         let mut w = World::default();
+-- 
+2.43.0
+

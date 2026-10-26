@@ -6,6 +6,15 @@
   const D = globalThis.MAP_DATA;
   const K = globalThis.MapKit;
   const RANK = { pinned: 3, farming: 2, needed: 1 };
+  // A pet's genus colour (the game's categories), as Pet Finder's list shows
+  // it: Cogni, Fera, Natura, Varian.
+  const GENUS = {
+    Intellect: { name: "Cogni", color: "#b99bff" },
+    Feral: { name: "Fera", color: "#ff9f66" },
+    Nature: { name: "Natura", color: "#74d99a" },
+    Trans: { name: "Varian", color: "#5cc9e6" },
+  };
+  const genusOf = (pet) => GENUS[D.pets[pet]?.category] || null;
   const cubes = new Set(D.cubes.map(String));
 
   // ---------- spots the meter has seen (learnt) ----------
@@ -193,6 +202,13 @@
     return Array.isArray(list) ? new Set(list.map(String)) : null;
   }
 
+  /** The souls each pet still needs to level 3, as Pet Finder shares them
+   *  (id -> count); null when not known. */
+  function soulsOf(shared) {
+    const souls = shared?.["pet-finder"]?.souls;
+    return souls && typeof souls === "object" ? souls : null;
+  }
+
   /** The pets the other plugins track, merged: id -> { mark, name }. Pet
    *  Finder's alone once it shares (it holds the Pet Soul Tracker's list
    *  now: one list of favourites, not two). */
@@ -208,6 +224,58 @@
         if (!prev || RANK[mark] > RANK[prev.mark]) out.set(id, { mark, name: p.name || prev?.name || null });
         else if (!prev.name && p.name) prev.name = p.name;
       }
+    }
+    return out;
+  }
+
+  /**
+   * The nearest kinds of monster that drop souls for a pet not at level 3
+   * (with `needed` unknown: the pets followed): up to `max` of them, the
+   * nearest first: { npc, name, level, count, metres, bearing, pet, petName,
+   * souls, live }. The ones in range; with none, the nearest spawn points of
+   * the map.
+   */
+  function nearestKinds({ key, world, tracked, needed, souls, max = 4 }) {
+    const me = world?.me;
+    if (!me || !D.maps[key]) return [];
+    const wantedPet = (pet) => (needed ? needed.has(String(pet)) : tracked.has(String(pet)));
+    const kinds = new Map();
+    const add = (npc, x, y, live) => {
+      const pet = D.npcPets[npc];
+      if (pet == null || !wantedPet(pet)) return;
+      const metres = K.metres(me.x, me.y, x, y);
+      const k = kinds.get(String(npc));
+      if (!k) {
+        kinds.set(String(npc), {
+          npc: String(npc), name: npcName(npc), level: D.npcLevels?.[npc] ?? null, count: 1, metres,
+          bearing: K.bearing(me.x, me.y, x, y), pet: String(pet), petName: petName(pet, tracked),
+          souls: souls?.[pet] ?? null, genus: genusOf(pet), live,
+        });
+      } else {
+        k.count++;
+        if (metres < k.metres) Object.assign(k, { metres, bearing: K.bearing(me.x, me.y, x, y) });
+      }
+    };
+    for (const [, npc, x, y] of world?.npcs || []) add(npc, x, y, true);
+    if (!kinds.size) {
+      for (const [npc, pts] of Object.entries(spawnPoints(key))) {
+        for (let i = 0; i < pts.length; i += 2) add(npc, pts[i], pts[i + 1], false);
+      }
+    }
+    return [...kinds.values()].sort((a, b) => a.metres - b.metres).slice(0, max);
+  }
+
+  /** Metres from `me` to each pet's nearest spawn point on the map (id ->
+   *  metres), for the pets given (all with none). */
+  function nearestByPet(key, me, pets = null) {
+    const out = {};
+    if (!me || !D.maps[key]) return out;
+    for (const [npc, pts] of Object.entries(spawnPoints(key))) {
+      const pet = D.npcPets[npc];
+      if (pet == null || (pets && !pets.has(String(pet)))) continue;
+      let best = Infinity;
+      for (let i = 0; i < pts.length; i += 2) best = Math.min(best, K.metres(me.x, me.y, pts[i], pts[i + 1]));
+      if (best < (out[pet] ?? Infinity)) out[pet] = Math.round(best);
     }
     return out;
   }
@@ -419,20 +487,26 @@
     const map = D.maps[key];
     if (!map) return { marks, next: null, petsHere: 0, around: 0, hits: [], route: null };
     const me = world?.me || null;
-    // With no plugin tracking pets, all of them.
-    const all = petsMode === "all" || tracked.size === 0;
-    const wanted = (pet) => all || tracked.has(String(pet));
+    // petsMode "tracked": Pet Finder's favourites and the pet being farmed
+    // (with none followed, all); "needed": those and every pet not at level
+    // 3 yet (all while Pet Finder hasn't read the pet list); "all".
+    const all = petsMode === "all" || (petsMode !== "needed" && tracked.size === 0) || (petsMode === "needed" && !needed);
+    const wanted = (pet) => all || tracked.has(String(pet)) || (petsMode === "needed" && !!needed?.has(String(pet)));
     // How a pet looks (render.js pet()): a favourite a gold star, the one
     // being farmed red in a thick white ring, one not at level 3 yet red in a
     // white ring, one at level 3 small and grey; levels not known: small and
     // white. The size of its spawn points and their order (z).
+    // A pet not at level 3 is filled in its genus colour.
     const isNeeded = (pet) => (needed ? needed.has(String(pet)) : null);
     const style = (pet) => {
       const t = tracked.get(String(pet));
-      if (t?.mark === "pinned") return { look: "fav", r: 4.5, z: 3, text: "★ favourite" };
-      if (t?.mark === "farming") return { look: "farm", r: 4, z: 3, text: "being farmed" };
+      const g = genusOf(pet);
+      const color = g?.color;
+      const genus = g ? ` · ${g.name}` : "";
+      if (t?.mark === "pinned") return { look: "fav", r: 4.5, z: 3, color, text: `★ favourite${genus}` };
+      if (t?.mark === "farming") return { look: "farm", r: 4, z: 3, color, text: `being farmed${genus}` };
       const n = isNeeded(pet);
-      if (n === true || (n === null && t)) return { look: "need", r: 3.5, z: 2, text: "not at level 3 yet" };
+      if (n === true || (n === null && t)) return { look: "need", r: 3.5, z: 2, color, text: `not at level 3 yet${genus}` };
       if (n === false) return { look: "max", r: 2.5, z: 1, text: "level 3" };
       return { look: "plain", r: 2.5, z: 1, text: "" };
     };
@@ -459,12 +533,12 @@
       for (const [npc, pts] of Object.entries(spawnPoints(key))) {
         const pet = D.npcPets[npc];
         if (pet == null) continue;
-        if (!all && !tracked.has(String(pet))) continue;
+        if (!wanted(pet)) continue;
         petsHere.add(String(pet));
         const s = style(pet);
         const label = `${petName(pet, tracked)} · ${npcName(npc)}${s.text ? ` · ${s.text}` : ""}`;
         for (let i = 0; i < pts.length; i += 2) {
-          marks.push({ kind: "petSpawn", x: pts[i], y: pts[i + 1], r: s.r, look: s.look, label, z: s.z });
+          marks.push({ kind: "petSpawn", x: pts[i], y: pts[i + 1], r: s.r, look: s.look, color: s.color, label, z: s.z });
           consider(pet, pts[i], pts[i + 1], false);
         }
       }
@@ -479,7 +553,7 @@
         around++;
         const s = style(pet);
         const d = me ? ` · ${Math.round(K.metres(me.x, me.y, x, y))} m` : "";
-        marks.push({ kind: "petLive", x, y, r: s.look === "max" ? 4 : 6, look: s.look, label: `${petName(pet, tracked)} · ${npcName(npc)}${s.text ? ` · ${s.text}` : ""}${d}`, z: s.look === "max" ? 7 : 8 });
+        marks.push({ kind: "petLive", x, y, r: s.look === "max" ? 4 : 6, look: s.look, color: s.color, label: `${petName(pet, tracked)} · ${npcName(npc)}${s.text ? ` · ${s.text}` : ""}${d}`, z: s.look === "max" ? 7 : 8 });
         consider(pet, x, y, true);
       } else if (layers.monsters) {
         marks.push({ kind: "monster", x, y, r: 2.5, label: npcName(npc), z: 4 });
@@ -639,6 +713,6 @@
   const arrow = (deg) => ARROWS[Math.round((((deg % 360) + 360) % 360) / 45) % 8];
 
   globalThis.MapMarks = Object.freeze({
-    build, mergeTracked, neededOf, mapOf, regionAt, arrow, markText, petName, setLearned, learnFrom, routeTo, gatherFor, TELEPORT_M, steady, search, focusMaps, focusPoints, KIND_ORDER, kindLabel, kindTitle, placeLabel,
+    build, mergeTracked, neededOf, soulsOf, nearestKinds, nearestByPet, GENUS, genusOf, mapOf, regionAt, arrow, markText, petName, setLearned, learnFrom, routeTo, gatherFor, TELEPORT_M, steady, search, focusMaps, focusPoints, KIND_ORDER, kindLabel, kindTitle, placeLabel,
   });
 })();
