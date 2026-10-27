@@ -1,4 +1,4 @@
-From a936a1659e2286635d8df47bd8a6a1959d23573a Mon Sep 17 00:00:00 2001
+From 5b583988337982d836287982cd20ffaf6c480ac9 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Sat, 24 Oct 2026 10:31:21 +0000
 Subject: [PATCH 07/24] Locked windows keep their buttons clickable
@@ -255,7 +255,7 @@ index 0000000..b64d7b2
 +  window.__a2LockedButtons = { measure, report, view, selector };
 +})();
 diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
-index 3fad777..7a5a81a 100644
+index d41c5f6..d255919 100644
 --- a/src-tauri/src/app.rs
 +++ b/src-tauri/src/app.rs
 @@ -389,6 +389,17 @@ pub const LOCK_ALL_WINDOWS_KEY: &str = "dpsMeter.lockAllWindows";
@@ -339,7 +339,7 @@ index 3fad777..7a5a81a 100644
  /// Whether the meter's windows are locked with the overlay ("Lock all meter
  /// windows"): a tool window then offers no resize at its edges.
  #[tauri::command]
-@@ -4436,6 +4473,7 @@ pub fn run() {
+@@ -4437,6 +4474,7 @@ pub fn run() {
              set_overlay_card_open,
              is_overlay_locked,
              meter_windows_locked,

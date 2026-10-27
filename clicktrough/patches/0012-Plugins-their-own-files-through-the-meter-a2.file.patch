@@ -1,4 +1,4 @@
-From e29d0ec4f535eeae1007ccc447da33f4b0b62fec Mon Sep 17 00:00:00 2001
+From f4b980d7ac64ed22c72dc4727498dc1a6aa45ad2 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Sat, 24 Oct 2026 17:16:33 +0000
 Subject: [PATCH 12/24] Plugins: their own files through the meter (a2.file)
@@ -50,10 +50,10 @@ index ebc858a..a6f8d8e 100644
  
    window.addEventListener("message", async (event) => {
 diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
-index d9823b9..e50fe5a 100644
+index e62fed1..1f43339 100644
 --- a/src-tauri/src/app.rs
 +++ b/src-tauri/src/app.rs
-@@ -4395,6 +4395,8 @@ pub fn run() {
+@@ -4396,6 +4396,8 @@ pub fn run() {
              crate::plugins::plugin_set_hide,
              crate::plugins::plugin_hello,
              crate::plugins::plugin_share,

@@ -1,4 +1,4 @@
-From 74190156be4c9e903919855133ba3f36bdc642f9 Mon Sep 17 00:00:00 2001
+From cee06f2185f364117919e1bedc91eddf3b9ae3ef Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Fri, 23 Oct 2026 14:00:52 +0000
 Subject: [PATCH 05/24] Locked windows scroll at their right edge
@@ -167,7 +167,7 @@ index 4e07d60..83344d1 100644
    console.log("[A2Tools] Tauri bridge adapter loaded (javaBridge + dpsData)");
  })();
 diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
-index cca65a1..6d95f33 100644
+index fd3cec1..7a8d85f 100644
 --- a/src-tauri/src/app.rs
 +++ b/src-tauri/src/app.rs
 @@ -384,6 +384,11 @@ fn screenshot_tool(app: &tauri::AppHandle, in_front: bool) {
@@ -224,7 +224,7 @@ index cca65a1..6d95f33 100644
  #[tauri::command]
  fn is_overlay_locked(state: tauri::State<'_, AppState>) -> bool {
      state.overlay_lock.locked.load(std::sync::atomic::Ordering::SeqCst)
-@@ -4410,6 +4431,7 @@ pub fn run() {
+@@ -4411,6 +4432,7 @@ pub fn run() {
              set_overlay_locked,
              set_overlay_card_open,
              is_overlay_locked,

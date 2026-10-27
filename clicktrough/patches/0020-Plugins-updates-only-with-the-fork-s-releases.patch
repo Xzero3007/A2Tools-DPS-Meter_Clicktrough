@@ -1,4 +1,4 @@
-From 451b088e885c5644b1cfa93c3ace40ddc1c235b1 Mon Sep 17 00:00:00 2001
+From 013d4f20895ed100942ef037afcf3b1b76e7c81f Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Mon, 26 Oct 2026 00:05:23 +0000
 Subject: [PATCH 20/24] Plugins: updates only with the fork's releases

@@ -1,4 +1,4 @@
-From 47faf1a0f941c5a262b36285c949a80cf9881f55 Mon Sep 17 00:00:00 2001
+From 171216e28d6f75961eb6c6abebbbd34c6a3ae74d Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Sat, 24 Oct 2026 10:13:55 +0000
 Subject: [PATCH 06/24] No supporter features, donation or author links
@@ -307,10 +307,10 @@ index 9c05a40..93ab177 100644
      this.syncBarTextureControl();
    }
 diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
-index 6d95f33..3fad777 100644
+index 7a8d85f..d41c5f6 100644
 --- a/src-tauri/src/app.rs
 +++ b/src-tauri/src/app.rs
-@@ -4254,8 +4254,12 @@ pub fn run() {
+@@ -4255,8 +4255,12 @@ pub fn run() {
              // — asking the server "is this player a supporter?" would hand it a
              // list of who you play with, every fight, for a cosmetic. The
              // private build fetches nothing: only a local override counts.
@@ -324,7 +324,7 @@ index 6d95f33..3fad777 100644
                  let mut had_override = false;
                  // The published roster: asked for when due, with the ETag of
                  // the one held. The loop itself turns every 15 s, for the
-@@ -4326,7 +4330,7 @@ pub fn run() {
+@@ -4327,7 +4331,7 @@ pub fn run() {
                      }
                      tokio::time::sleep(wait).await;
                  }

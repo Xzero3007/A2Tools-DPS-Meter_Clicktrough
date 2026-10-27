@@ -1,4 +1,4 @@
-From 36ce270723182e4f5a49e5f5307ce0a885492c87 Mon Sep 17 00:00:00 2001
+From f4bacb506490429995d4d2d0643a4be0af742a39 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Fri, 23 Oct 2026 11:35:59 +0000
 Subject: [PATCH 03/24] Updates from the Clicktrough fork
@@ -12,19 +12,20 @@ Settings name it.
 Meter 2.0.80 fetches the manifest itself (update_check.rs) from a fixed
 address, checks it with the original's signing key and installs only
 packages from cdn.a2tools.app. Here the address is the fork's latest
-release, its packages are allowed too, and its manifest, which that key
+release, only its packages are installed (not the original's CDN), and
+its manifest, which that key
 would refuse, is taken unsigned: over HTTPS from the fork's own releases,
 with each package's SHA-256.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_01RahWACwaxzLAcYgwc9jk8C
 ---
- src-tauri/src/app.rs          | 31 +++++++++++++++++++++---
+ src-tauri/src/app.rs          | 38 +++++++++++++++++++++++++-----
  src-tauri/src/update_check.rs | 44 +++++++++++++++++++++++++++++------
- 2 files changed, 65 insertions(+), 10 deletions(-)
+ 2 files changed, 69 insertions(+), 13 deletions(-)
 
 diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
-index 1b0fedc..cca65a1 100644
+index 1b0fedc..fd3cec1 100644
 --- a/src-tauri/src/app.rs
 +++ b/src-tauri/src/app.rs
 @@ -1597,9 +1597,15 @@ async fn check_for_update(app: tauri::AppHandle, state: tauri::State<'_, AppStat
@@ -44,7 +45,14 @@ index 1b0fedc..cca65a1 100644
      let some = |s: String| Some(s).filter(|s| !s.is_empty());
      let yes = show_update_window(
          app,
-@@ -1671,7 +1677,7 @@ async fn show_update_window(
+@@ -1665,13 +1671,13 @@ async fn show_update_window(
+     // our CDN, and only version-shaped text in the dialog (security audit H1,
+     // in part; a signed manifest checked here is the rest).
+     if !package_url.is_empty() && !update_url_allowed(&package_url) {
+-        tracing::warn!("Update: refused a package that isn't on cdn.a2tools.app");
++        tracing::warn!("Update: refused a package that isn't in the Clicktrough fork's releases");
+         return Ok(false);
+     }
      // The running version is the app's own, not what the page says.
      drop(current);
      let current = env!("CARGO_PKG_VERSION").to_string();
@@ -53,14 +61,15 @@ index 1b0fedc..cca65a1 100644
          tracing::warn!("Update: refused a latest version that isn't one");
          return Ok(false);
      }
-@@ -1717,11 +1723,24 @@ async fn show_update_window(
+@@ -1717,11 +1723,25 @@ async fn show_update_window(
  /// An update package on our CDN, over https, with a plain path.
  #[cfg_attr(not(feature = "online"), allow(dead_code))]
  fn update_url_allowed(url: &str) -> bool {
 -    url.strip_prefix("https://cdn.a2tools.app/").is_some_and(|path| {
-+    // This build's packages: the Clicktrough fork's releases.
++    // This build's packages: only the Clicktrough fork's releases, never the
++    // original's CDN.
 +    const FORK: &str = "https://github.com/Xzero3007/A2Tools-DPS-Meter_Clicktrough/releases/download/";
-+    url.strip_prefix("https://cdn.a2tools.app/").or_else(|| url.strip_prefix(FORK)).is_some_and(|path| {
++    url.strip_prefix(FORK).is_some_and(|path| {
          !path.is_empty() && !path.contains("..") && path.chars().all(|c| c.is_ascii_alphanumeric() || "/._-+".contains(c))
      })
  }
@@ -79,7 +88,19 @@ index 1b0fedc..cca65a1 100644
  /// "2.0.80": digits and dots, short.
  #[cfg_attr(not(feature = "online"), allow(dead_code))]
  fn version_shaped(v: &str) -> bool {
-@@ -4458,6 +4477,12 @@ mod tests {
+@@ -4446,9 +4466,9 @@ mod tests {
+     #[test]
+     fn updates_come_only_from_the_cdn() {
+         use super::{update_url_allowed as ok, version_shaped};
+-        assert!(ok("https://cdn.a2tools.app/A2Tools-DPS-Meter_2.0.80_x64_en-US.msi"));
+-        assert!(ok("https://cdn.a2tools.app/linux/a2tools-dps-meter-2.0.80-1-x86_64.pkg.tar.zst"));
+         for bad in [
++            "https://cdn.a2tools.app/A2Tools-DPS-Meter_2.0.80_x64_en-US.msi",
++            "https://cdn.a2tools.app/linux/a2tools-dps-meter-2.0.80-1-x86_64.pkg.tar.zst",
+             "http://cdn.a2tools.app/x.msi",
+             "https://cdn.a2tools.app.evil.example/x.msi",
+             "https://evil.example/x.msi",
+@@ -4458,6 +4478,12 @@ mod tests {
          ] {
              assert!(!ok(bad), "{bad}");
          }

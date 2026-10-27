@@ -1,4 +1,4 @@
-From b0dedb28176f777d5ee60b83eb828a3c2c999bac Mon Sep 17 00:00:00 2001
+From 92025baebe48589be13afa1d5eff8c5083c2ee34 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Sat, 24 Oct 2026 14:16:36 +0000
 Subject: [PATCH 11/24] Plugins: a value shared with other plugins (share,
@@ -77,10 +77,10 @@ index e31468f..7987f66 100644
          return t("settings.plugins.permDecoder", "Read your own game data: {name}", { name: permission.slice(8) });
        }
 diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
-index acbbc3c..d9823b9 100644
+index 76972e4..e62fed1 100644
 --- a/src-tauri/src/app.rs
 +++ b/src-tauri/src/app.rs
-@@ -4394,6 +4394,7 @@ pub fn run() {
+@@ -4395,6 +4395,7 @@ pub fn run() {
              crate::plugins::plugin_set_enabled,
              crate::plugins::plugin_set_hide,
              crate::plugins::plugin_hello,

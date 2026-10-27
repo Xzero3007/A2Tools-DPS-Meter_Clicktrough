@@ -1,4 +1,4 @@
-From a44a73ab38a1cae1e38f4eefeba381dde7d6fcde Mon Sep 17 00:00:00 2001
+From 0232e3ecbccd2d8a9fbbf0d3fbf04d44479ebcfa Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Sun, 25 Oct 2026 00:35:48 +0000
 Subject: [PATCH 17/24] Plugins: window sizes to switch between, set by the
@@ -318,10 +318,10 @@ index 0000000..398bec2
 +  window.A2_WINDOW_SIZES.refresh = () => groups.forEach(show);
 +})();
 diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
-index 7d4831d..db22f05 100644
+index 08f324e..a5493d1 100644
 --- a/src-tauri/src/app.rs
 +++ b/src-tauri/src/app.rs
-@@ -4441,6 +4441,7 @@ pub fn run() {
+@@ -4442,6 +4442,7 @@ pub fn run() {
              crate::plugins::plugin_share,
              crate::plugins::plugin_file,
              crate::plugins::plugin_web_get,

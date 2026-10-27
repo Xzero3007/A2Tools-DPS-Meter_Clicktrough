@@ -1,4 +1,4 @@
-From d7f4ec1388fcd97d4c0200e0ad3833b67d88f1d9 Mon Sep 17 00:00:00 2001
+From e98780bd07cedd9aef4c4b3e2bfb8784449faf49 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Mon, 26 Oct 2026 00:41:58 +0000
 Subject: [PATCH 21/24] Plugins: this build's own plugins can be removed, and
@@ -110,10 +110,10 @@ index 83faa6c..49b6e2f 100644
            tag.title = t("settings.plugins.hint", "Plugins loaded here are not reviewed. Only load plugins you trust.");
            tags.push(tag);
 diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
-index db22f05..2479736 100644
+index a5493d1..3646027 100644
 --- a/src-tauri/src/app.rs
 +++ b/src-tauri/src/app.rs
-@@ -4442,6 +4442,7 @@ pub fn run() {
+@@ -4443,6 +4443,7 @@ pub fn run() {
              crate::plugins::plugin_file,
              crate::plugins::plugin_web_get,
              crate::plugins::plugin_window_size,

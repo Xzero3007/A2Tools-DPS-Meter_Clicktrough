@@ -1,4 +1,4 @@
-From 954f8700322dd183947a112d4ddc294fc92cc6e7 Mon Sep 17 00:00:00 2001
+From 27cd76caa2d8f1d55234f64b4508319d1416c8b2 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Sat, 24 Oct 2026 20:13:41 +0000
 Subject: [PATCH 15/24] Meter: the plugins button turns the plugins' widgets
@@ -22,7 +22,7 @@ Claude-Session: https://claude.ai/code/session_01RBQati3x8VviBbpY9juEWf
  4 files changed, 89 insertions(+), 6 deletions(-)
 
 diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
-index 9b62620..15ed4cc 100644
+index 8fdec8b..8757640 100644
 --- a/src-tauri/src/app.rs
 +++ b/src-tauri/src/app.rs
 @@ -224,8 +224,9 @@ fn hide_with_meter(app: &tauri::AppHandle, meter: bool, hidden: &mut std::collec

@@ -1,4 +1,4 @@
-From 5d72acf38a94df9e9f3d29145d944bc3f4fabfc1 Mon Sep 17 00:00:00 2001
+From ecbb9678f4cf932e713f49e54dbe9f2fb48ecfc5 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Mon, 26 Oct 2026 06:55:17 +0000
 Subject: [PATCH 22/24] Plugins: every plugin this build ships installs from
