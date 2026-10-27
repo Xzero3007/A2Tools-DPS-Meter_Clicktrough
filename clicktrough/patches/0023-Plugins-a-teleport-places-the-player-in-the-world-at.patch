@@ -1,7 +1,7 @@
-From 62895017afdac7b4c0bd36d02269a66895fd81f0 Mon Sep 17 00:00:00 2001
+From 582122009914214518c70cae612ea8352ea98263 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Mon, 26 Oct 2026 08:08:12 +0000
-Subject: [PATCH 23/26] Plugins: a teleport places the player in the world at
+Subject: [PATCH 23/27] Plugins: a teleport places the player in the world at
  once
 
 The world plugins hear (events:world) placed the player exactly only with

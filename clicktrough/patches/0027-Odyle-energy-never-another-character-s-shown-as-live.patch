@@ -1,0 +1,158 @@
+From 0c8e94687cca1896b5a157610e2db8968d3bc371 Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Tue, 27 Oct 2026 22:44:15 +0000
+Subject: [PATCH 27/27] Odyle energy: never another character's shown as live
+
+After switching to a twink the meter's title showed the last character's
+Odyle energy (390 (+50)) as live while the game said 0. The window kept the
+last value it was sent: when the backend no longer knew the energy (a
+login's list that didn't read), it sent nothing. Now it tells the window
+(`cleared`), and the window shows energy named for another character than
+the one playing only as that character's, never as the current one's.
+
+A character with no energy has the entry with no value (`00`, both 0). In
+a list that doesn't read whole, the energy found by its id was only taken
+in the forms with a value: now `00` too. A login's list that doesn't read
+is logged with its size.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01RahWACwaxzLAcYgwc9jk8C
+---
+ public/src/js/core.js                     | 12 +++++++--
+ src-tauri/src/app.rs                      |  5 ++++
+ src-tauri/src/capture/stream_processor.rs | 30 ++++++++++++++++++++++-
+ tests/odyle-remembered.test.mjs           | 21 ++++++++++++++++
+ 4 files changed, 65 insertions(+), 3 deletions(-)
+
+diff --git a/public/src/js/core.js b/public/src/js/core.js
+index 5fa5ddb..43889f2 100644
+--- a/public/src/js/core.js
++++ b/public/src/js/core.js
+@@ -6493,14 +6493,22 @@ class DpsApp {
+   // long while. Each value the backend names an owner for is kept by that
+   // character's name, and shown dimmed until the game sends one again.
+   updateOdyle(energy) {
+-    if (energy && typeof energy === "object") {
++    // Clicktrough: `cleared`, the backend no longer knows it (a login's list
++    // that didn't read): the last value isn't live any more.
++    if (energy?.cleared) {
++      this.odyleEnergy = null;
++    } else if (energy && typeof energy === "object") {
+       this.odyleEnergy = energy;
+       this.rememberOdyle(energy);
+     }
+     const el = this.odyleEl;
+     if (!el) return;
+     const isEnergy = (e) => typeof e?.basic === "number" && typeof e?.charged === "number";
+-    const live = isEnergy(this.odyleEnergy);
++    // Clicktrough: another character's energy is never shown as the one
++    // playing's (the last character's stayed after a switch).
++    const owner = String(this.odyleEnergy?.name ?? "").trim();
++    const mine = !owner || !this.USER_NAME || owner === this.USER_NAME;
++    const live = isEnergy(this.odyleEnergy) && mine;
+     const shown = live ? this.odyleEnergy : this.rememberedOdyle()[this.USER_NAME];
+     if (!this.showOdyle || !isEnergy(shown)) {
+       el.classList.remove("isVisible");
+diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
+index f8b5d85..2ec9658 100644
+--- a/src-tauri/src/app.rs
++++ b/src-tauri/src/app.rs
+@@ -4120,6 +4120,11 @@ pub fn run() {
+                                 );
+                                 last_odyle = Some(now);
+                             }
++                        } else if last_odyle.take().is_some() {
++                            // Clicktrough: not known any more (a login's list
++                            // that didn't read): the window stops showing the
++                            // last character's as live.
++                            let _ = handle.emit("odyle-energy", serde_json::json!({ "cleared": true }));
+                         }
+ 
+                         // --- Hide while AION2 is closed, or while solo (every 2 s) ---
+diff --git a/src-tauri/src/capture/stream_processor.rs b/src-tauri/src/capture/stream_processor.rs
+index 33e1ec1..f50f65d 100644
+--- a/src-tauri/src/capture/stream_processor.rs
++++ b/src-tauri/src/capture/stream_processor.rs
+@@ -376,6 +376,15 @@ impl StreamProcessor {
+             .as_ref()
+             .and_then(|e| odyle_energy_in(&e.counts))
+             .or_else(|| if whole_list { odyle_energy_in_list(body) } else { None });
++        // Clicktrough: a login's list that doesn't read, logged, to find
++        // what the game sent (a character's energy stayed the last one's).
++        if whole_list && entries.is_none() {
++            tracing::info!(
++                "Content list at login doesn't read ({} bytes); Odyle energy {}",
++                body.len(),
++                energy.map_or("not found".to_string(), |(b, c)| format!("{b} basic, {c} charged"))
++            );
++        }
+         // A whole list that doesn't read still says a character logged in:
+         // the last one's counts go, with nothing in their place.
+         if entries.is_some() || whole_list {
+@@ -2345,7 +2354,8 @@ fn odyle_energy_in(entries: &[ContentEntry]) -> Option<(u32, u32)> {
+ fn odyle_energy_in_list(body: &[u8]) -> Option<(u32, u32)> {
+     let id = ODYLE_ID.to_le_bytes();
+     (0..body.len())
+-        .filter(|&i| matches!(body[i], 0x04 | 0x08 | 0x0C) && body.get(i + 1..i + 5) == Some(&id[..]))
++        // `00`: both 0, as a character with no energy left has it.
++        .filter(|&i| matches!(body[i], 0x00 | 0x04 | 0x08 | 0x0C) && body.get(i + 1..i + 5) == Some(&id[..]))
+         .find_map(|i| match content_entry_at(body, i)?.0 {
+             Entry::Count(entry) => odyle_energy_in(&[entry]),
+             Entry::Time(..) => None,
+@@ -4710,6 +4720,24 @@ mod tests {
+         assert_eq!(storage.odyle_energy(), Some((0, 1995)));
+     }
+ 
++    /// Clicktrough: a character with no energy has the entry with no value
++    /// (`00`, both 0). In a list that doesn't read whole, the energy found
++    /// by its id was only taken in the forms with a value, so the last
++    /// character's stayed.
++    #[test]
++    fn no_energy_is_read_in_a_list_that_doesnt_read_whole() {
++        let (storage, mut p) = processor();
++        let mut list = hex("0b61490c018793031ec806");
++        list.insert(0, (list.len() + 1) as u8);
++        p.parse_perfect_packet(&list);
++        assert_eq!(storage.odyle_energy(), Some((30, 840)));
++        // Bytes that make no list, the energy entry with no value among them.
++        let mut list = hex("0b61ffee0001879303ee");
++        list.insert(0, (list.len() + 1) as u8);
++        p.parse_perfect_packet(&list);
++        assert_eq!(storage.odyle_energy(), Some((0, 0)));
++    }
++
+     #[test]
+     fn odyle_energy_without_charged_energy_is_read() {
+         let (storage, mut p) = processor();
+diff --git a/tests/odyle-remembered.test.mjs b/tests/odyle-remembered.test.mjs
+index db2ebe3..543806d 100644
+--- a/tests/odyle-remembered.test.mjs
++++ b/tests/odyle-remembered.test.mjs
+@@ -95,3 +95,24 @@ test("nothing remembered shows nothing, and the setting off hides it", () => {
+   m.app.updateOdyle();
+   assert.equal(m.shown().visible, false);
+ });
++
++// Clicktrough: switching to a character whose energy didn't come, the last
++// character's is not shown as live.
++test("the last character's energy isn't shown as the next one's", () => {
++  const m = meter(new Map());
++  m.app.USER_NAME = "Diabolia";
++  m.app.updateOdyle({ basic: 390, charged: 50, name: "Diabolia" });
++  assert.deepEqual(m.shown(), { visible: true, remembered: false, text: "390(+50)" });
++  // A twink logs in: the name changes before any energy of theirs comes.
++  m.app.USER_NAME = "Twink";
++  m.app.updateOdyle();
++  assert.equal(m.shown().visible, false);
++  // The backend says it no longer knows any.
++  m.app.USER_NAME = "Diabolia";
++  m.app.updateOdyle({ cleared: true });
++  assert.deepEqual(m.shown(), { visible: true, remembered: true, text: "390(+50)" });
++  // The twink's own, once it comes.
++  m.app.USER_NAME = "Twink";
++  m.app.updateOdyle({ basic: 0, charged: 0, name: "Twink" });
++  assert.deepEqual(m.shown(), { visible: true, remembered: false, text: "0" });
++});
+-- 
+2.43.0
+
