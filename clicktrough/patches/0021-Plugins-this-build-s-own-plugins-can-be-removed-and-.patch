@@ -1,7 +1,7 @@
-From 101ac1560b7e92dc13d4217e1ec4130449702bfb Mon Sep 17 00:00:00 2001
+From b1221fa2122c6dd8a49d612bd50e828d7e11464a Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Mon, 26 Oct 2026 00:41:58 +0000
-Subject: [PATCH 21/25] Plugins: this build's own plugins can be removed, and
+Subject: [PATCH 21/26] Plugins: this build's own plugins can be removed, and
  added again
 
 Settings' Remove did nothing for a plugin this build ships (data/ct-plugins:

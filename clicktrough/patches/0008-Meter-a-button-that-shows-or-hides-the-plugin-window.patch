@@ -1,7 +1,7 @@
-From 27bd9b4f7d7770af469bdbed768416bd20ac7076 Mon Sep 17 00:00:00 2001
+From 64a43a92b820a796c0b0850d7ef42ebe90912307 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Sat, 24 Oct 2026 11:53:44 +0000
-Subject: [PATCH 08/25] Meter: a button that shows or hides the plugin window
+Subject: [PATCH 08/26] Meter: a button that shows or hides the plugin window
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit

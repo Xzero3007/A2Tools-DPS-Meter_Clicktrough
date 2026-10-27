@@ -681,10 +681,13 @@ function whereOf(id) {
     const kibelisk = kib && (k.teleport ? words.teleport(k.teleport, kib) : words.near(kib));
     const zones = listOf((d.zones || []).map(text)) || "?";
     const at = line("at", zones, d.map && text(d.map), d.spawns && words.spawns(d.spawns), kibelisk);
-    const href = mapLink(d, k);
-    if (href) {
-      const link = document.createElement("a");
-      link.href = href;
+    // The monster's spawn points on the Map plugin (a2.share): a button in
+    // the meter, never a website.
+    if (d.npcId && typeof a2.share === "function") {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "mapLink";
+      button.title = "Show its spawn points on the Map";
       // A folded map before the word.
       const NS = "http://www.w3.org/2000/svg";
       const icon = document.createElementNS(NS, "svg");
@@ -694,22 +697,12 @@ function whereOf(id) {
       const path = document.createElementNS(NS, "path");
       path.setAttribute("d", "M9 4 3 6.5v13.5l6-2.5 6 2.5 6-2.5V4l-6 2.5L9 4Zm0 0v13.5m6-11v13.5");
       icon.append(path);
-      link.append(icon, words.map);
-      // Aion 2 Timers' map, which the address shows.
-      link.title = href;
-      // Clicktrough: with the Map plugin's meter, the monster's spawn points
-      // on the Map instead of the website.
-      if (typeof a2.share === "function") {
-        link.title = "Show its spawn points on the Map";
-        link.addEventListener("click", (e) => {
-          // Not on to the page's own link handling (a2.js), which opens a
-          // link in the browser whatever was done with its click.
-          e.preventDefault();
-          e.stopPropagation();
-          showOnMap({ npc: d.npcId, name: SOURCE_TEXT[d.npc]?.en || text(d.npc), region: regionOf(d) });
-        });
-      }
-      at.append(" · ", link);
+      button.append(icon, words.map);
+      button.addEventListener("click", (e) => {
+        e.stopPropagation();
+        showOnMap({ npc: d.npcId, name: SOURCE_TEXT[d.npc]?.en || text(d.npc), region: regionOf(d) });
+      });
+      at.append(" · ", button);
     }
     box.append(at);
   }
@@ -724,40 +717,6 @@ function whereOf(id) {
   return box;
 }
 
-// The languages the Aion 2 Timers map speaks besides English.
-const MAP_LANGUAGES = new Set(["de", "fr", "es", "it", "ja", "ko", "pl", "pt", "ru", "tr"]);
-
-// A drop's monster on the Aion 2 Timers map, opened in the browser: every
-// spawn of it on its map, and the nearest teleport, measured from the spawn
-// this list measures from (`at`), so the two give the same distance. Their
-// teleport is the nearest of all; where this list takes your side's own
-// Kibelisk (the Abyss), it is named (`to`), which leaves it unlabelled there.
-// Off (MAP_LINKS): this build links to no website the player hasn't chosen.
-const MAP_LINKS = false;
-// Coordinates are the game's world units, as theirs are. The name goes in
-// English, as their map reads it. Spec: homelessguynabox/a2tools-integration,
-// reference/map-links.md.
-function mapLink(d, k) {
-  // No links to websites in this build: not Aion 2 Timers' live map either.
-  if (!MAP_LINKS) return null;
-  if (!d.npcId) return null;
-  const q = new URLSearchParams();
-  if (d.mapId) q.set("map", String(d.mapId));
-  q.set("pet", String(d.npcId));
-  const name = SOURCE_TEXT[d.npc]?.en ?? (String(d.npc ?? "").startsWith("=") ? d.npc.slice(1) : "");
-  if (name) q.set("petName", name);
-  if (k?.at) {
-    q.set("x", String(Math.round(k.at[0])));
-    q.set("y", String(Math.round(k.at[1])));
-  }
-  if (k?.to && String(k.to) !== String(d.kibelisk?.to)) {
-    q.set("tx", String(Math.round(k.to[0])));
-    q.set("ty", String(Math.round(k.to[1])));
-  }
-  const lang = language.startsWith("zh") ? "zh" : MAP_LANGUAGES.has(language) ? language : "";
-  if (lang) q.set("lang", lang);
-  return "https://www.aion2timers.com/map/?" + q.toString();
-}
 
 // A filter row (genus or level): All, then each choice with how many of
 // `pets` it holds, given the other filters.

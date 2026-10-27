@@ -164,6 +164,8 @@ jobs:
           git -C plugins-up checkout -q --detach "$PLUGINS_COMMIT"
           mkdir -p src/src/data/ct-plugins
           : > src/src/data/ct-plugins/installed-only.txt
+          # Never run, not even an installed copy (patch 0026).
+          sed '/^#/d;/^$/d' fork/clicktrough/plugins-left-out.txt > src/src/data/ct-plugins/left-out.txt
           for d in fork/clicktrough/plugins/*/; do
             [ -d "$d" ] || continue
             id=$(basename "$d")
@@ -186,6 +188,8 @@ jobs:
             [ -f "$d/manifest.json" ] || continue
             # Held back by the author: not shipped either.
             [ -e "$d/.unpublished" ] && continue
+            # Left out by this repo (clicktrough/plugins-left-out.txt).
+            grep -qx "$id" fork/clicktrough/plugins-left-out.txt && continue
             [ -e "src/src/data/ct-plugins/$id" ] && continue
             [ -e "fork/clicktrough/own-plugins/$id" ] && continue
             cp -r "$d" "src/src/data/ct-plugins/$id"

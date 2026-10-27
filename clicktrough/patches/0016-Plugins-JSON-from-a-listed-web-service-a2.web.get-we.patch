@@ -1,7 +1,7 @@
-From e8dfc5d23613913e67ca07e7f80f48625bc3a4e0 Mon Sep 17 00:00:00 2001
+From 7b14838ee0a2045d27415756c314f9fa931fdf2a Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Sat, 24 Oct 2026 22:44:44 +0000
-Subject: [PATCH 16/25] Plugins: JSON from a listed web service (a2.web.get,
+Subject: [PATCH 16/26] Plugins: JSON from a listed web service (a2.web.get,
  web:<host>)
 
 A plugin's page has no network at all, and some data plugins want is

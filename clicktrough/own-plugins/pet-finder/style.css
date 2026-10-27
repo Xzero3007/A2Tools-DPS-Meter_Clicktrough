@@ -727,6 +727,19 @@ body.layout-classic #petsView .where {
 #petsView .where a:hover {
   text-decoration: underline;
 }
+/* The Map button: shows the monster's spawn points on the Map plugin. */
+#petsView .where .mapLink {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  white-space: nowrap;
+  color: var(--accent);
+  cursor: pointer;
+}
+#petsView .where .mapLink:hover {
+  text-decoration: underline;
+}
 /* Pin to the top, and the pet being farmed. */
 #petsView .pin {
   flex: none;

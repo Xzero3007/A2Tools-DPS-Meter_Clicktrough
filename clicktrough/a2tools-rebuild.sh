@@ -79,6 +79,7 @@ git -C "$plugins_src" reset -q --hard
 git -C "$plugins_src" checkout -q --detach origin/HEAD
 mkdir -p src/data/ct-plugins
 : > src/data/ct-plugins/installed-only.txt
+sed '/^#/d;/^$/d' "$here/plugins-left-out.txt" > src/data/ct-plugins/left-out.txt
 for d in "$here"/plugins/*/; do
   [ -d "$d" ] || continue
   id=$(basename "$d")
@@ -90,6 +91,7 @@ for d in "$plugins_src"/plugins/*/; do
   id=$(basename "$d")
   [ -f "$d/manifest.json" ] || continue
   [ -e "$d/.unpublished" ] && continue
+  grep -qx "$id" "$here/plugins-left-out.txt" && continue
   [ -e "src/data/ct-plugins/$id" ] && continue
   [ -e "$here/own-plugins/$id" ] && continue
   cp -r "$d" "src/data/ct-plugins/$id"

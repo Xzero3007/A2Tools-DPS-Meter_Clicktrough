@@ -1,0 +1,48 @@
+From 3a8bf05db036245158f94e824093d78c1a39e745 Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Tue, 27 Oct 2026 02:04:24 +0000
+Subject: [PATCH 26/26] Plugins this build leaves out don't run
+
+The original's plugins this build leaves out (data/ct-plugins/
+left-out.txt, an id a line: Pet Soul Tracker, whose list is Pet Finder's)
+never run, not even a copy installed before from the original's catalog.
+Their saved data stays.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01RahWACwaxzLAcYgwc9jk8C
+---
+ src-tauri/src/plugins/mod.rs | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
+index 68f335b..3425842 100644
+--- a/src-tauri/src/plugins/mod.rs
++++ b/src-tauri/src/plugins/mod.rs
+@@ -813,6 +813,14 @@ impl PluginHost {
+             .and_then(|root| std::fs::read_to_string(root.join("installed-only.txt")).ok())
+             .map(|text| text.lines().map(str::trim).filter(|l| !l.is_empty()).map(String::from).collect())
+             .unwrap_or_default();
++        // Clicktrough: the original's plugins this build leaves out
++        // (`left-out.txt`, an id a line) never run, not even a copy
++        // installed before; their saved data stays.
++        let left_out: Vec<String> = bundled_root
++            .as_ref()
++            .and_then(|root| std::fs::read_to_string(root.join("left-out.txt")).ok())
++            .map(|text| text.lines().map(str::trim).filter(|l| !l.is_empty()).map(String::from).collect())
++            .unwrap_or_default();
+         let installed_root = plugins_dir(app).ok();
+         let removed = bundled_removed(app);
+         let added = bundled_added(app);
+@@ -857,6 +865,9 @@ impl PluginHost {
+             .filter(|path| path.is_dir() && path.file_name().is_some_and(|n| !n.to_string_lossy().starts_with('.')));
+         for dir in installed {
+             match load_folder(&dir) {
++                Ok(l) if left_out.iter().any(|id| id == &l.manifest.id) => {
++                    tracing::info!("Plugins: {} is left out of this build; its installed copy doesn't run", l.manifest.id);
++                }
+                 Ok(l) if loaded.iter().any(|x: &Loaded| x.manifest.id == l.manifest.id) => {
+                     tracing::info!("Plugins: {} runs from its developer folder or this build's copy, not the installed copy", l.manifest.id);
+                 }
+-- 
+2.43.0
+

@@ -22,7 +22,8 @@ learnt, so nothing has to be asked or worked out again.
   for the person's yes. They decide; don't take features away on your own.
 - **Nothing is sent, no account, no prompts, no links out.** The person wants
   every plugin (new ones too, through this repo's releases only, never the
-  original's catalog), the timers, Pet Soul Tracker and Pet Finder, the
+  original's catalog), the timers, Pet Finder (this repo's Pet Soul Tracker; the
+  original's is left out), the
   market prices, and nothing sent anywhere: no A2 Tools account, sign-in,
   uploads, leaderboards, reports, live connection, Discord, donation or
   "report it here" links, no pop-up asking to sign in or share, no link to
@@ -69,7 +70,8 @@ meter updates only from these releases (patch 0003), plugins too (patch 0020).
 | `clicktrough/README.md` | Every patch and plugin change, in the person's terms. Keep it current. |
 | `clicktrough/patches/NNNN-*.patch` | The meter patches (`git format-patch`), applied in order on the original's tag. |
 | `clicktrough/backports/` | Fixes of the original taken before its release (none at the moment). |
-| `clicktrough/plugins/<id>/` | Patches for the original's plugins (Daily Checklist, Event Timers; Pet Soul Tracker and Enhanced Boss Telegraph without links). A file `installed-only` there: the plugin still runs only where installed. |
+| `clicktrough/plugins/<id>/` | Patches for the original's plugins (Daily Checklist, Event Timers; Enhanced Boss Telegraph without its link). A file `installed-only` there: the plugin still runs only where installed. |
+| `clicktrough/plugins-left-out.txt` | The original's plugins never shipped or run (patch 0026): Pet Soul Tracker (Pet Finder replaces it). |
 | `clicktrough/own-plugins/<id>/` | Own plugins: `map`, `market`, `pet-finder`. Edited here directly; `dev/` holds tests (`dev/ci.sh`) and generators, not shipped. |
 | `clicktrough/watch/plugin_watch.py` | The plugin watch (issues when the original has a new plugin). |
 | `clicktrough/dev/` | `setup-workspace.sh` (the working clones), `run-meter.sh` (the meter on a virtual screen). |

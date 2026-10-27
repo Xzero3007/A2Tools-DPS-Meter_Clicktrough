@@ -1,7 +1,7 @@
-From e71cf87b1e495e9cd9fe2a84dd1349ddbc8ba2cf Mon Sep 17 00:00:00 2001
+From bb026a8350289485eb4b48f7b275e661f739e3f0 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Tue, 27 Oct 2026 00:51:38 +0000
-Subject: [PATCH 25/25] Nothing sent, no account: the private build, with what
+Subject: [PATCH 25/26] Nothing sent, no account: the private build, with what
  it may download
 
 This build sends nothing to the original's services and asks for no

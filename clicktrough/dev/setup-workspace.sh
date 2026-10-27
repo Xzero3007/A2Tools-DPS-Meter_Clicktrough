@@ -126,6 +126,7 @@ if [ "$build" = 1 ]; then
   dest="$src/src-tauri/target/debug/_up_/src/data/ct-plugins"
   rm -rf "$dest" && mkdir -p "$dest"
   : > "$dest/installed-only.txt"
+  sed '/^#/d;/^$/d' "$here/clicktrough/plugins-left-out.txt" > "$dest/left-out.txt"
   for d in "$here"/clicktrough/plugins/*/; do
     [ -d "$d" ] && cp -r "$plugins/plugins/$(basename "$d")" "$dest/"
     [ -e "$d/installed-only" ] && basename "$d" >> "$dest/installed-only.txt"
@@ -133,6 +134,7 @@ if [ "$build" = 1 ]; then
   for d in "$plugins"/plugins/*/; do
     id=$(basename "$d")
     [ -f "$d/manifest.json" ] && [ ! -e "$d/.unpublished" ] && [ ! -e "$dest/$id" ] && [ ! -e "$here/clicktrough/own-plugins/$id" ] || continue
+    grep -qx "$id" "$here/clicktrough/plugins-left-out.txt" && continue
     cp -r "$d" "$dest/$id" && echo "$id" >> "$dest/installed-only.txt"
   done
   for d in "$here"/clicktrough/own-plugins/*/; do

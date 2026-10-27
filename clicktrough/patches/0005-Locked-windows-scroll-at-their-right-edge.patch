@@ -1,7 +1,7 @@
-From 48b70d65997f1ed90092715a8985cd9b0ceaffac Mon Sep 17 00:00:00 2001
+From 5acc6ce0e9ed67e447bca3d0fc3e6840c12a149a Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Fri, 23 Oct 2026 14:00:52 +0000
-Subject: [PATCH 05/25] Locked windows scroll at their right edge
+Subject: [PATCH 05/26] Locked windows scroll at their right edge
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
