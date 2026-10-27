@@ -39,6 +39,20 @@ test("the map is the zone's, else the one the pet monsters around stand on", () 
   assert.equal(M.mapOf({ zone: null, npcs: [] }), null);
 });
 
+test("monsters around win over a zone that is out of date, one stray doesn't", () => {
+  // Three of Verteron's monsters around, the zone still Altgard's: Verteron.
+  const three = [0, 1, 2].map((i) => [i + 1, Number(npc), sx + 100 * i, sy]);
+  assert.equal(M.mapOf({ zone: 1110, npcs: three }), "verteron");
+  // One or two are not enough to doubt the zone.
+  assert.equal(M.mapOf({ zone: 1110, npcs: three.slice(0, 1) }), "altgard");
+  assert.equal(M.mapOf({ zone: 1110, npcs: three.slice(0, 2) }), "altgard");
+  // The zone's own map with as many around stays.
+  const alt = Object.keys(D.spawns.altgard).find((n) => D.spawns.altgard[n].length >= 2 && !D.spawns.verteron[n]);
+  const [ax, ay] = D.spawns.altgard[alt];
+  const mixed = [...three, ...[0, 1, 2].map((i) => [i + 10, Number(alt), ax + 100 * i, ay])];
+  assert.equal(M.mapOf({ zone: 1110, npcs: mixed }), "altgard");
+});
+
 test("tracked pets merge: pinned beats farming beats needed", () => {
   const t = M.mergeTracked({
     a: { pets: [{ id: 1001, mark: "needed", name: "A" }, { id: 1002, mark: "farming" }] },

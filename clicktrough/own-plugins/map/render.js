@@ -561,6 +561,12 @@
   // map, and so does each gathering spot or Hidden Cube within 30 m of a place
   // one stands at on it. Null when nothing around is known anywhere.
   function detectMap(npcs, objects = []) {
+    const best = Object.entries(mapVotes(npcs, objects)).sort((a, b) => b[1] - a[1])[0];
+    return best ? best[0] : null;
+  }
+  /** How many of the monsters and objects around stand where each map has
+   *  them: { mapKey: count }. */
+  function mapVotes(npcs, objects = []) {
     const votes = {};
     const near = (pts, x, y, cm) => {
       for (let i = 0; i < pts.length; i += 2) {
@@ -582,13 +588,12 @@
         if (pts && near(pts, x, y, 3000)) votes[key] = (votes[key] || 0) + 1;
       }
     }
-    const best = Object.entries(votes).sort((a, b) => b[1] - a[1])[0];
-    return best ? best[0] : null;
+    return votes;
   }
 
   /** Compass bearing from a to b, 0 = up (north on the map), clockwise. */
   const bearing = (ax, ay, bx, by) => (Math.atan2(by - ay, bx - ax) * 180) / Math.PI + 90;
   const metres = (ax, ay, bx, by) => Math.hypot(bx - ax, by - ay) / 100;
 
-  globalThis.MapKit = Object.freeze({ MapView, detectMap, toNative, bearing, metres, GATHER_COLORS, PLACE_COLORS, PET_RED, GOLD });
+  globalThis.MapKit = Object.freeze({ MapView, detectMap, mapVotes, toNative, bearing, metres, GATHER_COLORS, PLACE_COLORS, PET_RED, GOLD });
 })();

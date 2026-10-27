@@ -16,7 +16,10 @@ follows you over the game.
   are in (Safe Haven, Black Claw Village ...) and, while the place is only
   about, how long ago it last was exact ("exact 21 s ago").
 - **Which map**: the game names your zone at login and at each teleport or
-  zone change. Started after that, the meter hasn't heard it yet: the map
+  zone change. When what is around you clearly belongs to another map than
+  the zone heard (3 or more monsters or spots, more than of the zone's map),
+  the map goes by what is around you: a zone change the meter missed doesn't
+  leave it on the wrong map. Started after that, the meter hasn't heard it yet: the map
   then goes by what is around you (pet monsters, gathering spots, Hidden
   Cubes), else it is the map you were on last time, marked "map as last
   time" (and a "?" in the overlay) until your next teleport.

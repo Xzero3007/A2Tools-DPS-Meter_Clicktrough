@@ -685,9 +685,17 @@
    *  gathering spots and Hidden Cubes around him stand on, else none. */
   function mapOf(world) {
     const byZone = world?.zone != null ? D.zones[String(world.zone)] : null;
-    if (byZone) return byZone;
-    return world?.npcs?.length || world?.objects?.length ? K.detectMap(world.npcs, world.objects) : null;
+    const around = world?.npcs?.length || world?.objects?.length ? K.mapVotes(world.npcs, world.objects) : {};
+    const [best, count] = Object.entries(around).sort((a, b) => b[1] - a[1])[0] || [null, 0];
+    // What is around wins over a zone that is clearly out of date: the meter
+    // hears the zone only with a loading screen, and one it missed (going
+    // over to the Elyos side, 2026-10-27) left the map on Altgard while the
+    // player stood in Verteron. Clearly: 3 or more around for another map,
+    // and more than for the zone's.
+    if (byZone) return best && best !== byZone && count >= MIN_AROUND && count > (around[byZone] || 0) ? best : byZone;
+    return best;
   }
+  const MIN_AROUND = 3;
 
   /** The region of a map a place lies in (AION2 Interactive Map), or null. */
   function regionAt(key, x, y) {
