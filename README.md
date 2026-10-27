@@ -1,14 +1,25 @@
 # A2Tools DPS Meter · Clicktrough
 
-An unofficial fork of the [A2Tools DPS Meter by taengu](https://github.com/taengu/A2Tools-DPS-Meter).
-This repo rebuilds every new version of the original automatically with a few
-changes for Linux (KDE Plasma on Wayland above all) and publishes it as an Arch
-package.
+A personal version of the A2Tools DPS Meter for AION 2, shared as a public
+fork because it is one.
+
+- **Built on the [A2Tools DPS Meter by taengu](https://github.com/taengu/A2Tools-DPS-Meter)**
+  and its contributors: all credit for the meter goes to them. This repo
+  rebuilds every new version of the original automatically with a few changes
+  for Linux (KDE Plasma on Wayland above all) and publishes it as an Arch
+  package.
+- **Pet Finder builds on [PetTracker by 0Fox2Give](https://github.com/0Fox2Give/PetTracker)**
+  (its data and packet layouts) and on A2 Tools' Pet Soul Tracker (its pet
+  list).
+- Everything else it takes from others, and under which licence:
+  [License and origin](#license-and-origin).
 
 > [!NOTE]
-> This is not the official project. Bugs in the meter itself belong to the
-> [original](https://github.com/taengu/A2Tools-DPS-Meter/issues). Problems with
-> the changes made here go to the
+> This is not the official project and not affiliated with A2 Tools or
+> NCSOFT. It is made for my own use; no support is promised. Bugs in the
+> meter itself belong to the
+> [original](https://github.com/taengu/A2Tools-DPS-Meter/issues); problems
+> with the changes made here go to the
 > [issues of this repo](https://github.com/Xzero3007/A2Tools-DPS-Meter_Clicktrough/issues).
 
 ## What's different
@@ -68,11 +79,16 @@ package.
   farm), pet mobs near you with how far and which way, and a Black Cloud
   Merchant shopping list (data from
   [PetTracker](https://github.com/0Fox2Give/PetTracker)); the Merchant tab
-  optionally in columns. Pet Soul Tracker itself can then be removed.
+  optionally in columns. The original's Pet Soul Tracker isn't shipped:
+  Pet Finder replaces it.
 - **Every plugin of the original, from this repo**: Settings → Plugins →
   Available installs any of them as this repo's build took them (tagged
   Clicktrough), test plugins too, such as Enhanced Boss Telegraph; a watch
   opens an issue when the original has a new plugin and builds it in.
+- **Nothing is sent, no account**: no A2 Tools account or sign-in prompt, no
+  uploads, leaderboards or reports, no links to websites in the meter or its
+  plugins. The meter only downloads: its updates from this repo, the market
+  prices, and the world boss and Abyss siege timers players share.
 - **Updates come from this repo**, so an official update doesn't replace the
   changes again; the green button looks for one every 20 minutes. Plugin
   updates too come only with a release here, never straight from the
@@ -92,8 +108,9 @@ Every setting, the patches one by one and how the automation works:
 
 After that, updates come through the **green button** in the meter's title.
 
-What the meter does in general and how to set it up (Proton, packet capture,
-OBS overlay …) is covered by the original:
+What the meter does in general and how to set it up (Proton, packet capture
+…) is covered by the original (its account, uploads and stream overlay are
+not in this build):
 [README](https://github.com/taengu/A2Tools-DPS-Meter#readme) and
 [Linux guide](https://github.com/taengu/A2Tools-DPS-Meter/blob/main/docs/linux.md).
 
@@ -106,9 +123,11 @@ OBS overlay …) is covered by the original:
 - Only what lies in [`clicktrough/`](clicktrough/) is changed: the patches
   (each dated in its header), fixes taken early from the original, the plugins
   and the build. The source of every package is the original at its version
-  tag plus these patches.
+  tag plus these patches; every change is described in
+  [clicktrough/README.md](clicktrough/README.md).
 - Pet Finder (`clicktrough/own-plugins/pet-finder`) takes its data and packet
-  layouts from [PetTracker](https://github.com/0Fox2Give/PetTracker) and its
+  layouts from [PetTracker](https://github.com/0Fox2Give/PetTracker) by
+  0Fox2Give (GPL-3.0) and its
   Pets tab from A2 Tools' Pet Soul Tracker
   ([A2Tools-Plugins](https://github.com/taengu/A2Tools-Plugins), GPL-3.0, see
   `NOTICE-PetSoulTracker.txt` there); its own parts are licensed under the
