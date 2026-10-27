@@ -160,7 +160,10 @@ jobs:
           exec > >(tee -a "$GITHUB_WORKSPACE/ct-build.log") 2>&1
           echo "== Patch and ship the original's plugins"
           set -euo pipefail
-          git clone -q --filter=blob:none "$PLUGINS" plugins-up
+          # Whole, with every old version of each file: `git am -3` below
+          # needs the version a patch was made on to merge it into a newer
+          # one (a partial clone lacks it: "could not build fake ancestor").
+          git clone -q "$PLUGINS" plugins-up
           git -C plugins-up checkout -q --detach "$PLUGINS_COMMIT"
           mkdir -p src/src/data/ct-plugins
           : > src/src/data/ct-plugins/installed-only.txt
