@@ -1,0 +1,246 @@
+From 5ee57172d1459c94f544de52ef9ac83abcd057b8 Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Tue, 27 Oct 2026 23:06:32 +0000
+Subject: [PATCH 30/30] Plugin dock: full opacity at a press, and a lock of its
+ own
+
+Beside the dock's opacity slider, a button makes the dock fully opaque,
+and the slider's value again at the next press; moving the slider lets
+go of it. It is kept with the dock's other preferences.
+
+Next to it, a lock for the dock alone. With every meter window locked
+("Lock all meter windows"), it frees the dock: clicks and scrolling stay
+in the plugins while the meter and the other windows let clicks through
+to the game. Pressed again, the dock is locked like the rest. With the
+windows free, it locks the dock alone. When the lock of all windows
+changes, the dock follows it again. Both buttons stay clickable while
+locked, as the dock bar's others; pressed, they show in gold.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01RahWACwaxzLAcYgwc9jk8C
+---
+ public/plugin-dock.html      |  8 +++++++
+ public/src/js/pluginDock.css | 43 ++++++++++++++++++++++++++++++++++
+ public/src/js/pluginDock.js  | 37 +++++++++++++++++++++++++++--
+ src-tauri/src/app.rs         | 45 ++++++++++++++++++++++++++++++++++++
+ src-tauri/src/plugins/mod.rs |  1 +
+ 5 files changed, 132 insertions(+), 2 deletions(-)
+
+diff --git a/public/plugin-dock.html b/public/plugin-dock.html
+index e28ac07..8e4a083 100644
+--- a/public/plugin-dock.html
++++ b/public/plugin-dock.html
+@@ -11,6 +11,14 @@
+     <header class="pluginBar dockBar">
+       <div class="dockTabs" role="tablist"></div>
+       <input type="range" class="pluginOpacity" min="20" max="100" step="5" value="100" aria-label="Background opacity" title="Background opacity" />
++      <!-- Clicktrough: full opacity at a press, the slider's again at the next. -->
++      <button type="button" class="dockOpaque" aria-label="Full opacity" title="Full opacity" aria-pressed="false">
++        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect class="dockOpaqueFill" x="4" y="4" width="16" height="16" rx="2"/></svg>
++      </button>
++      <!-- Clicktrough: this window's own lock, apart from the meter's. -->
++      <button type="button" class="dockLock" aria-label="Lock this window" title="Lock this window" aria-pressed="false">
++        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path class="dockLockShut" d="M8 11V7a4 4 0 0 1 8 0v4"/><path class="dockLockOpen" d="M8 11V7a4 4 0 0 1 7.75-1.4"/></svg>
++      </button>
+       <button type="button" class="pluginMeter" aria-label="Hide the DPS meter" title="Hide the DPS meter" aria-pressed="true">
+         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3v18h18"/><path d="M7 16V11"/><path d="M12 16V7"/><path d="M17 16v-3"/></svg>
+       </button>
+diff --git a/public/src/js/pluginDock.css b/public/src/js/pluginDock.css
+index 02d2bd3..3247313 100644
+--- a/public/src/js/pluginDock.css
++++ b/public/src/js/pluginDock.css
+@@ -219,3 +219,46 @@ body.dockFolded .dockStage {
+ }
+ 
+ 
++
++/* Clicktrough: full opacity and this window's lock, beside the slider.
++   Pressed in gold, as the meter's pressed buttons (no blue). */
++.dockOpaque,
++.dockLock {
++  flex: none;
++  display: flex;
++  align-items: center;
++  justify-content: center;
++  width: 15px;
++  height: 15px;
++  padding: 0;
++  border: 0;
++  background: none;
++  color: rgba(255, 255, 255, 0.55);
++  cursor: pointer;
++  transition: color 120ms ease;
++}
++.dockOpaque svg,
++.dockLock svg {
++  width: 15px;
++  height: 15px;
++}
++.dockOpaque:hover,
++.dockOpaque:focus-visible,
++.dockLock:hover,
++.dockLock:focus-visible {
++  color: #fff;
++}
++.dockOpaque[aria-pressed="true"],
++.dockLock[aria-pressed="true"] {
++  color: #e2b54f;
++}
++.dockOpaque[aria-pressed="true"] .dockOpaqueFill {
++  fill: currentColor;
++}
++.dockLock .dockLockShut,
++.dockLock[aria-pressed="true"] .dockLockOpen {
++  display: none;
++}
++.dockLock[aria-pressed="true"] .dockLockShut {
++  display: inline;
++}
+diff --git a/public/src/js/pluginDock.js b/public/src/js/pluginDock.js
+index 7fbdc22..ade6242 100644
+--- a/public/src/js/pluginDock.js
++++ b/public/src/js/pluginDock.js
+@@ -335,16 +335,49 @@
+     invoke("open_settings_at", { section: "plugins" }).catch(() => {});
+   });
+ 
+-  // One opacity for the whole dock.
+-  const applyOpacity = () => document.body.style.setProperty("--panel-alpha", String(prefs.opacity / 100));
++  // One opacity for the whole dock. Clicktrough: the button beside the
++  // slider makes it fully opaque, and the slider's value again at the next
++  // press; moving the slider lets go of it.
++  const opaqueBtn = document.querySelector(".dockOpaque");
++  const applyOpacity = () => {
++    document.body.style.setProperty("--panel-alpha", String(prefs.opaque ? 1 : prefs.opacity / 100));
++    opaqueBtn?.setAttribute("aria-pressed", String(!!prefs.opaque));
++    if (opaqueBtn) setLabel(opaqueBtn, prefs.opaque
++      ? t("opaqueOff", "Back to the slider's opacity")
++      : t("opaque", "Full opacity (press again for the slider's)"));
++  };
+   opacity.value = String(prefs.opacity);
+   applyOpacity();
+   opacity.addEventListener("input", () => {
+     prefs.opacity = Number(opacity.value) || 100;
++    prefs.opaque = false;
++    applyOpacity();
++    savePrefs();
++  });
++  opaqueBtn?.addEventListener("click", () => {
++    prefs.opaque = !prefs.opaque;
+     applyOpacity();
+     savePrefs();
+   });
+ 
++  // Clicktrough: this window's own lock. With every meter window locked, it
++  // frees this one alone (clicks and scrolling in the plugins), and locks it
++  // again; with them free, it locks this one alone. The meter keeps it until
++  // the lock of all windows changes, then this window follows that again.
++  const lockBtn = document.querySelector(".dockLock");
++  const showLock = (locked) => {
++    if (!lockBtn) return;
++    lockBtn.setAttribute("aria-pressed", String(!!locked));
++    setLabel(lockBtn, locked
++      ? t("unlockDock", "Free this window (clicks stay here; the meter stays locked)")
++      : t("lockDock", "Lock this window (clicks go to the game)"));
++  };
++  lockBtn?.addEventListener("click", () => {
++    invoke("dock_lock_toggle").then(showLock).catch(() => {});
++  });
++  listen("dock-locked", (event) => showLock(event.payload === true));
++  invoke("dock_lock_state").then(showLock).catch(() => showLock(false));
++
+   invoke("dock_hello").then(async (hello) => {
+     await loadText(hello.language || "en");
+     applyTheme(hello.theme);
+diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
+index 4e88664..92b2715 100644
+--- a/src-tauri/src/app.rs
++++ b/src-tauri/src/app.rs
+@@ -435,6 +435,40 @@ fn other_window_ignores(label: &str, screenshot: bool, all_locked: bool) -> Opti
+     tool.then_some(screenshot || all_locked)
+ }
+ 
++/// Clicktrough: the plugin dock's own lock, set by its lock button: 0 as
++/// the other windows, 1 locked, 2 free. Back to 0 when the lock of all
++/// windows changes, so the dock follows it again.
++static DOCK_LOCK: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
++/// The lock of all windows when last synced: 0 off, 1 on, 2 not yet.
++static LAST_ALL_LOCKED: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(2);
++
++/// Clicktrough: whether the plugin dock lets clicks through now: its own
++/// lock where its button set one, else as the other windows.
++fn dock_locked(all_locked: bool) -> bool {
++    match DOCK_LOCK.load(std::sync::atomic::Ordering::Relaxed) {
++        1 => true,
++        2 => false,
++        _ => all_locked,
++    }
++}
++
++/// Clicktrough: the dock's lock button. Locked: clicks go through it to the
++/// game; free: it takes them, while the other windows stay as they are.
++/// Answers whether it is locked now.
++#[tauri::command]
++fn dock_lock_toggle(app: tauri::AppHandle) -> bool {
++    let locked = !dock_locked(ALL_WINDOWS_LOCKED.load(std::sync::atomic::Ordering::Relaxed));
++    DOCK_LOCK.store(if locked { 1 } else { 2 }, std::sync::atomic::Ordering::Relaxed);
++    sync_other_windows(&app);
++    locked
++}
++
++/// Clicktrough: whether the dock is locked now, for its lock button.
++#[tauri::command]
++fn dock_lock_state() -> bool {
++    dock_locked(ALL_WINDOWS_LOCKED.load(std::sync::atomic::Ordering::Relaxed))
++}
++
+ /// Every window besides the overlay as the screenshot tool and the lock say:
+ /// all or nothing for the tool windows, by their lock and area for plugins'
+ /// icons. Called when either changes, and when a tool window opens.
+@@ -445,6 +479,13 @@ pub fn sync_other_windows(app: &tauri::AppHandle) {
+             && s.settings.get(LOCK_ALL_WINDOWS_KEY).as_deref() == Some("true")
+     });
+     ALL_WINDOWS_LOCKED.store(locked, Ordering::Relaxed);
++    // Clicktrough: the lock of all windows changed: the dock follows it again.
++    let was = LAST_ALL_LOCKED.swap(locked as u8, Ordering::Relaxed);
++    if was != 2 && was != locked as u8 {
++        DOCK_LOCK.store(0, Ordering::Relaxed);
++    }
++    let dock = dock_locked(locked);
++    let _ = app.emit_to(crate::plugins::dock::LABEL, "dock-locked", dock);
+     // The pages stop offering their resize edges while locked: the right
+     // one is the strip that scrolls them (tauriBridge.js).
+     let _ = app.emit("meter-windows-locked", locked);
+@@ -454,6 +495,8 @@ pub fn sync_other_windows(app: &tauri::AppHandle) {
+         .is_none_or(|s| s.settings.get(LOCK_SCROLL_EDGE_KEY).as_deref() != Some("false"));
+     let buttons = lock_buttons_on(app);
+     for (label, window) in app.webview_windows() {
++        // Clicktrough: the dock by its own lock.
++        let locked = if label == crate::plugins::dock::LABEL { dock } else { locked };
+         let Some(ignore) = other_window_ignores(&label, screenshot, locked) else { continue };
+         // Locked, not while a screenshot tool is in front (its selection is
+         // dragged across them).
+@@ -4449,6 +4492,8 @@ pub fn run() {
+             crate::plugins::plugin_window_size,
+             crate::plugins::plugin_restore_bundled,
+             crate::plugins::plugin_set_order,
++            dock_lock_toggle,
++            dock_lock_state,
+             crate::plugins::widgets::plugin_widget_file,
+             crate::plugins::widgets::plugin_widget_resize,
+             open_settings_at,
+diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
+index 4aee1d5..1fa7961 100644
+--- a/src-tauri/src/plugins/mod.rs
++++ b/src-tauri/src/plugins/mod.rs
+@@ -152,6 +152,7 @@ const PLUGIN_SURFACE_COMMANDS: &[&str] = &[
+     // Clicktrough's plugin calls: a2.share, a2.file, a2.web.get, the window
+     // sizes, a widget's files and corners, and locked windows' buttons.
+     "plugin_share", "plugin_file", "plugin_web_get", "plugin_window_size", "plugin_set_order",
++    "dock_lock_toggle", "dock_lock_state",
+     "plugin_widget_file", "plugin_widget_resize", "set_locked_buttons",
+ ];
+ 
+-- 
+2.43.0
+

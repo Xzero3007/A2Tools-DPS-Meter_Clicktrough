@@ -1,0 +1,223 @@
+From 359c0a6fcab00667d8c029fb34d83253cdcbafda Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Tue, 27 Oct 2026 23:04:48 +0000
+Subject: [PATCH 29/30] Plugins: an order the player sets, for the dock's tabs
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Settings → Plugins → Installed has arrows to move a plugin up or down;
+the plugin dock's tabs follow that order. The meter keeps it
+(`dpsMeter.pluginOrder`), so it survives a restart and the dock's own
+storage.
+
+The dock's tabs were meant to be dragged into order, but on Linux the
+window's file drop handler took the drag and nothing moved. The dock
+window no longer has one, and a tab dragged there sets the same order.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01RahWACwaxzLAcYgwc9jk8C
+---
+ public/src/js/pluginDock.js     |  8 ++++++++
+ public/src/js/pluginSettings.js | 28 +++++++++++++++++++++++---
+ src-tauri/src/app.rs            |  1 +
+ src-tauri/src/plugins/dock.rs   |  6 +++++-
+ src-tauri/src/plugins/mod.rs    | 35 ++++++++++++++++++++++++++++++++-
+ src/styles.css                  |  3 +++
+ 6 files changed, 76 insertions(+), 5 deletions(-)
+
+diff --git a/public/src/js/pluginDock.js b/public/src/js/pluginDock.js
+index 60f0bd1..7fbdc22 100644
+--- a/public/src/js/pluginDock.js
++++ b/public/src/js/pluginDock.js
+@@ -158,6 +158,8 @@
+       prefs.order = ids;
+       dragging = null;
+       render();
++      // Clicktrough: kept by the meter, for Settings' list and the next start.
++      invoke("plugin_set_order", { order: ids }).catch(() => {});
+     });
+     tab.addEventListener("dragend", () => { dragging = null; });
+     return tab;
+@@ -221,6 +223,12 @@
+   // ones, stopped for the ones gone, tabs shown or hidden.
+   const applyLayout = (layout) => {
+     const tabs = Array.isArray(layout?.tabs) ? layout.tabs : [];
++    // Clicktrough: the order the player set, kept by the meter (Settings'
++    // arrows, or a tab dragged here); the ones it doesn't name after.
++    if (Array.isArray(layout?.order) && layout.order.length) {
++      prefs.order = [...layout.order, ...prefs.order.filter((id) => !layout.order.includes(id))];
++      savePrefs();
++    }
+     const ids = new Set(tabs.map((x) => x.id));
+     for (const [id, d] of docked) {
+       if (ids.has(id)) continue;
+diff --git a/public/src/js/pluginSettings.js b/public/src/js/pluginSettings.js
+index e96811c..cb211b6 100644
+--- a/public/src/js/pluginSettings.js
++++ b/public/src/js/pluginSettings.js
+@@ -434,8 +434,24 @@
+       toggle.checked = !!view.devMode;
+       devRow.hidden = !view.devMode;
+       list.replaceChildren();
+-      for (const p of view.plugins || []) {
+-        if (!matches(p.name, p.description, p.id)) continue;
++      // Clicktrough: in the order the player set (the dock's tabs follow
++      // it); the ones not in it after, as listed.
++      const order = view.order || [];
++      const rank = (id) => (order.includes(id) ? order.indexOf(id) : order.length);
++      const plugins = (view.plugins || []).map((p, i) => ({ p, i }))
++        .sort((a, b) => rank(a.p.id) - rank(b.p.id) || a.i - b.i)
++        .map((x) => x.p);
++      // Move a plugin one place up (-1) or down (+1), and keep it.
++      const move = (id, by) => {
++        const ids = plugins.map((x) => x.id);
++        const at = ids.indexOf(id);
++        const to = at + by;
++        if (at < 0 || to < 0 || to >= ids.length) return;
++        [ids[at], ids[to]] = [ids[to], ids[at]];
++        run(invoke("plugin_set_order", { order: ids }));
++      };
++      plugins.forEach((p, index) => {
++        if (!matches(p.name, p.description, p.id)) return;
+         const tags = [];
+         const wasUpdated = !p.error && updatedFrom.has(p.id);
+         if (wasUpdated) {
+@@ -475,6 +491,12 @@
+           controls.push(iconButton("app-window", t("settings.plugins.open", "Open"), () => invoke("plugin_open", { id: p.id }).catch((e) => say(String(e)))));
+         }
+         if (!p.error) controls.push(enabledSwitch(p, on));
++        // Clicktrough: its place in the order, one up or down.
++        const up = iconButton("arrow-up", "Move up (the plugin window's tabs follow this order)", () => move(p.id, -1), "pluginOrderBtn");
++        const down = iconButton("arrow-down", "Move down (the plugin window's tabs follow this order)", () => move(p.id, 1), "pluginOrderBtn");
++        up.disabled = index === 0;
++        down.disabled = index === plugins.length - 1;
++        controls.unshift(up, down);
+ 
+         // Its details: the whole description, when it hides, what it may
+         // do, and Remove.
+@@ -521,7 +543,7 @@
+         if (wasUpdated) item.classList.add("pluginUpdated");
+         if (!p.error && !on) item.classList.add("pluginOff");
+         list.append(item);
+-      }
++      });
+       empty.hidden = list.childElementCount > 0 || !!query;
+       window.lucide?.createIcons?.({ root: list });
+       refreshBar();
+diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
+index 2ec9658..4e88664 100644
+--- a/src-tauri/src/app.rs
++++ b/src-tauri/src/app.rs
+@@ -4448,6 +4448,7 @@ pub fn run() {
+             crate::plugins::plugin_web_get,
+             crate::plugins::plugin_window_size,
+             crate::plugins::plugin_restore_bundled,
++            crate::plugins::plugin_set_order,
+             crate::plugins::widgets::plugin_widget_file,
+             crate::plugins::widgets::plugin_widget_resize,
+             open_settings_at,
+diff --git a/src-tauri/src/plugins/dock.rs b/src-tauri/src/plugins/dock.rs
+index bfb9032..cfe7e9e 100644
+--- a/src-tauri/src/plugins/dock.rs
++++ b/src-tauri/src/plugins/dock.rs
+@@ -94,7 +94,8 @@ pub fn layout(app: &tauri::AppHandle) -> Value {
+             Some(serde_json::json!({ "id": id, "name": name, "version": version, "shown": tab_shown(app, &id) }))
+         })
+         .collect();
+-    serde_json::json!({ "tabs": tabs })
++    // Clicktrough: the order the player set (Settings, or a tab dragged).
++    serde_json::json!({ "tabs": tabs, "order": super::order(app) })
+ }
+ 
+ /// Bring the dock in line with its plugins: built when it has any, closed
+@@ -260,6 +261,9 @@ fn build(app: &tauri::AppHandle, visible: bool) -> Result<(), String> {
+         .focused(false)
+         // Transparent, so the panel's opacity slider shows the game through it.
+         .transparent(true)
++        // Clicktrough: the page's own drag and drop (its tabs dragged into
++        // another order), which the window's file drop handler took.
++        .disable_drag_drop_handler()
+         .shadow(false)
+         .build()
+         .map_err(|e| e.to_string())?;
+diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
+index bb83c21..4aee1d5 100644
+--- a/src-tauri/src/plugins/mod.rs
++++ b/src-tauri/src/plugins/mod.rs
+@@ -151,7 +151,7 @@ const PLUGIN_SURFACE_COMMANDS: &[&str] = &[
+     "plugin_window", "plugin_window_fit", "set_meter_shown", "start_tool_drag",
+     // Clicktrough's plugin calls: a2.share, a2.file, a2.web.get, the window
+     // sizes, a widget's files and corners, and locked windows' buttons.
+-    "plugin_share", "plugin_file", "plugin_web_get", "plugin_window_size",
++    "plugin_share", "plugin_file", "plugin_web_get", "plugin_window_size", "plugin_set_order",
+     "plugin_widget_file", "plugin_widget_resize", "set_locked_buttons",
+ ];
+ 
+@@ -297,6 +297,9 @@ pub struct PluginsView {
+     /// Clicktrough: this build's plugins that don't run (removed, or not
+     /// installed yet), for Available to install.
+     pub offered_bundled: Vec<PluginInfo>,
++    /// Clicktrough: the plugins' order as the player set it (ids; the ones
++    /// not in it after, by name): the dock's tabs and Settings' list.
++    pub order: Vec<String>,
+ }
+ 
+ fn view(app: &tauri::AppHandle, host: &PluginHost) -> PluginsView {
+@@ -312,9 +315,39 @@ fn view(app: &tauri::AppHandle, host: &PluginHost) -> PluginsView {
+         hide_unfocused: listed(app, HIDE_UNFOCUSED_KEY),
+         own_window: listed(app, dock::OWN_WINDOW_KEY),
+         offered_bundled: offered_bundled(app, host),
++        order: order(app),
+     }
+ }
+ 
++/// Clicktrough: the plugins' order as the player set it, ids.
++pub const ORDER_KEY: &str = "dpsMeter.pluginOrder";
++
++/// Clicktrough: the plugins' order as the player set it (Settings' arrows,
++/// or a dock tab dragged): the dock's tabs follow it.
++pub fn order(app: &tauri::AppHandle) -> Vec<String> {
++    listed(app, ORDER_KEY)
++}
++
++/// Clicktrough: set the plugins' order (ids, each once); the dock's tabs
++/// follow at once. Answers what Settings shows.
++#[tauri::command]
++pub fn plugin_set_order(app: tauri::AppHandle, order: Vec<String>) -> Result<PluginsView, String> {
++    let mut ids: Vec<String> = Vec::new();
++    for id in order {
++        if valid_id(&id) && !ids.contains(&id) {
++            ids.push(id);
++        }
++    }
++    if ids.len() > 500 {
++        return Err("too many plugins".into());
++    }
++    let state = app.try_state::<AppState>().ok_or("no app state")?;
++    state.settings.set(ORDER_KEY, &serde_json::to_string(&ids).unwrap_or_default());
++    dock::sync(&app, None);
++    let host = host(&app)?;
++    Ok(view(&app, &host))
++}
++
+ /// Clicktrough: the ids of this build's plugins the player removed.
+ fn bundled_removed(app: &tauri::AppHandle) -> Vec<String> {
+     listed(app, BUNDLED_REMOVED_KEY)
+diff --git a/src/styles.css b/src/styles.css
+index 1d1d19e..e1a9502 100644
+--- a/src/styles.css
++++ b/src/styles.css
+@@ -8739,6 +8739,9 @@ html.a2-offline .historyUploadBtn {
+   outline-offset: 1px;
+ }
+ .settingsPanel .pluginIconBtn svg { width: 15px; height: 15px; }
++/* Clicktrough: a plugin's place in the order, narrow, dimmed at the ends. */
++.settingsPanel .pluginOrderBtn { width: 20px; }
++.settingsPanel .pluginOrderBtn:disabled { opacity: 0.25; cursor: default; background: none; border-color: transparent; }
+ .settingsPanel .pluginUpdateBtn:disabled svg { animation: pluginSpin 900ms linear infinite; }
+ @keyframes pluginSpin { to { transform: rotate(360deg); } }
+ @media (prefers-reduced-motion: reduce) {
+-- 
+2.43.0
+

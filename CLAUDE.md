@@ -70,7 +70,7 @@ meter updates only from these releases (patch 0003), plugins too (patch 0020).
 | `clicktrough/README.md` | Every patch and plugin change, in the person's terms. Keep it current. |
 | `clicktrough/patches/NNNN-*.patch` | The meter patches (`git format-patch`), applied in order on the original's tag. |
 | `clicktrough/backports/` | Fixes of the original taken before its release (none at the moment). |
-| `clicktrough/plugins/<id>/` | Patches for the original's plugins (Daily Checklist, Event Timers; Enhanced Boss Telegraph without its link). A file `installed-only` there: the plugin still runs only where installed. |
+| `clicktrough/plugins/<id>/` | Patches for the original's plugins (Daily Checklist, Event Timers, Roster's report times and hints; Enhanced Boss Telegraph without its link). A file `installed-only` there: the plugin still runs only where installed. |
 | `clicktrough/plugins-left-out.txt` | The original's plugins never shipped or run (patch 0026): Pet Soul Tracker (Pet Finder replaces it). |
 | `clicktrough/own-plugins/<id>/` | Own plugins: `map`, `market`, `pet-finder`. Edited here directly; `dev/` holds tests (`dev/ci.sh`) and generators, not shipped. |
 | `clicktrough/watch/plugin_watch.py` | The plugin watch (issues when the original has a new plugin). |

@@ -1,0 +1,372 @@
+From 10bce0ff3fe43e9b71d91c29f4744d2dc374c864 Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Tue, 27 Oct 2026 23:02:23 +0000
+Subject: [PATCH 28/30] Plugins: character values with when the game reported
+ them; shops per character
+
+The character event now says when the game last reported each value
+(`seenAt`: Odyle energy, each content count, shop limit and craft, Kinah
+by the game's own time, Abyss Points), also when it reported one
+unchanged. A plugin keeping values per character (Roster) took the first
+time it saw a value: the same count reported again a week later looked a
+week old, and past the reset it showed 0.
+
+Shop limits and crafts, which the game sends only as the shop or the
+crafting window opens, were dropped at every login. They are now kept by
+character and come back when that character plays again.
+
+A login's Kinah that comes after the self record naming who logged in
+(the list, the record, then `a5 ff`) is theirs at once; it waited for the
+next self record, minutes later.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01RahWACwaxzLAcYgwc9jk8C
+---
+ src-tauri/src/capture/stream_processor.rs |  45 +++++++++
+ src-tauri/src/combat/data_storage.rs      | 111 +++++++++++++++++++++-
+ src-tauri/src/plugins/a2.js               |   6 +-
+ src-tauri/src/plugins/mod.rs              |  14 +++
+ 4 files changed, 174 insertions(+), 2 deletions(-)
+
+diff --git a/src-tauri/src/capture/stream_processor.rs b/src-tauri/src/capture/stream_processor.rs
+index f50f65d..c6e1a3b 100644
+--- a/src-tauri/src/capture/stream_processor.rs
++++ b/src-tauri/src/capture/stream_processor.rs
+@@ -4558,6 +4558,51 @@ mod tests {
+         assert!(list.shop_limits.is_empty() && list.crafts.is_empty());
+     }
+ 
++    /// Clicktrough: a login's Kinah that comes after the self record (the
++    /// list, then the record, then `a5 ff`) is theirs at once; it waited for
++    /// the next self record, minutes later.
++    #[test]
++    fn a_logins_kinah_after_the_self_record_is_theirs() {
++        let (storage, mut p) = processor();
++        let now = 1_792_929_600_000;
++        p.set_override_timestamp(Some(now));
++        storage.set_local_identity_from_game(1030, Some("Main".into()));
++        storage.set_kinah_today(400, now, false);
++        // Alt's login: the list, the self record, then its Kinah.
++        storage.set_content_counts(vec![(1, [12, 9])], true);
++        storage.set_local_identity_from_game(4294, Some("Alt".into()));
++        p.parse_perfect_packet(&hex("13a5ff00000000000000000983c072a1010000"));
++        assert_eq!(storage.kinah_today_at(now), Some(0));
++        assert_eq!(storage.entry_list().owner.as_deref(), Some("Alt"));
++    }
++
++    /// Clicktrough: a character's shop limits and crafts come back when they
++    /// play again (the game sends them only as the shop or crafting window
++    /// opens), and each value says when the game last reported it.
++    #[test]
++    fn shop_limits_and_crafts_come_back_with_their_character() {
++        let (storage, _p) = processor();
++        let now = 1_792_929_600_000;
++        storage.set_local_identity_from_game(1030, Some("Main".into()));
++        storage.set_content_counts(vec![(1, [12, 9])], false);
++        storage.set_shop_limits(&[(100_134, 5, now + 86_400_000)], true);
++        storage.set_craft_counts(&[(32_070_002, 2)], true);
++        let seen = storage.entry_list().seen;
++        assert!(seen.shop_limits.contains_key(&100_134) && seen.crafts.contains_key(&32_070_002));
++        assert!(seen.counts.contains_key(&1));
++        // Alt logs in: not theirs.
++        storage.set_content_counts(vec![(1, [3, 0])], true);
++        storage.set_local_identity_from_game(4294, Some("Alt".into()));
++        assert!(storage.entry_list().shop_limits.is_empty());
++        assert!(storage.craft_counts().is_empty());
++        // Main again: theirs are back.
++        storage.set_content_counts(vec![(1, [12, 9])], true);
++        storage.set_local_identity_from_game(1030, Some("Main".into()));
++        assert_eq!(storage.craft_counts().get(&32_070_002), Some(&2));
++        assert_eq!(storage.shop_limits_at(now).get(&100_134), Some(&(5, Some(now + 86_400_000))));
++        assert!(storage.entry_list().seen.crafts.contains_key(&32_070_002));
++    }
++
+     /// Kinah gained today at a login, then a pickup; the week's Abyss Points
+     /// and limit (2026-10-25, Nullception). A login's wait for the self
+     /// record; a reset since gives 0.
+diff --git a/src-tauri/src/combat/data_storage.rs b/src-tauri/src/combat/data_storage.rs
+index 0f9bd52..a578f33 100644
+--- a/src-tauri/src/combat/data_storage.rs
++++ b/src-tauri/src/combat/data_storage.rs
+@@ -738,6 +738,22 @@ struct Inner {
+     /// was seen (unix ms). An Abyss passage's usage time left (ms), the times
+     /// of others. Gone again as a count.
+     content_times: std::collections::BTreeMap<u32, (u64, i64)>,
++    /// Clicktrough: when the game last reported each value (unix ms), also
++    /// when it reported it unchanged, for plugins to tell a value from last
++    /// week from the same value reported again (`EntrySeen`).
++    odyle_seen: Option<i64>,
++    content_seen: std::collections::BTreeMap<u32, i64>,
++    shop_seen: std::collections::BTreeMap<u32, i64>,
++    craft_seen: std::collections::BTreeMap<u32, i64>,
++    duty_seen: Option<i64>,
++    /// Clicktrough: each character's shop limits and crafts, kept at the
++    /// next login's list (which clears them) for when they play again: the
++    /// game sends them only as the shop or crafting window opens.
++    shops_by_character: HashMap<String, CharacterShop>,
++    /// Clicktrough: the self record named who logged in since the last
++    /// login's list (the owner waited for it): the login's Kinah after it
++    /// is theirs.
++    named_since_list: bool,
+ 
+     // Local player
+     local_player_id: Option<i64>,
+@@ -874,6 +890,13 @@ impl DataStorage {
+                 login_abyss_points: None,
+                 daily_duty: None,
+                 content_times: Default::default(),
++                odyle_seen: None,
++                content_seen: Default::default(),
++                shop_seen: Default::default(),
++                craft_seen: Default::default(),
++                duty_seen: None,
++                shops_by_character: HashMap::new(),
++                named_since_list: false,
+                 local_player_id: None,
+                 supporters: std::sync::Arc::new(crate::supporters::Roster::default()),
+                 local_character_name: None,
+@@ -1147,8 +1170,21 @@ impl DataStorage {
+             || inner.kinah_today.is_some()
+             || inner.abyss_points.is_some();
+         if known && (inner.odyle_awaits_self_record || inner.odyle_owner.is_none()) {
++            inner.named_since_list = inner.odyle_awaits_self_record;
+             inner.odyle_owner = name.clone();
+             inner.odyle_awaits_self_record = false;
++            // Clicktrough: their shop limits and crafts from when they last
++            // played, unless the game has sent new ones since.
++            if let Some(kept) = name.as_ref().and_then(|n| inner.shops_by_character.remove(n.trim())) {
++                if inner.shop_limits.is_empty() {
++                    inner.shop_limits = kept.shop_limits;
++                    inner.shop_seen = kept.shop_seen;
++                }
++                if inner.craft_counts.is_empty() {
++                    inner.craft_counts = kept.craft_counts;
++                    inner.craft_seen = kept.craft_seen;
++                }
++            }
+         }
+         set_game_identity(&mut inner, id, name);
+         changed
+@@ -1567,12 +1603,16 @@ impl DataStorage {
+     ) {
+         let crate::capture::stream_processor::ContentEntries { counts, times } = entries;
+         let mut inner = self.inner.write();
++        // Clicktrough: whose the shop limits and crafts were, before this
++        // list (a login's) makes the owner unknown.
++        let before = inner.odyle_owner.clone();
+         own_list(&mut inner, whole_list);
+         if let Some((basic, charged)) = energy.filter(|&e| inner.odyle_energy != Some(e)) {
+             tracing::info!("Odyle energy: {basic} basic, {charged} charged");
+         }
+         if whole_list || energy.is_some() {
+             inner.odyle_energy = energy;
++            inner.odyle_seen = energy.map(|_| now);
+         }
+         if whole_list {
+             inner.content_counts.clear();
+@@ -1584,8 +1624,24 @@ impl DataStorage {
+             inner.daily_duty = None;
+             // The shop's limits and the crafts are the character's too
+             // (a server-wide recipe's count is the same on each).
++            // Clicktrough: kept by character for when they play again.
++            if let Some(owner) = before.map(|o| o.trim().to_string()).filter(|o| !o.is_empty()) {
++                if !inner.shop_limits.is_empty() || !inner.craft_counts.is_empty() {
++                    let kept = CharacterShop {
++                        shop_limits: std::mem::take(&mut inner.shop_limits),
++                        shop_seen: std::mem::take(&mut inner.shop_seen),
++                        craft_counts: std::mem::take(&mut inner.craft_counts),
++                        craft_seen: std::mem::take(&mut inner.craft_seen),
++                    };
++                    inner.shops_by_character.insert(owner, kept);
++                }
++            }
+             inner.shop_limits.clear();
+             inner.craft_counts.clear();
++            inner.shop_seen.clear();
++            inner.craft_seen.clear();
++            inner.content_seen.clear();
++            inner.duty_seen = None;
+             // Kinah and Abyss Points too: the new character's come with the
+             // login (held until its self record, `login_kinah`).
+             inner.kinah_today = None;
+@@ -1600,6 +1656,7 @@ impl DataStorage {
+                 tracing::debug!("Content count {id}: {} (+{})", v[0], v[1]);
+             }
+             inner.content_counts.insert(id, v);
++            inner.content_seen.insert(id, now);
+         }
+         for (id, time) in times {
+             inner.content_counts.remove(&id);
+@@ -1638,6 +1695,20 @@ impl DataStorage {
+             kinah_today: kinah_today_of(&inner, now),
+             abyss_points: abyss_points_of(&inner, now),
+             times: inner.content_times.clone(),
++            seen: EntrySeen {
++                odyle_energy: inner.odyle_seen,
++                counts: {
++                    let mut seen = inner.content_seen.clone();
++                    if let Some(at) = inner.duty_seen.filter(|_| inner.daily_duty.is_some()) {
++                        seen.insert(DAILY_DUTY_ID, at);
++                    }
++                    seen
++                },
++                shop_limits: inner.shop_seen.clone(),
++                crafts: inner.craft_seen.clone(),
++                kinah_today: inner.kinah_today.map(|(_, at)| at),
++                abyss_points: inner.abyss_points.map(|(_, _, at)| at),
++            },
+         }
+     }
+ 
+@@ -1650,11 +1721,14 @@ impl DataStorage {
+         own_list(&mut inner, false);
+         if whole {
+             inner.shop_limits.retain(|id, _| limits.iter().any(|l| l.0 == *id));
++            inner.shop_seen.retain(|id, _| limits.iter().any(|l| l.0 == *id));
+         }
++        let now = now_ms();
+         for &(id, bought, reset_ms) in limits {
+             if inner.shop_limits.insert(id, (bought, reset_ms)) != Some((bought, reset_ms)) {
+                 tracing::info!("Shop limit {id}: {bought} bought (resets {reset_ms})");
+             }
++            inner.shop_seen.insert(id, now);
+         }
+     }
+ 
+@@ -1672,12 +1746,15 @@ impl DataStorage {
+         own_list(&mut inner, false);
+         if whole {
+             inner.craft_counts.clear();
++            inner.craft_seen.clear();
+         }
++        let now = now_ms();
+         for &(recipe, n) in counts {
+             if !whole && inner.craft_counts.get(&recipe) != Some(&n) {
+                 tracing::info!("Craft count {recipe}: {n}");
+             }
+             inner.craft_counts.insert(recipe, n);
++            inner.craft_seen.insert(recipe, now);
+         }
+     }
+ 
+@@ -1690,7 +1767,11 @@ impl DataStorage {
+     pub fn set_kinah_today(&self, kinah: u64, at: i64, login: bool) {
+         let mut inner = self.inner.write();
+         tracing::debug!("Kinah today: {kinah}{}", if login { " (login)" } else { "" });
+-        if login {
++        // Clicktrough: a login's that comes after the self record that named
++        // who logged in (the list before it made the owner wait for one) is
++        // theirs at once; held, it waited for the next self record.
++        let named = inner.named_since_list && !inner.odyle_awaits_self_record && inner.odyle_owner.is_some();
++        if login && !named {
+             inner.login_kinah = Some((kinah, at));
+         } else {
+             own_list(&mut inner, false);
+@@ -1736,6 +1817,7 @@ impl DataStorage {
+         let mut inner = self.inner.write();
+         own_list(&mut inner, false);
+         inner.daily_duty = Some(DutyBoard { offers, reset_ms, sent_reset_ms: reset_ms });
++        inner.duty_seen = Some(now_ms());
+     }
+ 
+     /// A quest taken at `now` (unix ms) (`20 8d 01`, which may not be only
+@@ -1775,6 +1857,7 @@ impl DataStorage {
+             None => return,
+         }
+         own_list(&mut inner, false);
++        inner.duty_seen = Some(now);
+         tracing::info!("Daily Duty: offer {offer} taken (quest {quest}, number {number})");
+     }
+ 
+@@ -1785,6 +1868,7 @@ impl DataStorage {
+             o.number = 0;
+             o.state = 1;
+             tracing::info!("Daily Duty: offer {} given up", o.offer);
++            inner.duty_seen = Some(now_ms());
+         }
+     }
+ 
+@@ -3162,6 +3246,30 @@ pub struct EntryList {
+     pub abyss_points: Option<(u64, u64)>,
+     /// `(time, seen at unix ms)` by id.
+     pub times: std::collections::BTreeMap<u32, (u64, i64)>,
++    /// Clicktrough: when the game last reported each value.
++    pub seen: EntrySeen,
++}
++
++/// Clicktrough: when the game last reported each value of an `EntryList`
++/// (unix ms), also unchanged: Kinah by the game's own time of it.
++#[derive(Debug, Clone, Default)]
++pub struct EntrySeen {
++    pub odyle_energy: Option<i64>,
++    pub counts: std::collections::BTreeMap<u32, i64>,
++    pub shop_limits: std::collections::BTreeMap<u32, i64>,
++    pub crafts: std::collections::BTreeMap<u32, i64>,
++    pub kinah_today: Option<i64>,
++    pub abyss_points: Option<i64>,
++}
++
++/// Clicktrough: a character's shop limits and crafts with when seen, kept
++/// while another plays (`shops_by_character`).
++#[derive(Debug, Clone, Default)]
++struct CharacterShop {
++    shop_limits: std::collections::BTreeMap<u32, (u32, i64)>,
++    shop_seen: std::collections::BTreeMap<u32, i64>,
++    craft_counts: std::collections::BTreeMap<u32, u32>,
++    craft_seen: std::collections::BTreeMap<u32, i64>,
+ }
+ 
+ /// The shop's limits at `now` (`DataStorage::shop_limits_at`).
+@@ -3214,6 +3322,7 @@ fn own_list(inner: &mut Inner, whole_list: bool) {
+     if whole_list {
+         inner.odyle_owner = None;
+         inner.odyle_awaits_self_record = true;
++        inner.named_since_list = false;
+     } else if inner.odyle_owner.is_none() && !inner.odyle_awaits_self_record && inner.local_identity_from_game {
+         inner.odyle_owner = inner.local_character_name.clone();
+     }
+diff --git a/src-tauri/src/plugins/a2.js b/src-tauri/src/plugins/a2.js
+index d658ee2..985c5c5 100644
+--- a/src-tauri/src/plugins/a2.js
++++ b/src-tauri/src/plugins/a2.js
+@@ -32,7 +32,11 @@
+ //                                              (Wednesday) has passed, and contentTimes ({ "<entry
+ //                                              id>": [time, seen at ms] }: 10000001-10000003 the Abyss
+ //                                              passages' usage time left (ms), gone once used; the time
+-//                                              as the game last sent it)
++//                                              as the game last sent it). Clicktrough: seenAt ({
++//                                              odyleEnergy, contentCounts: { "<id>" }, shopLimits: {
++//                                              "<item>" }, crafts: { "<recipe>" }, kinahToday,
++//                                              abyssPoints }), when the game last reported each value
++//                                              (unix ms), also when unchanged
+ //   a2.on("bossMap", ({ map, bosses }) => ...) a map the player just opened, its field bosses as
+ //                                              a2.bossTimers gives them (permission
+ //                                              "feed:boss-timers", meter 2.0.65 on)
+diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
+index 3425842..bb83c21 100644
+--- a/src-tauri/src/plugins/mod.rs
++++ b/src-tauri/src/plugins/mod.rs
+@@ -713,6 +713,20 @@ fn character(app: &tauri::AppHandle) -> Option<Value> {
+             // is as the game last sent it: it counts down only while in use,
+             // and the game sends the change. Theirs the same way.
+             "contentTimes": Some(list.times).filter(|t| theirs && !t.is_empty()),
++            // Clicktrough: when the game last reported each of the values
++            // above (unix ms), also when it reported one unchanged, as
++            // `{ odyleEnergy, contentCounts: {id}, shopLimits: {item},
++            // crafts: {recipe}, kinahToday, abyssPoints }`: a plugin keeping
++            // values per character can tell a count from last week from the
++            // same count reported again. Kinah by the game's own time.
++            "seenAt": theirs.then(|| serde_json::json!({
++                "odyleEnergy": list.seen.odyle_energy,
++                "contentCounts": list.seen.counts,
++                "shopLimits": list.seen.shop_limits,
++                "crafts": list.seen.crafts,
++                "kinahToday": list.seen.kinah_today,
++                "abyssPoints": list.seen.abyss_points,
++            })),
+         })
+     })
+ }
+-- 
+2.43.0
+
