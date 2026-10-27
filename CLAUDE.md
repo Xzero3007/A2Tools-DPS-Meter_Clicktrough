@@ -18,6 +18,23 @@ learnt, so nothing has to be asked or worked out again.
 
 ## Hard rules
 
+- **No connections and no links the person hasn't approved.** The meter and
+  every plugin it ships reach only: this repo's releases (updates), the web
+  services plugins list in `WEB_HOSTS` (aion2.exchange and this repo's
+  `market-data`, for the Market), and the game's skill icon server
+  (assets.playnccdn.com, the original's private build keeps it). No A2 Tools
+  account, sign-in, uploads, leaderboards, feeds, catalog, Discord, donation
+  or "report it here" links, no link to any website in a page. The release is
+  the original's private build (`--no-default-features --features
+  desktop,net`, patch 0025). Anything else needs the person's yes first.
+- **After every new version of the original, and before saying a release is
+  done: build it and look.** Run the meter (`setup-workspace.sh --build`,
+  `run-meter.sh start`), click through the meter, Settings (every section)
+  and the plugins, take screenshots, and grep the patched source and the
+  original's plugins for new hosts and links (`grep -rnoE "https?://[a-z0-9.-]+"`
+  over `src-tauri/src`, `public`, `index.html`, `src`, and the shipped
+  plugins). Something new that reaches out or links out: remove it in a
+  patch, then tell the person what it was.
 - **Never push to, or open anything on, the original's repos**
   (`taengu/A2Tools-DPS-Meter`, `taengu/A2Tools-Plugins`). They are read only:
   this repo takes from them, never gives back. The working clones of them
@@ -47,7 +64,7 @@ meter updates only from these releases (patch 0003), plugins too (patch 0020).
 | `clicktrough/README.md` | Every patch and plugin change, in the person's terms. Keep it current. |
 | `clicktrough/patches/NNNN-*.patch` | The meter patches (`git format-patch`), applied in order on the original's tag. |
 | `clicktrough/backports/` | Fixes of the original taken before its release (none at the moment). |
-| `clicktrough/plugins/<id>/` | Patches for the original's plugins (Daily Checklist, Event Timers). |
+| `clicktrough/plugins/<id>/` | Patches for the original's plugins (Daily Checklist, Event Timers; Pet Soul Tracker and Enhanced Boss Telegraph without links). A file `installed-only` there: the plugin still runs only where installed. |
 | `clicktrough/own-plugins/<id>/` | Own plugins: `map`, `market`, `pet-finder`. Edited here directly; `dev/` holds tests (`dev/ci.sh`) and generators, not shipped. |
 | `clicktrough/watch/plugin_watch.py` | The plugin watch (issues when the original has a new plugin). |
 | `clicktrough/dev/` | `setup-workspace.sh` (the working clones), `run-meter.sh` (the meter on a virtual screen). |
@@ -101,6 +118,9 @@ stand-in for `/_sdk/a2.js` (`a2.on`, `a2.storage`, `a2.share`, ... and a way to
 emit events), and take screenshots with Playwright (installed, needs no
 options). In the real meter: `bash clicktrough/dev/run-meter.sh start`, then
 xdotool on `DISPLAY=:97` and `run-meter.sh shot <file>`.
+
+Tests are run as the release is built: `cargo test --lib --no-default-features
+--features desktop,net`.
 
 **Release.** Push `main`. "Clicktrough release" builds in about 10 minutes:
 

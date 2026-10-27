@@ -1,7 +1,7 @@
 From 0232e3ecbccd2d8a9fbbf0d3fbf04d44479ebcfa Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Sun, 25 Oct 2026 00:35:48 +0000
-Subject: [PATCH 17/24] Plugins: window sizes to switch between, set by the
+Subject: [PATCH 17/25] Plugins: window sizes to switch between, set by the
  player
 
 A plugin's window or the plugin dock could only be resized from its

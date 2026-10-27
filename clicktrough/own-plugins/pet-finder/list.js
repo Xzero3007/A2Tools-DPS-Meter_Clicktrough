@@ -732,10 +732,14 @@ const MAP_LANGUAGES = new Set(["de", "fr", "es", "it", "ja", "ko", "pl", "pt", "
 // this list measures from (`at`), so the two give the same distance. Their
 // teleport is the nearest of all; where this list takes your side's own
 // Kibelisk (the Abyss), it is named (`to`), which leaves it unlabelled there.
+// Off (MAP_LINKS): this build links to no website the player hasn't chosen.
+const MAP_LINKS = false;
 // Coordinates are the game's world units, as theirs are. The name goes in
 // English, as their map reads it. Spec: homelessguynabox/a2tools-integration,
 // reference/map-links.md.
 function mapLink(d, k) {
+  // No links to websites in this build: not Aion 2 Timers' live map either.
+  if (!MAP_LINKS) return null;
   if (!d.npcId) return null;
   const q = new URLSearchParams();
   if (d.mapId) q.set("map", String(d.mapId));

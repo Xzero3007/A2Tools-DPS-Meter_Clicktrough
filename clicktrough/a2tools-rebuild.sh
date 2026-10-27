@@ -78,13 +78,14 @@ git -C "$plugins_src" fetch -q origin
 git -C "$plugins_src" reset -q --hard
 git -C "$plugins_src" checkout -q --detach origin/HEAD
 mkdir -p src/data/ct-plugins
+: > src/data/ct-plugins/installed-only.txt
 for d in "$here"/plugins/*/; do
   [ -d "$d" ] || continue
   id=$(basename "$d")
   git -C "$plugins_src" "${who[@]}" am -3 -q "$d"*.patch || fail "The plugin patch for $id"
   cp -r "$plugins_src/plugins/$id" "src/data/ct-plugins/$id"
+  [ -e "$d/installed-only" ] && echo "$id" >> src/data/ct-plugins/installed-only.txt
 done
-: > src/data/ct-plugins/installed-only.txt
 for d in "$plugins_src"/plugins/*/; do
   id=$(basename "$d")
   [ -f "$d/manifest.json" ] || continue

@@ -1,7 +1,7 @@
 From 15215cd5e5ac6ebdd32d202efe24f0713368bbfa Mon Sep 17 00:00:00 2001
 From: A2Tools patch <patch@localhost>
 Date: Tue, 20 Oct 2026 10:26:21 +0000
-Subject: [PATCH 01/24] Lock all meter windows; the click-through lock on
+Subject: [PATCH 01/25] Lock all meter windows; the click-through lock on
  native Wayland
 
 ---

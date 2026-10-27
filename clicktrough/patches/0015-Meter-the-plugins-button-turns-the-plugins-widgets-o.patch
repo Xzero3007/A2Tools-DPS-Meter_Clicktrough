@@ -1,7 +1,7 @@
 From 27cd76caa2d8f1d55234f64b4508319d1416c8b2 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Sat, 24 Oct 2026 20:13:41 +0000
-Subject: [PATCH 15/24] Meter: the plugins button turns the plugins' widgets
+Subject: [PATCH 15/25] Meter: the plugins button turns the plugins' widgets
  off too
 
 The puzzle button in the meter's header hid only the plugin window; a

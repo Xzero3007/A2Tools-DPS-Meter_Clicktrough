@@ -121,13 +121,15 @@ fi
 # ---- a debug build, with this build's plugins where the release has them ----
 if [ "$build" = 1 ]; then
   echo "==> Debug build (cargo build)"
-  (cd "$src/src-tauri" && cargo build -q)
+  # As the release is built (PKGBUILD): without `online`, with `net`.
+  (cd "$src/src-tauri" && cargo build -q --no-default-features --features desktop,net)
   dest="$src/src-tauri/target/debug/_up_/src/data/ct-plugins"
   rm -rf "$dest" && mkdir -p "$dest"
+  : > "$dest/installed-only.txt"
   for d in "$here"/clicktrough/plugins/*/; do
     [ -d "$d" ] && cp -r "$plugins/plugins/$(basename "$d")" "$dest/"
+    [ -e "$d/installed-only" ] && basename "$d" >> "$dest/installed-only.txt"
   done
-  : > "$dest/installed-only.txt"
   for d in "$plugins"/plugins/*/; do
     id=$(basename "$d")
     [ -f "$d/manifest.json" ] && [ ! -e "$d/.unpublished" ] && [ ! -e "$dest/$id" ] && [ ! -e "$here/clicktrough/own-plugins/$id" ] || continue

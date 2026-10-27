@@ -163,6 +163,7 @@ jobs:
           git clone -q --filter=blob:none "$PLUGINS" plugins-up
           git -C plugins-up checkout -q --detach "$PLUGINS_COMMIT"
           mkdir -p src/src/data/ct-plugins
+          : > src/src/data/ct-plugins/installed-only.txt
           for d in fork/clicktrough/plugins/*/; do
             [ -d "$d" ] || continue
             id=$(basename "$d")
@@ -171,13 +172,15 @@ jobs:
             git -C plugins-up -c user.name="Clicktrough" -c user.email="clicktrough@users.noreply.github.com" \
               am -3 "$GITHUB_WORKSPACE/fork/clicktrough/plugins/$id/"*.patch
             cp -r "plugins-up/plugins/$id" "src/src/data/ct-plugins/$id"
+            # A changed plugin that still runs only where it is installed
+            # (the file installed-only next to its patches).
+            [ -e "$d/installed-only" ] && echo "$id" >> src/src/data/ct-plugins/installed-only.txt
             echo "$id $(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "plugins-up/plugins/$id/manifest.json" | head -n1)"
           done
           # The original's other plugins as they are there: each runs from
           # this build only where it is installed (installed-only.txt, patch
           # 0020), so their updates come with this repo's releases and never
           # past them. Not one with the id of an own plugin.
-          : > src/src/data/ct-plugins/installed-only.txt
           for d in plugins-up/plugins/*/; do
             id=$(basename "$d")
             [ -f "$d/manifest.json" ] || continue
