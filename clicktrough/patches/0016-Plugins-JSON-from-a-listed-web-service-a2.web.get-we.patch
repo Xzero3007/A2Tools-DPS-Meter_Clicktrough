@@ -1,4 +1,4 @@
-From 1262d799169d69b2b0037f123e8cd3ebcbd50102 Mon Sep 17 00:00:00 2001
+From 60f359a296f36070159c6f4b99862619effb857a Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Sat, 24 Oct 2026 22:44:44 +0000
 Subject: [PATCH 16/30] Plugins: JSON from a listed web service (a2.web.get,

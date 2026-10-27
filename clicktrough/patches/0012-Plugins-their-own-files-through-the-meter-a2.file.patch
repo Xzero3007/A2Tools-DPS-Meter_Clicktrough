@@ -1,4 +1,4 @@
-From acf2fdd201034e457aa8593a597d8caee9d20511 Mon Sep 17 00:00:00 2001
+From 7f4a4b5eab78e6c9a3797b98914638bb216625cc Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Sat, 24 Oct 2026 17:16:33 +0000
 Subject: [PATCH 12/30] Plugins: their own files through the meter (a2.file)

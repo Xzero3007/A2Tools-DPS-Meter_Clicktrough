@@ -1,4 +1,4 @@
-From 2eff4b77b587d3c80757bf2b5c22bf8469742e97 Mon Sep 17 00:00:00 2001
+From fe84e030d29ce9ef7fcc09bfd8e24bd9734e48e1 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Sun, 25 Oct 2026 00:35:48 +0000
 Subject: [PATCH 17/30] Plugins: window sizes to switch between, set by the

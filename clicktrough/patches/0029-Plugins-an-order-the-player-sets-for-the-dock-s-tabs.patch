@@ -1,4 +1,4 @@
-From 359c0a6fcab00667d8c029fb34d83253cdcbafda Mon Sep 17 00:00:00 2001
+From 788ec0df441731e6822130388f40f53820857acc Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Tue, 27 Oct 2026 23:04:48 +0000
 Subject: [PATCH 29/30] Plugins: an order the player sets, for the dock's tabs
@@ -18,28 +18,129 @@ window no longer has one, and a tab dragged there sets the same order.
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_01RahWACwaxzLAcYgwc9jk8C
 ---
- public/src/js/pluginDock.js     |  8 ++++++++
- public/src/js/pluginSettings.js | 28 +++++++++++++++++++++++---
+ public/src/js/pluginDock.css    |  8 ++++
+ public/src/js/pluginDock.js     | 76 +++++++++++++++++++++++++--------
+ public/src/js/pluginSettings.js | 28 ++++++++++--
  src-tauri/src/app.rs            |  1 +
- src-tauri/src/plugins/dock.rs   |  6 +++++-
- src-tauri/src/plugins/mod.rs    | 35 ++++++++++++++++++++++++++++++++-
- src/styles.css                  |  3 +++
- 6 files changed, 76 insertions(+), 5 deletions(-)
+ src-tauri/src/plugins/dock.rs   |  6 ++-
+ src-tauri/src/plugins/mod.rs    | 35 ++++++++++++++-
+ src/styles.css                  |  3 ++
+ 7 files changed, 135 insertions(+), 22 deletions(-)
 
+diff --git a/public/src/js/pluginDock.css b/public/src/js/pluginDock.css
+index 02d2bd3..429d857 100644
+--- a/public/src/js/pluginDock.css
++++ b/public/src/js/pluginDock.css
+@@ -219,3 +219,11 @@ body.dockFolded .dockStage {
+ }
+ 
+ 
++
++/* Clicktrough: a tab being dragged, and the tab it would go before. */
++.dockTabDragging {
++  opacity: 0.5;
++}
++.dockTabTarget {
++  box-shadow: inset 2px 0 0 #e2b54f;
++}
 diff --git a/public/src/js/pluginDock.js b/public/src/js/pluginDock.js
-index 60f0bd1..7fbdc22 100644
+index 60f0bd1..ac79b24 100644
 --- a/public/src/js/pluginDock.js
 +++ b/public/src/js/pluginDock.js
-@@ -158,6 +158,8 @@
-       prefs.order = ids;
-       dragging = null;
-       render();
-+      // Clicktrough: kept by the meter, for Settings' list and the next start.
-+      invoke("plugin_set_order", { order: ids }).catch(() => {});
+@@ -120,14 +120,31 @@
+     render();
+   };
+ 
+-  // A tab can be dragged to a new place among the others.
++  // A tab can be dragged to a new place among the others. Clicktrough: by
++  // the pointer (press, move, let go over another tab), not the browser's
++  // drag and drop, which on Linux never moved a tab.
+   let dragging = null;
++  // A drag just ended: the click that follows doesn't open the tab.
++  let dragged = false;
++  const tabUnder = (x, y) => document.elementFromPoint(x, y)?.closest?.(".dockTab") || null;
++  const dropOn = (targetId) => {
++    if (!dragging || !targetId || targetId === dragging) return;
++    const ids = ordered().map((x) => x.id).filter((x) => x !== dragging);
++    ids.splice(ids.indexOf(targetId), 0, dragging);
++    prefs.order = ids;
++    render();
++    // Kept by the meter, for Settings' list and the next start.
++    invoke("plugin_set_order", { order: ids }).catch(() => {});
++  };
++  const clearTargets = () => {
++    for (const el of tabsEl.querySelectorAll(".dockTabTarget")) el.classList.remove("dockTabTarget");
++  };
+   const makeTab = (d) => {
+     const tab = document.createElement("button");
+     tab.type = "button";
+     tab.className = "dockTab";
+     tab.setAttribute("role", "tab");
+-    tab.draggable = true;
++    tab.dataset.id = d.id;
+     // The plugin's icon (or first letter) in its colour; the name is the
+     // tooltip and what a screen reader says.
+     const { glyph, hue, letter } = window.A2_PLUGIN_ICON(d.id, d.name);
+@@ -142,24 +159,43 @@
+     tab.style.setProperty("--mark-hue", String(hue));
+     tab.setAttribute("aria-label", d.name);
+     tab.title = `${d.name} ${d.version}`;
+-    tab.addEventListener("click", () => activate(d.id));
+-    tab.addEventListener("dragstart", (e) => {
+-      dragging = d.id;
+-      e.dataTransfer.effectAllowed = "move";
++    tab.addEventListener("click", () => {
++      if (dragged) {
++        dragged = false;
++        return;
++      }
++      activate(d.id);
      });
-     tab.addEventListener("dragend", () => { dragging = null; });
+-    tab.addEventListener("dragover", (e) => {
+-      if (dragging && dragging !== d.id) e.preventDefault();
++    let start = null;
++    tab.addEventListener("pointerdown", (e) => {
++      if (e.button !== 0) return;
++      start = { x: e.clientX, y: e.clientY, id: e.pointerId };
++      dragged = false;
++      try { tab.setPointerCapture(e.pointerId); } catch {}
+     });
+-    tab.addEventListener("drop", (e) => {
+-      e.preventDefault();
+-      if (!dragging || dragging === d.id) return;
+-      const ids = ordered().map((x) => x.id).filter((x) => x !== dragging);
+-      ids.splice(ids.indexOf(d.id), 0, dragging);
+-      prefs.order = ids;
+-      dragging = null;
+-      render();
++    tab.addEventListener("pointermove", (e) => {
++      if (!start) return;
++      if (!dragging && Math.hypot(e.clientX - start.x, e.clientY - start.y) < 6) return;
++      dragging = d.id;
++      tab.classList.add("dockTabDragging");
++      clearTargets();
++      const over = tabUnder(e.clientX, e.clientY);
++      if (over && over !== tab) over.classList.add("dockTabTarget");
+     });
+-    tab.addEventListener("dragend", () => { dragging = null; });
++    const end = (e, drop) => {
++      if (!start) return;
++      start = null;
++      try { tab.releasePointerCapture(e.pointerId); } catch {}
++      tab.classList.remove("dockTabDragging");
++      clearTargets();
++      if (dragging) {
++        dragged = true;
++        if (drop) dropOn(tabUnder(e.clientX, e.clientY)?.dataset?.id);
++      }
++      dragging = null;
++    };
++    tab.addEventListener("pointerup", (e) => end(e, true));
++    tab.addEventListener("pointercancel", (e) => end(e, false));
      return tab;
-@@ -221,6 +223,12 @@
+   };
+ 
+@@ -221,6 +257,12 @@
    // ones, stopped for the ones gone, tabs shown or hidden.
    const applyLayout = (layout) => {
      const tabs = Array.isArray(layout?.tabs) ? layout.tabs : [];

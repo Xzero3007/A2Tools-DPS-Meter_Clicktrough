@@ -1,4 +1,4 @@
-From dea07b63b11d7de9a5416d59bd0621fcab745c82 Mon Sep 17 00:00:00 2001
+From cd85bb3b5cea1d628a0ddb876da44f3bb993b1ba Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Thu, 22 Oct 2026 13:04:42 +0000
 Subject: [PATCH 02/30] KDE: the meter's windows keep their top-left corner as
