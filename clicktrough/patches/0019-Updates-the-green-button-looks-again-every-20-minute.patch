@@ -1,7 +1,7 @@
-From e8699333ca46e82773c763163e85ce2c5732c476 Mon Sep 17 00:00:00 2001
+From 353f68e7abd1039211323bf2483d8eb629e620d0 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Mon, 26 Oct 2026 00:05:23 +0000
-Subject: [PATCH 19/22] Updates: the green button looks again every 20 minutes
+Subject: [PATCH 19/24] Updates: the green button looks again every 20 minutes
 
 The meter looked for an update at start and then every 6 hours, and a
 check that failed at start (the bridge not up yet, no network) waited the
@@ -14,15 +14,15 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_01RBQati3x8VviBbpY9juEWf
 ---
  public/src/js/checkRelease.js | 13 ++++--
- tests/update-check.test.mjs   | 79 +++++++++++++++++++++++++++++++++++
- 2 files changed, 89 insertions(+), 3 deletions(-)
+ tests/update-check.test.mjs   | 78 +++++++++++++++++++++++++++++++++++
+ 2 files changed, 88 insertions(+), 3 deletions(-)
  create mode 100644 tests/update-check.test.mjs
 
 diff --git a/public/src/js/checkRelease.js b/public/src/js/checkRelease.js
-index 4c069ea..36feb5f 100644
+index 8741cef..6e21d01 100644
 --- a/public/src/js/checkRelease.js
 +++ b/public/src/js/checkRelease.js
-@@ -108,22 +108,29 @@
+@@ -31,22 +31,29 @@
  
    // At start nothing pops up: an update this install can take shows the
    // green button in the meter's title (`onAvailable`), which asks. Then
@@ -57,10 +57,10 @@ index 4c069ea..36feb5f 100644
  
 diff --git a/tests/update-check.test.mjs b/tests/update-check.test.mjs
 new file mode 100644
-index 0000000..9f9e459
+index 0000000..5715ce6
 --- /dev/null
 +++ b/tests/update-check.test.mjs
-@@ -0,0 +1,79 @@
+@@ -0,0 +1,78 @@
 +// Clicktrough: the green button's update check (checkRelease.js) looks again
 +// every 20 minutes, and a minute after a check that failed, so a build the
 +// fork releases while the meter runs shows without a restart.
@@ -70,9 +70,9 @@ index 0000000..9f9e459
 +import vm from "node:vm";
 +
 +const source = readFileSync(new URL("../public/src/js/checkRelease.js", import.meta.url), "utf8");
-+// The build's own revision (the fork's release workflow sets it): the ones
-+// offered are newer.
-+const OWN = Number(/const CT_REVISION = (\d+);/.exec(source)[1]);
++// The build's own revision; the meter (update_check.rs, 2.0.80 on) decides
++// what is newer, so any build above it is offered here.
++const OWN = 0;
 +const tick = () => new Promise((resolve) => setImmediate(resolve));
 +
 +function meter({ manifest }) {
@@ -84,13 +84,12 @@ index 0000000..9f9e459
 +    __TAURI__: {
 +      core: {
 +        invoke: async (cmd) => {
-+          if (cmd === "fetch_url") {
++          if (cmd === "check_for_update") {
 +            fetches++;
 +            const m = manifest();
 +            if (!m) throw new Error("offline");
-+            return JSON.stringify(m);
++            return { state: "offer", latest: `${m.version} (Clicktrough ${m.revision})` };
 +          }
-+          if (cmd === "show_update_window") return true;
 +          throw new Error(cmd);
 +        },
 +      },

@@ -1,7 +1,7 @@
-From 8f0c0d44ab78e59bb029c0f586af866f2bad53df Mon Sep 17 00:00:00 2001
+From 76d7eaef1372c35fa8694e7dd2492a91832894d0 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Sat, 24 Oct 2026 18:35:33 +0000
-Subject: [PATCH 13/22] Plugins: a widget the player resizes from its corners
+Subject: [PATCH 13/24] Plugins: a widget the player resizes from its corners
  (a2.widget.resize)
 
 A widget could only be resized by its plugin opening it again at a new
@@ -54,10 +54,10 @@ index a6f8d8e..bb615e5 100644
      }
    });
 diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
-index 15b1530..614f80e 100644
+index e50fe5a..75a5eac 100644
 --- a/src-tauri/src/app.rs
 +++ b/src-tauri/src/app.rs
-@@ -4201,6 +4201,7 @@ pub fn run() {
+@@ -4397,6 +4397,7 @@ pub fn run() {
              crate::plugins::plugin_share,
              crate::plugins::plugin_file,
              crate::plugins::widgets::plugin_widget_file,

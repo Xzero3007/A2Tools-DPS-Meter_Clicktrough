@@ -1,7 +1,7 @@
-From 76853b1b8af084bce0b47177da6b605032d288f1 Mon Sep 17 00:00:00 2001
+From b0dedb28176f777d5ee60b83eb828a3c2c999bac Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Sat, 24 Oct 2026 14:16:36 +0000
-Subject: [PATCH 11/22] Plugins: a value shared with other plugins (share,
+Subject: [PATCH 11/24] Plugins: a value shared with other plugins (share,
  events:shared)
 
 A plugin with the permission "share" can hand other plugins a value:
@@ -77,10 +77,10 @@ index e31468f..7987f66 100644
          return t("settings.plugins.permDecoder", "Read your own game data: {name}", { name: permission.slice(8) });
        }
 diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
-index b63603a..aabda3c 100644
+index acbbc3c..d9823b9 100644
 --- a/src-tauri/src/app.rs
 +++ b/src-tauri/src/app.rs
-@@ -4198,6 +4198,7 @@ pub fn run() {
+@@ -4394,6 +4394,7 @@ pub fn run() {
              crate::plugins::plugin_set_enabled,
              crate::plugins::plugin_set_hide,
              crate::plugins::plugin_hello,
@@ -113,10 +113,10 @@ index 2d5f5c0..2f638f4 100644
      // Meter 2.0.72 on: the server's Abyss siege (artifact holders, cores).
      abyssSiege: (server) => call("abyssSiege", [Number(server)]),
 diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
-index 3033be7..0ececa4 100644
+index 25accef..5ce0b9d 100644
 --- a/src-tauri/src/plugins/mod.rs
 +++ b/src-tauri/src/plugins/mod.rs
-@@ -380,6 +380,40 @@ pub struct PluginHost {
+@@ -408,6 +408,40 @@ pub struct PluginHost {
  static WORLD: Mutex<Option<world::World>> = Mutex::new(None);
  static WORLD_WANTED: AtomicBool = AtomicBool::new(false);
  
@@ -157,7 +157,7 @@ index 3033be7..0ececa4 100644
  fn with_world<T>(f: impl FnOnce(&mut world::World) -> T) -> T {
      let mut slot = WORLD.lock().unwrap_or_else(|p| p.into_inner());
      f(slot.get_or_insert_with(world::World::default))
-@@ -626,6 +660,10 @@ impl PluginHost {
+@@ -654,6 +688,10 @@ impl PluginHost {
          let any_decoders = loaded.iter().any(|l| !l.decoders.is_empty());
          let any_world = loaded.iter().any(|l| l.manifest.permissions.iter().any(|p| p == "events:world"));
          WORLD_WANTED.store(any_world, Ordering::Relaxed);
@@ -168,7 +168,7 @@ index 3033be7..0ececa4 100644
          tracing::info!("Plugins: {} loaded (developer mode {})", loaded.len(), if dev { "on" } else { "off" });
          *self.loaded.write().unwrap_or_else(|p| p.into_inner()) = loaded;
          *self.errors.write().unwrap_or_else(|p| p.into_inner()) = errors;
-@@ -1163,6 +1201,8 @@ fn describe_permission(t: &PromptTexts, permission: &str) -> String {
+@@ -1191,6 +1229,8 @@ fn describe_permission(t: &PromptTexts, permission: &str) -> String {
          "events:character" => t.perm_character.clone(),
          "fps" => t.perm_fps.clone(),
          "events:world" => "See where you and the monsters and objects around you are (from the game data)".into(),
@@ -177,7 +177,7 @@ index 3033be7..0ececa4 100644
          p => match p.strip_prefix("decoder:") {
              Some(name) => t.perm_decoder.replace("{name}", name),
              None => p.to_string(),
-@@ -1916,6 +1956,8 @@ pub fn plugin_hello(app: tauri::AppHandle, window: tauri::WebviewWindow, plugin:
+@@ -1944,6 +1984,8 @@ pub fn plugin_hello(app: tauri::AppHandle, window: tauri::WebviewWindow, plugin:
          "reviewed": reviewed,
          "game": crate::platform::window_detector::find_aion2_window(),
          "ping": app.try_state::<AppState>().and_then(|s| s.ping_tracker.current_ping_ms()),

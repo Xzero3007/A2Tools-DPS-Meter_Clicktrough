@@ -1,7 +1,7 @@
-From 30c0c967be9992d50dd62aa11cc31ea284af5f1a Mon Sep 17 00:00:00 2001
+From 15215cd5e5ac6ebdd32d202efe24f0713368bbfa Mon Sep 17 00:00:00 2001
 From: A2Tools patch <patch@localhost>
 Date: Tue, 20 Oct 2026 10:26:21 +0000
-Subject: [PATCH 01/22] Lock all meter windows; the click-through lock on
+Subject: [PATCH 01/24] Lock all meter windows; the click-through lock on
  native Wayland
 
 ---
@@ -38,10 +38,10 @@ index 2dac013..9345e75 100644
  | Screenshots | Works from 2.0.41, to the clipboard and a folder (`~/Pictures/A2Tools DPS Meter` by default). On Linux the meter pictures itself on a plain background, since Wayland lets no app copy the screen |
  | Auto-hide when the game loses focus | Not yet (the meter stays visible) |
 diff --git a/index.html b/index.html
-index a2183b9..cec5820 100644
+index 790711c..f998c06 100644
 --- a/index.html
 +++ b/index.html
-@@ -778,6 +778,13 @@
+@@ -772,6 +772,13 @@
                        <span class="settingsToggleTrack" aria-hidden="true"></span>
                      </span>
                    </label>
@@ -56,7 +56,7 @@ index a2183b9..cec5820 100644
                </section>
                <section class="settingsSection" id="settingsSection-appearance" role="tabpanel" aria-labelledby="settingsTab-appearance" data-section="appearance" hidden>
 diff --git a/public/src/js/core.js b/public/src/js/core.js
-index 02bf506..b90b0d1 100644
+index aa61577..87ab3e8 100644
 --- a/public/src/js/core.js
 +++ b/public/src/js/core.js
 @@ -57,6 +57,7 @@ const REMOTE_APPLIED_SETTING_CONTROLS = {
@@ -67,7 +67,7 @@ index 02bf506..b90b0d1 100644
    // Set from the main window by the account offer.
    "dpsMeter.autoUpload": ".autoUploadCheckbox",
  };
-@@ -150,6 +151,7 @@ class DpsApp {
+@@ -151,6 +152,7 @@ class DpsApp {
        detailsMonitor: "dpsMeter.detailsMonitor",
        showSuspendBtn: "dpsMeter.showSuspendBtn",
        showLockBtn: "dpsMeter.showLockBtn",
@@ -75,7 +75,7 @@ index 02bf506..b90b0d1 100644
        overlayLocked: "dpsMeter.overlayLocked",
      };
  
-@@ -6944,11 +6946,14 @@ class DpsApp {
+@@ -6967,11 +6969,14 @@ class DpsApp {
    // Locked, the overlay lets clicks through to the game and cannot be
    // dragged; only its lock button stays clickable (the backend watches the
    // pointer, see OverlayLock in app.rs), and a hotkey toggles it too. Offered
@@ -91,7 +91,7 @@ index 02bf506..b90b0d1 100644
      const isOverlay = window.A2_VIEW === "main";
      Promise.resolve(window.javaBridge?.overlayLockSupported?.())
        .then((supported) => {
-@@ -6966,6 +6971,12 @@ class DpsApp {
+@@ -6989,6 +6994,12 @@ class DpsApp {
              if (!isChecked) this._setOverlayLocked(false);
            });
          }
@@ -105,10 +105,10 @@ index 02bf506..b90b0d1 100644
          this._applyLockBtnVisibility(show);
          window.addEventListener("resize", () => this._sendLockBtnRect());
 diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
-index 276b419..169952d 100644
+index f4c8400..1b0fedc 100644
 --- a/src-tauri/src/app.rs
 +++ b/src-tauri/src/app.rs
-@@ -373,15 +373,59 @@ fn screenshot_tool(app: &tauri::AppHandle, in_front: bool) {
+@@ -374,15 +374,59 @@ fn screenshot_tool(app: &tauri::AppHandle, in_front: bool) {
          *lock.applied.lock() = None;
          sync_click_through(app, &lock, false);
      }
@@ -174,7 +174,7 @@ index 276b419..169952d 100644
  }
  
  fn sync_click_through(app: &tauri::AppHandle, lock: &OverlayLock, over_button: bool) {
-@@ -434,7 +478,12 @@ fn apply_overlay_lock(app: &tauri::AppHandle, locked: bool) {
+@@ -435,7 +479,12 @@ fn apply_overlay_lock(app: &tauri::AppHandle, locked: bool) {
      let lock = state.overlay_lock.clone();
      lock.locked.store(locked, Ordering::SeqCst);
      sync_click_through(app, &lock, false);
@@ -188,7 +188,7 @@ index 276b419..169952d 100644
      // No pointer watch where the window keeps the button by its input region.
      if cfg!(target_os = "linux") {
          return;
-@@ -1056,7 +1105,7 @@ pub(crate) fn toggle_overlay_lock(app: &tauri::AppHandle) {
+@@ -1090,7 +1139,7 @@ pub(crate) fn toggle_overlay_lock(app: &tauri::AppHandle) {
      let locked = app
          .try_state::<AppState>()
          .is_some_and(|s| s.overlay_lock.locked.load(std::sync::atomic::Ordering::SeqCst));
@@ -197,7 +197,7 @@ index 276b419..169952d 100644
          return; // the lock is not offered here
      }
      apply_overlay_lock(app, !locked);
-@@ -1128,6 +1177,9 @@ fn update_settings(
+@@ -1166,6 +1215,9 @@ fn update_settings(
          if HOTKEY_KEYS.contains(&key.as_str()) {
              restart_global_hotkeys(&app);
          }
@@ -207,7 +207,7 @@ index 276b419..169952d 100644
          let _ = app.emit("setting-changed", serde_json::json!({ "key": key, "value": value }));
          #[cfg(feature = "online")]
          if key.starts_with(crate::stream_overlay::ENABLED_KEY) {
-@@ -1397,19 +1449,10 @@ fn suspend_capture(state: tauri::State<'_, AppState>, suspended: bool) {
+@@ -1450,19 +1502,10 @@ fn suspend_capture(state: tauri::State<'_, AppState>, suspended: bool) {
      tracing::info!("Capture {}", if suspended { "suspended" } else { "resumed" });
  }
  
@@ -229,7 +229,7 @@ index 276b419..169952d 100644
  }
  
  /// Where the mouse pointer is from the calling window's top-left, in screen
-@@ -2529,6 +2572,8 @@ fn tool_window_ready(app: tauri::AppHandle, label: String) -> bool {
+@@ -2665,6 +2708,8 @@ fn tool_window_ready(app: tauri::AppHandle, label: String) -> bool {
      let Some(window) = app.get_webview_window(&label) else { return false };
      let _ = window.show();
      let _ = window.set_focus();
@@ -238,7 +238,7 @@ index 276b419..169952d 100644
      true
  }
  
-@@ -2576,6 +2621,8 @@ fn announce_details_placement(app: &tauri::AppHandle, monitor_index: usize) {
+@@ -2712,6 +2757,8 @@ fn announce_details_placement(app: &tauri::AppHandle, monitor_index: usize) {
  fn details_window_ready(app: tauri::AppHandle, window: tauri::Window) {
      let _ = window.show();
      tracing::info!("{} window revealed (frontend ready)", window.label());
@@ -247,7 +247,7 @@ index 276b419..169952d 100644
      // Only the monitor-pinned singleton has a placement to confirm; a fight
      // window is placed by cascade and the History window by its own geometry.
      if window.label() == "details" {
-@@ -4234,6 +4281,31 @@ mod tests {
+@@ -4469,6 +4516,31 @@ mod tests {
          assert!(!click_through(false, false, false));
      }
  
@@ -419,10 +419,10 @@ index 54ecbc5..7868bc1 100644
      let target = window.clone();
      super::dialog::on_gtk_thread(move || {
 diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
-index 385da47..cf2ca89 100644
+index b552889..94a6362 100644
 --- a/src-tauri/src/plugins/mod.rs
 +++ b/src-tauri/src/plugins/mod.rs
-@@ -1841,6 +1841,8 @@ pub fn plugin_hello(app: tauri::AppHandle, window: tauri::WebviewWindow, plugin:
+@@ -1869,6 +1869,8 @@ pub fn plugin_hello(app: tauri::AppHandle, window: tauri::WebviewWindow, plugin:
          if manifest.permissions.iter().any(|p| p == "events:character") { character(&app) } else { None };
      let reviewed = host.with(&id, |l| l.reviewed).unwrap_or(false);
      let language = app.try_state::<AppState>().and_then(|s| s.settings.get("dpsMeter.language")).unwrap_or_else(|| "en".into());
@@ -448,7 +448,7 @@ index fdfc5a9..df9b1f1 100644
      let applied = match (locked, &area) {
          (true, _) => crate::platform::window::widget_click_through(window, true, None),
 diff --git a/src/data/i18n/ui/de.json b/src/data/i18n/ui/de.json
-index 35d015b..55a3346 100644
+index 5961452..71469a5 100644
 --- a/src/data/i18n/ui/de.json
 +++ b/src/data/i18n/ui/de.json
 @@ -317,6 +317,7 @@
@@ -459,7 +459,7 @@ index 35d015b..55a3346 100644
      "playerLimit": {
        "label": "Max. angezeigte Spieler"
      },
-@@ -569,6 +570,7 @@
+@@ -571,6 +572,7 @@
        "roundDps": "13.412 wird als 13k angezeigt.",
        "showSuspendBtn": "Eine Taste am Meter, die das Lesen des Spielverkehrs anhält, bis du sie erneut drückst.",
        "showLockBtn": "Eine Taste, mit der das Meter die Maus ignoriert, sodass Klicks im Spiel ankommen.",
@@ -468,7 +468,7 @@ index 35d015b..55a3346 100644
        "titleOpacity": "Wie durchsichtig die Titelleiste des Meters ist, getrennt vom Hintergrund darunter. Bis du ihn bewegst, folgt er dem Hintergrund.",
        "meterOpacity": "Wie deckend die farbigen Schadensbalken sind.",
 diff --git a/src/data/i18n/ui/en.json b/src/data/i18n/ui/en.json
-index 7118be6..831e13d 100644
+index da1f0d3..679646e 100644
 --- a/src/data/i18n/ui/en.json
 +++ b/src/data/i18n/ui/en.json
 @@ -327,6 +327,7 @@
@@ -479,7 +479,7 @@ index 7118be6..831e13d 100644
      "playerLimit": {
        "label": "Max players shown"
      },
-@@ -581,6 +582,7 @@
+@@ -583,6 +584,7 @@
        "roundDps": "13,412 shows as 13k.",
        "showSuspendBtn": "A button on the meter that stops reading game traffic until you press it again.",
        "showLockBtn": "A button that makes the meter ignore the mouse, so clicks go through to the game.",
@@ -488,7 +488,7 @@ index 7118be6..831e13d 100644
        "titleOpacity": "How see-through the meter's title bar is, apart from the background under it. Until you move it, it follows the background.",
        "meterOpacity": "How solid the coloured damage bars are.",
 diff --git a/src/data/i18n/ui/es.json b/src/data/i18n/ui/es.json
-index d7ae555..47c06a3 100644
+index d5edd18..8dcdce8 100644
 --- a/src/data/i18n/ui/es.json
 +++ b/src/data/i18n/ui/es.json
 @@ -317,6 +317,7 @@
@@ -499,7 +499,7 @@ index d7ae555..47c06a3 100644
      "playerLimit": {
        "label": "Máx. jugadores mostrados"
      },
-@@ -569,6 +570,7 @@
+@@ -571,6 +572,7 @@
        "roundDps": "13.412 se muestra como 13k.",
        "showSuspendBtn": "Un botón en el medidor que deja de leer el tráfico del juego hasta que lo pulses de nuevo.",
        "showLockBtn": "Un botón que hace que el medidor ignore el ratón, para que los clics lleguen al juego.",
@@ -508,7 +508,7 @@ index d7ae555..47c06a3 100644
        "titleOpacity": "Qué tan transparente es la barra de título del medidor, aparte del fondo de debajo. Hasta que lo muevas, sigue al fondo.",
        "meterOpacity": "Cuán sólidas son las barras de daño de color.",
 diff --git a/src/data/i18n/ui/fr.json b/src/data/i18n/ui/fr.json
-index e2d3a32..8ccc1b2 100644
+index df369a7..1d6e6a0 100644
 --- a/src/data/i18n/ui/fr.json
 +++ b/src/data/i18n/ui/fr.json
 @@ -317,6 +317,7 @@
@@ -519,7 +519,7 @@ index e2d3a32..8ccc1b2 100644
      "playerLimit": {
        "label": "Joueurs affichés max."
      },
-@@ -569,6 +570,7 @@
+@@ -571,6 +572,7 @@
        "roundDps": "13 412 s'affiche 13k.",
        "showSuspendBtn": "Un bouton sur le compteur qui arrête la lecture du trafic du jeu jusqu'à ce que tu appuies à nouveau.",
        "showLockBtn": "Un bouton qui fait ignorer la souris au compteur, pour que les clics passent au jeu.",
@@ -528,7 +528,7 @@ index e2d3a32..8ccc1b2 100644
        "titleOpacity": "La transparence de la barre de titre du meter, à part du fond en dessous. Tant que vous ne le bougez pas, il suit le fond.",
        "meterOpacity": "L'opacité des barres de dégâts colorées.",
 diff --git a/src/data/i18n/ui/ja.json b/src/data/i18n/ui/ja.json
-index b91868b..0096b1b 100644
+index 2f02aff..aabcb0a 100644
 --- a/src/data/i18n/ui/ja.json
 +++ b/src/data/i18n/ui/ja.json
 @@ -317,6 +317,7 @@
@@ -539,7 +539,7 @@ index b91868b..0096b1b 100644
      "playerLimit": {
        "label": "表示する最大プレイヤー数"
      },
-@@ -569,6 +570,7 @@
+@@ -571,6 +572,7 @@
        "roundDps": "13,412 は 13k と表示されます。",
        "showSuspendBtn": "押すとゲーム通信の読み取りを止め、もう一度押すと再開するボタンをメーターに表示します。",
        "showLockBtn": "メーターがマウスを無視し、クリックがゲームに届くようにするボタンです。",
@@ -548,7 +548,7 @@ index b91868b..0096b1b 100644
        "titleOpacity": "メーターのタイトルバーの透け具合を、下の背景とは別に設定します。動かすまでは背景の不透明度に合わせます。",
        "meterOpacity": "色付きのダメージバーの不透明度です。",
 diff --git a/src/data/i18n/ui/ko.json b/src/data/i18n/ui/ko.json
-index fd21333..d342fe0 100644
+index 1522e56..1910651 100644
 --- a/src/data/i18n/ui/ko.json
 +++ b/src/data/i18n/ui/ko.json
 @@ -322,6 +322,7 @@
@@ -559,7 +559,7 @@ index fd21333..d342fe0 100644
      "playerLimit": {
        "label": "최대 표시 인원"
      },
-@@ -576,6 +577,7 @@
+@@ -578,6 +579,7 @@
        "roundDps": "13,412는 13k로 표시됩니다.",
        "showSuspendBtn": "다시 누를 때까지 게임 트래픽 읽기를 멈추는 버튼을 미터에 표시합니다.",
        "showLockBtn": "미터가 마우스를 무시하게 하여 클릭이 게임으로 전달되도록 하는 버튼입니다.",
@@ -568,7 +568,7 @@ index fd21333..d342fe0 100644
        "titleOpacity": "미터 제목 표시줄의 투명도를 아래 배경과 따로 정합니다. 움직이기 전까지는 배경 불투명도를 따릅니다.",
        "meterOpacity": "색이 있는 피해량 막대의 불투명도입니다.",
 diff --git a/src/data/i18n/ui/pt.json b/src/data/i18n/ui/pt.json
-index 5bd2cdf..df9e6b0 100644
+index 9e4a01b..4a6b55a 100644
 --- a/src/data/i18n/ui/pt.json
 +++ b/src/data/i18n/ui/pt.json
 @@ -317,6 +317,7 @@
@@ -579,7 +579,7 @@ index 5bd2cdf..df9e6b0 100644
      "playerLimit": {
        "label": "Máx. de jogadores exibidos"
      },
-@@ -569,6 +570,7 @@
+@@ -571,6 +572,7 @@
        "roundDps": "13.412 aparece como 13k.",
        "showSuspendBtn": "Um botão no medidor que para de ler o tráfego do jogo até você apertar de novo.",
        "showLockBtn": "Um botão que faz o medidor ignorar o mouse, para os cliques irem ao jogo.",
@@ -588,7 +588,7 @@ index 5bd2cdf..df9e6b0 100644
        "titleOpacity": "O quanto a barra de título do medidor é transparente, separada do fundo abaixo. Até você mexer, ela segue o fundo.",
        "meterOpacity": "Quão sólidas são as barras coloridas de dano.",
 diff --git a/src/data/i18n/ui/ru.json b/src/data/i18n/ui/ru.json
-index 302fe0a..20d48ce 100644
+index 21991c2..e75b14c 100644
 --- a/src/data/i18n/ui/ru.json
 +++ b/src/data/i18n/ui/ru.json
 @@ -322,6 +322,7 @@
@@ -599,7 +599,7 @@ index 302fe0a..20d48ce 100644
      "playerLimit": {
        "label": "Макс. игроков на экране"
      },
-@@ -574,6 +575,7 @@
+@@ -576,6 +577,7 @@
        "roundDps": "13 412 показывается как 13k.",
        "showSuspendBtn": "Кнопка на счётчике, которая останавливает чтение трафика игры до повторного нажатия.",
        "showLockBtn": "Кнопка, после которой счётчик игнорирует мышь и клики проходят в игру.",
@@ -608,7 +608,7 @@ index 302fe0a..20d48ce 100644
        "titleOpacity": "Насколько прозрачна строка заголовка метра, отдельно от фона под ней. Пока вы его не сдвинете, он следует за фоном.",
        "meterOpacity": "Насколько плотные цветные полосы урона.",
 diff --git a/src/data/i18n/ui/zh-Hans.json b/src/data/i18n/ui/zh-Hans.json
-index 37d52ac..807c94f 100644
+index 19b2dd4..6c0c9ce 100644
 --- a/src/data/i18n/ui/zh-Hans.json
 +++ b/src/data/i18n/ui/zh-Hans.json
 @@ -322,6 +322,7 @@
@@ -619,7 +619,7 @@ index 37d52ac..807c94f 100644
      "playerLimit": {
        "label": "最大显示人数"
      },
-@@ -576,6 +577,7 @@
+@@ -578,6 +579,7 @@
        "roundDps": "13,412 显示为 13k。",
        "showSuspendBtn": "在计量器上显示一个按钮，按下后停止读取游戏流量，再按一次恢复。",
        "showLockBtn": "让计量器忽略鼠标、点击直接作用于游戏的按钮。",
@@ -628,7 +628,7 @@ index 37d52ac..807c94f 100644
        "titleOpacity": "统计窗口标题栏的透明程度，与下方背景分开设置。移动它之前，它跟随背景不透明度。",
        "meterOpacity": "彩色伤害条的不透明程度。",
 diff --git a/src/data/i18n/ui/zh-Hant.json b/src/data/i18n/ui/zh-Hant.json
-index 333b4b2..22ff364 100644
+index b317575..f6f706e 100644
 --- a/src/data/i18n/ui/zh-Hant.json
 +++ b/src/data/i18n/ui/zh-Hant.json
 @@ -322,6 +322,7 @@
@@ -639,7 +639,7 @@ index 333b4b2..22ff364 100644
      "playerLimit": {
        "label": "最大顯示人數"
      },
-@@ -576,6 +577,7 @@
+@@ -578,6 +579,7 @@
        "roundDps": "13,412 顯示為 13k。",
        "showSuspendBtn": "在計量器上顯示一個按鈕，按下後停止讀取遊戲流量，再按一次恢復。",
        "showLockBtn": "讓計量器忽略滑鼠、點擊直接作用於遊戲的按鈕。",

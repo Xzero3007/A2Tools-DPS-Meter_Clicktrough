@@ -1,7 +1,7 @@
-From a8667b338d8793edcaebb91eac155f9ce97fb26b Mon Sep 17 00:00:00 2001
+From a44a73ab38a1cae1e38f4eefeba381dde7d6fcde Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Sun, 25 Oct 2026 00:35:48 +0000
-Subject: [PATCH 17/22] Plugins: window sizes to switch between, set by the
+Subject: [PATCH 17/24] Plugins: window sizes to switch between, set by the
  player
 
 A plugin's window or the plugin dock could only be resized from its
@@ -318,10 +318,10 @@ index 0000000..398bec2
 +  window.A2_WINDOW_SIZES.refresh = () => groups.forEach(show);
 +})();
 diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
-index ff78679..bfc2624 100644
+index 7d4831d..db22f05 100644
 --- a/src-tauri/src/app.rs
 +++ b/src-tauri/src/app.rs
-@@ -4245,6 +4245,7 @@ pub fn run() {
+@@ -4441,6 +4441,7 @@ pub fn run() {
              crate::plugins::plugin_share,
              crate::plugins::plugin_file,
              crate::plugins::plugin_web_get,
@@ -330,10 +330,10 @@ index ff78679..bfc2624 100644
              crate::plugins::widgets::plugin_widget_resize,
              open_settings_at,
 diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
-index a077ff4..0127ca8 100644
+index a052e69..1ddfb92 100644
 --- a/src-tauri/src/plugins/mod.rs
 +++ b/src-tauri/src/plugins/mod.rs
-@@ -1670,6 +1670,25 @@ fn saved_size(app: &tauri::AppHandle, id: &str) -> Option<(f64, f64)> {
+@@ -1698,6 +1698,25 @@ fn saved_size(app: &tauri::AppHandle, id: &str) -> Option<(f64, f64)> {
      (w.is_finite() && h.is_finite() && w >= 120.0 && h >= 120.0).then_some((w.min(2000.0), h.min(1600.0)))
  }
  
@@ -359,7 +359,7 @@ index a077ff4..0127ca8 100644
  /// A plugin window was resized: remember its size, once it has settled, as
  /// `note_moved` does its place. Not while it is being shown, nor a minimized
  /// or hidden window's.
-@@ -2658,6 +2677,19 @@ mod tests {
+@@ -2701,6 +2720,19 @@ mod tests {
          }
      }
  
@@ -380,10 +380,10 @@ index a077ff4..0127ca8 100644
      /// "error sending request for url (...)".
      #[cfg(feature = "online")]
 diff --git a/src/data/i18n/ui/de.json b/src/data/i18n/ui/de.json
-index 2b7ad38..52a4ae5 100644
+index 733ed9e..6dbae53 100644
 --- a/src/data/i18n/ui/de.json
 +++ b/src/data/i18n/ui/de.json
-@@ -820,6 +820,8 @@
+@@ -822,6 +822,8 @@
    "pluginDock": {
      "smaller": "Schrift kleiner",
      "larger": "Schrift größer",
@@ -393,10 +393,10 @@ index 2b7ad38..52a4ae5 100644
      "tabs": "Plugins als Tabs zeigen",
      "stack": "Plugins untereinander zeigen",
 diff --git a/src/data/i18n/ui/en.json b/src/data/i18n/ui/en.json
-index 2bca3f2..eaa07b5 100644
+index 36d661f..e219355 100644
 --- a/src/data/i18n/ui/en.json
 +++ b/src/data/i18n/ui/en.json
-@@ -832,6 +832,8 @@
+@@ -834,6 +834,8 @@
    "pluginDock": {
      "smaller": "Smaller text",
      "larger": "Larger text",
@@ -406,10 +406,10 @@ index 2bca3f2..eaa07b5 100644
      "tabs": "Show the plugins as tabs",
      "stack": "Stack the plugins",
 diff --git a/src/data/i18n/ui/es.json b/src/data/i18n/ui/es.json
-index 9148d2f..85254bb 100644
+index 0050fea..3ec2727 100644
 --- a/src/data/i18n/ui/es.json
 +++ b/src/data/i18n/ui/es.json
-@@ -820,6 +820,8 @@
+@@ -822,6 +822,8 @@
    "pluginDock": {
      "smaller": "Texto más pequeño",
      "larger": "Texto más grande",
@@ -419,10 +419,10 @@ index 9148d2f..85254bb 100644
      "tabs": "Mostrar los plugins en pestañas",
      "stack": "Apilar los plugins",
 diff --git a/src/data/i18n/ui/fr.json b/src/data/i18n/ui/fr.json
-index f613d76..e2cc1be 100644
+index a4e5f47..3c9de3b 100644
 --- a/src/data/i18n/ui/fr.json
 +++ b/src/data/i18n/ui/fr.json
-@@ -820,6 +820,8 @@
+@@ -822,6 +822,8 @@
    "pluginDock": {
      "smaller": "Texte plus petit",
      "larger": "Texte plus grand",
@@ -432,10 +432,10 @@ index f613d76..e2cc1be 100644
      "tabs": "Afficher les plugins en onglets",
      "stack": "Empiler les plugins",
 diff --git a/src/data/i18n/ui/ja.json b/src/data/i18n/ui/ja.json
-index 83d1f0b..1c3eb68 100644
+index 283a505..b939734 100644
 --- a/src/data/i18n/ui/ja.json
 +++ b/src/data/i18n/ui/ja.json
-@@ -820,6 +820,8 @@
+@@ -822,6 +822,8 @@
    "pluginDock": {
      "smaller": "文字を小さく",
      "larger": "文字を大きく",
@@ -445,10 +445,10 @@ index 83d1f0b..1c3eb68 100644
      "tabs": "プラグインをタブで表示",
      "stack": "プラグインを縦に並べる",
 diff --git a/src/data/i18n/ui/ko.json b/src/data/i18n/ui/ko.json
-index 0ab9ebf..b152a6d 100644
+index c512425..efdac92 100644
 --- a/src/data/i18n/ui/ko.json
 +++ b/src/data/i18n/ui/ko.json
-@@ -827,6 +827,8 @@
+@@ -829,6 +829,8 @@
    "pluginDock": {
      "smaller": "글자 작게",
      "larger": "글자 크게",
@@ -458,10 +458,10 @@ index 0ab9ebf..b152a6d 100644
      "tabs": "플러그인을 탭으로 보기",
      "stack": "플러그인을 세로로 쌓기",
 diff --git a/src/data/i18n/ui/pt.json b/src/data/i18n/ui/pt.json
-index c721c57..3d9a96d 100644
+index a0b3e08..ea8fff7 100644
 --- a/src/data/i18n/ui/pt.json
 +++ b/src/data/i18n/ui/pt.json
-@@ -820,6 +820,8 @@
+@@ -822,6 +822,8 @@
    "pluginDock": {
      "smaller": "Texto menor",
      "larger": "Texto maior",
@@ -471,10 +471,10 @@ index c721c57..3d9a96d 100644
      "tabs": "Mostrar os plugins em abas",
      "stack": "Empilhar os plugins",
 diff --git a/src/data/i18n/ui/ru.json b/src/data/i18n/ui/ru.json
-index b42eda4..162bf4e 100644
+index 8becc34..991bde7 100644
 --- a/src/data/i18n/ui/ru.json
 +++ b/src/data/i18n/ui/ru.json
-@@ -825,6 +825,8 @@
+@@ -827,6 +827,8 @@
    "pluginDock": {
      "smaller": "Мельче текст",
      "larger": "Крупнее текст",
@@ -484,10 +484,10 @@ index b42eda4..162bf4e 100644
      "tabs": "Показывать плагины вкладками",
      "stack": "Показывать плагины друг под другом",
 diff --git a/src/data/i18n/ui/zh-Hans.json b/src/data/i18n/ui/zh-Hans.json
-index 53117b6..e71115d 100644
+index 700055f..9a58b96 100644
 --- a/src/data/i18n/ui/zh-Hans.json
 +++ b/src/data/i18n/ui/zh-Hans.json
-@@ -827,6 +827,8 @@
+@@ -829,6 +829,8 @@
    "pluginDock": {
      "smaller": "缩小文字",
      "larger": "放大文字",
@@ -497,10 +497,10 @@ index 53117b6..e71115d 100644
      "tabs": "以标签页显示插件",
      "stack": "堆叠显示插件",
 diff --git a/src/data/i18n/ui/zh-Hant.json b/src/data/i18n/ui/zh-Hant.json
-index a526cac..bf59b22 100644
+index ba4f914..5793026 100644
 --- a/src/data/i18n/ui/zh-Hant.json
 +++ b/src/data/i18n/ui/zh-Hant.json
-@@ -827,6 +827,8 @@
+@@ -829,6 +829,8 @@
    "pluginDock": {
      "smaller": "縮小文字",
      "larger": "放大文字",

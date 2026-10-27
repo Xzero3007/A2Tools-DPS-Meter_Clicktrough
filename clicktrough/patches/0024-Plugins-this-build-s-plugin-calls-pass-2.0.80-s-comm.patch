@@ -1,0 +1,35 @@
+From 54a66422528f889cb1c1d805cb20a6f56ce880ac Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Tue, 27 Oct 2026 00:11:33 +0000
+Subject: [PATCH 24/24] Plugins: this build's plugin calls pass 2.0.80's
+ command filter
+
+Meter 2.0.80 lets plugin windows, the dock and widgets call only the app
+commands on a list (security audit H2). The calls this build's patches
+add for plugins go on it: a2.share, a2.file, a2.web.get, the window sizes,
+a widget's files and corners, and the clickable buttons of locked windows.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01RahWACwaxzLAcYgwc9jk8C
+---
+ src-tauri/src/plugins/mod.rs | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
+index d127f6e..48a6483 100644
+--- a/src-tauri/src/plugins/mod.rs
++++ b/src-tauri/src/plugins/mod.rs
+@@ -149,6 +149,10 @@ const PLUGIN_SURFACE_COMMANDS: &[&str] = &[
+     "plugin_widget_hello", "plugin_widget_open", "plugin_widget_place", "plugin_widget_post",
+     "plugin_widget_send", "plugin_widget_where", "plugin_widgets_lock", "plugin_widgets_locked",
+     "plugin_window", "plugin_window_fit", "set_meter_shown", "start_tool_drag",
++    // Clicktrough's plugin calls: a2.share, a2.file, a2.web.get, the window
++    // sizes, a widget's files and corners, and locked windows' buttons.
++    "plugin_share", "plugin_file", "plugin_web_get", "plugin_window_size",
++    "plugin_widget_file", "plugin_widget_resize", "set_locked_buttons",
+ ];
+ 
+ /// Whether the window `label` may call the app command `command`: any of the
+-- 
+2.43.0
+

@@ -146,8 +146,9 @@ jobs:
             am ../fork/clicktrough/patches/*.patch
           # Which build of this repo this is: the meter tells a newer package
           # of the same version by it.
-          sed -i "s/const CT_REVISION = 0;/const CT_REVISION = ${REVISION};/" public/src/js/checkRelease.js
-          grep -q "const CT_REVISION = ${REVISION};" public/src/js/checkRelease.js
+          # (2.0.80 on the update check is the meter's own, update_check.rs.)
+          sed -i "s/pub const CT_REVISION: u64 = 0;/pub const CT_REVISION: u64 = ${REVISION};/" src-tauri/src/update_check.rs
+          grep -q "pub const CT_REVISION: u64 = ${REVISION};" src-tauri/src/update_check.rs
           # The package version carries the build (2.0.76.r727.ct5.g…), so
           # pacman sees a newer build of the same version as newer. (makepkg
           # resets pkgrel to 1 itself when pkgver() gives a new version.)

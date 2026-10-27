@@ -1,7 +1,7 @@
-From df7c12e063c696dc97f154c708d8620f15de4c3f Mon Sep 17 00:00:00 2001
+From 36ce270723182e4f5a49e5f5307ce0a885492c87 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Fri, 23 Oct 2026 11:35:59 +0000
-Subject: [PATCH 03/22] Updates from the Clicktrough fork
+Subject: [PATCH 03/24] Updates from the Clicktrough fork
 
 This build's update check reads the fork's manifest, which its release
 workflow writes for each release of the meter rebuilt with the fork's
@@ -9,73 +9,193 @@ patches: the official package would replace them. A newer build of the
 same version (its revision) is an update too, and the update window and
 Settings name it.
 
-Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01TUNxq4V2zBL7bJg3yPJ3oC
----
- public/src/js/checkRelease.js | 22 ++++++++++++++++------
- 1 file changed, 16 insertions(+), 6 deletions(-)
+Meter 2.0.80 fetches the manifest itself (update_check.rs) from a fixed
+address, checks it with the original's signing key and installs only
+packages from cdn.a2tools.app. Here the address is the fork's latest
+release, its packages are allowed too, and its manifest, which that key
+would refuse, is taken unsigned: over HTTPS from the fork's own releases,
+with each package's SHA-256.
 
-diff --git a/public/src/js/checkRelease.js b/public/src/js/checkRelease.js
-index 6bef2d9..4c069ea 100644
---- a/public/src/js/checkRelease.js
-+++ b/public/src/js/checkRelease.js
-@@ -1,5 +1,11 @@
- (() => {
--  const CDN_MANIFEST = "https://a2tools.app/latest-v2.json";
-+  // This build updates from the Clicktrough fork, which rebuilds each release
-+  // of the meter with its patches (the lock for every window, windows that
-+  // keep their place): the official package would replace them.
-+  const CDN_MANIFEST = "https://github.com/Xzero3007/A2Tools-DPS-Meter_Clicktrough/releases/latest/download/latest-v2.json";
-+  // The fork's build of this version, so a newer build of the same version is
-+  // an update too. Its release workflow sets it; 0 for a build of its own.
-+  const CT_REVISION = 0;
-   const START_DELAY = 800,
-     RETRY = 500,
-     LIMIT = 5;
-@@ -51,6 +57,7 @@
-       const v = m.version?.startsWith("v") ? m.version : "v" + m.version;
-       // One package per platform; the backend picks the one it can install.
-       result = { latest: v, msi: m.msiUrl || "", arch: m.archUrl || "", deb: m.debUrl || "", rpm: m.rpmUrl || "" };
-+      result.revision = Number(m.revision) || 0;
-       // SHA-256 of each package: the backend installs a download only when it matches.
-       result.hashes = { msi: m.msiSha256 || "", arch: m.archSha256 || "", deb: m.debSha256 || "", rpm: m.rpmSha256 || "" };
-     } catch (e) {
-@@ -65,14 +72,17 @@
-       latestInfo.value > currentInfo.value ||
-       (latestInfo.value === currentInfo.value &&
-         currentInfo.prerelease &&
--        !latestInfo.prerelease);
-+        !latestInfo.prerelease) ||
-+      (latestInfo.value === currentInfo.value && result.revision > CT_REVISION);
- 
-     if (!hasUpdate) return { state: "current", latest };
-+    // Shown in the update window and Settings: which build of the fork.
-+    const shown = result.revision ? `${latest} (Clicktrough ${result.revision})` : latest;
- 
-     console.log("[A2Tools] Update available:", current, "->", latest);
-     const args = {
-       current,
--      latest,
-+      latest: shown,
-       msiUrl: result.msi,
-       archUrl: result.arch,
-       debUrl: result.deb,
-@@ -84,12 +94,12 @@
-     };
-     if (!ask) {
-       const offered = await window.__TAURI__.core.invoke("show_update_window", { ...args, ask: false });
--      if (!offered) return { state: "update", latest };
-+      if (!offered) return { state: "update", latest: shown };
-       pending = args;
--      return { state: "offer", latest };
-+      return { state: "offer", latest: shown };
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01RahWACwaxzLAcYgwc9jk8C
+---
+ src-tauri/src/app.rs          | 31 +++++++++++++++++++++---
+ src-tauri/src/update_check.rs | 44 +++++++++++++++++++++++++++++------
+ 2 files changed, 65 insertions(+), 10 deletions(-)
+
+diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
+index 1b0fedc..cca65a1 100644
+--- a/src-tauri/src/app.rs
++++ b/src-tauri/src/app.rs
+@@ -1597,9 +1597,15 @@ async fn check_for_update(app: tauri::AppHandle, state: tauri::State<'_, AppStat
+     let manifest = crate::update_check::fetch(&state.http).await?;
+     let current = env!("CARGO_PKG_VERSION");
+     let latest = manifest.version.trim_start_matches(['v', 'V']).to_string();
+-    if !crate::update_check::newer(&latest, current) {
++    if !crate::update_check::update_for_this_build(&latest, manifest.revision, current) {
+         return Ok(serde_json::json!({ "state": "current", "latest": latest }));
      }
-     const accepted = await window.__TAURI__.core.invoke("show_update_window", args);
--    return { state: accepted ? "installing" : "update", latest };
-+    return { state: accepted ? "installing" : "update", latest: shown };
-   };
++    // Shown in the update window and Settings: which build of the fork.
++    let latest = if manifest.revision > 0 {
++        format!("{latest} (Clicktrough {})", manifest.revision)
++    } else {
++        latest
++    };
+     let some = |s: String| Some(s).filter(|s| !s.is_empty());
+     let yes = show_update_window(
+         app,
+@@ -1671,7 +1677,7 @@ async fn show_update_window(
+     // The running version is the app's own, not what the page says.
+     drop(current);
+     let current = env!("CARGO_PKG_VERSION").to_string();
+-    if !version_shaped(&latest) {
++    if !version_shaped(latest.split(" (Clicktrough ").next().unwrap_or("")) || !clicktrough_suffix_shaped(&latest) {
+         tracing::warn!("Update: refused a latest version that isn't one");
+         return Ok(false);
+     }
+@@ -1717,11 +1723,24 @@ async fn show_update_window(
+ /// An update package on our CDN, over https, with a plain path.
+ #[cfg_attr(not(feature = "online"), allow(dead_code))]
+ fn update_url_allowed(url: &str) -> bool {
+-    url.strip_prefix("https://cdn.a2tools.app/").is_some_and(|path| {
++    // This build's packages: the Clicktrough fork's releases.
++    const FORK: &str = "https://github.com/Xzero3007/A2Tools-DPS-Meter_Clicktrough/releases/download/";
++    url.strip_prefix("https://cdn.a2tools.app/").or_else(|| url.strip_prefix(FORK)).is_some_and(|path| {
+         !path.is_empty() && !path.contains("..") && path.chars().all(|c| c.is_ascii_alphanumeric() || "/._-+".contains(c))
+     })
+ }
  
-   let once = false;
++/// What follows the version in the shown text: nothing, or " (Clicktrough N)".
++#[cfg_attr(not(feature = "online"), allow(dead_code))]
++fn clicktrough_suffix_shaped(shown: &str) -> bool {
++    match shown.split_once(" (Clicktrough ") {
++        None => true,
++        Some((_, rest)) => rest
++            .strip_suffix(')')
++            .is_some_and(|n| (1..=10).contains(&n.len()) && n.bytes().all(|b| b.is_ascii_digit())),
++    }
++}
++
+ /// "2.0.80": digits and dots, short.
+ #[cfg_attr(not(feature = "online"), allow(dead_code))]
+ fn version_shaped(v: &str) -> bool {
+@@ -4458,6 +4477,12 @@ mod tests {
+         ] {
+             assert!(!ok(bad), "{bad}");
+         }
++        assert!(ok("https://github.com/Xzero3007/A2Tools-DPS-Meter_Clicktrough/releases/download/v2.0.80-ct50/a2tools-dps-meter-2.0.80.r1.ct50.g1-1-x86_64.pkg.tar.zst"));
++        assert!(!ok("https://github.com/someone/else/releases/download/x/x.pkg.tar.zst"));
++        assert!(!ok("https://github.com/Xzero3007/A2Tools-DPS-Meter_Clicktrough/releases/download/../x"));
++        assert!(super::clicktrough_suffix_shaped("2.0.80 (Clicktrough 50)"));
++        assert!(super::clicktrough_suffix_shaped("2.0.80"));
++        assert!(!super::clicktrough_suffix_shaped("2.0.80 (Clicktrough 5\n\nClick Yes)"));
+         assert!(version_shaped("2.0.80"));
+         assert!(!version_shaped("2.0.80\n\nClick Yes"));
+         assert!(!version_shaped("latest"));
+diff --git a/src-tauri/src/update_check.rs b/src-tauri/src/update_check.rs
+index 503f395..a3648a0 100644
+--- a/src-tauri/src/update_check.rs
++++ b/src-tauri/src/update_check.rs
+@@ -16,15 +16,24 @@ use ed25519_dalek::{Signature, VerifyingKey};
+ use serde::Deserialize;
+ use std::time::Duration;
+ 
+-pub const MANIFEST_URL: &str = "https://cdn.a2tools.app/latest-v2.json";
+-pub const SIGNATURE_URL: &str = "https://cdn.a2tools.app/latest-v2.json.sig";
++// This build updates from the Clicktrough fork, which rebuilds each release
++// of the meter with its patches (the lock for every window, windows that keep
++// their place): the official package would replace them. The fork's release
++// workflow writes this manifest for each of its releases.
++pub const MANIFEST_URL: &str = "https://github.com/Xzero3007/A2Tools-DPS-Meter_Clicktrough/releases/latest/download/latest-v2.json";
++
++/// The fork's build of this version, so a newer build of the same version is
++/// an update too. Its release workflow sets it; 0 for a build of its own.
++pub const CT_REVISION: u64 = 0;
+ 
+ /// The update key's public half (Ed25519), made 2026-10-27. The private
+ /// half is kept off the repository, on the publisher's PC.
++#[cfg_attr(not(test), allow(dead_code))]
+ const UPDATE_PUBLIC_KEY_HEX: &str = "dab40e70aa5e31e705c0b4b178d17c8a40859bec4aa2dcc9cff088b958b5c020";
+ 
+ /// Whether a manifest without a signature is refused. Off for 2.0.80, which
+ /// starts the signing; on once meters that check are out.
++#[allow(dead_code)]
+ const REQUIRE_SIGNATURE: bool = false;
+ 
+ const TIMEOUT: Duration = Duration::from_secs(15);
+@@ -51,6 +60,9 @@ pub struct Manifest {
+     pub deb_sha256: String,
+     #[serde(default)]
+     pub rpm_sha256: String,
++    /// The fork's build of `version` (its release workflow's run number).
++    #[serde(default)]
++    pub revision: u64,
+ }
+ 
+ /// Fetch the manifest and check it: its signature (when there is one, or
+@@ -60,11 +72,9 @@ pub async fn fetch(client: &reqwest::Client) -> Result<Manifest, String> {
+     if body.len() > MAX_MANIFEST {
+         return Err("the update manifest is too big".into());
+     }
+-    match get(client, SIGNATURE_URL).await? {
+-        Some(sig) => verify(UPDATE_PUBLIC_KEY_HEX, &body, String::from_utf8_lossy(&sig).trim())?,
+-        None if REQUIRE_SIGNATURE => return Err("the update manifest is not signed".into()),
+-        None => tracing::warn!("Update: the manifest has no signature (accepted in this version)"),
+-    }
++    // The fork's manifest isn't signed with the original's key (that key
++    // would refuse it): it comes over HTTPS from the fork's own releases, at
++    // the fixed address above, and names packages there with their SHA-256.
+     serde_json::from_slice(&body).map_err(|e| format!("update manifest: {e}"))
+ }
+ 
+@@ -82,6 +92,7 @@ async fn get(client: &reqwest::Client, url: &str) -> Result<Option<Vec<u8>>, Str
+ }
+ 
+ /// Check `body`'s Ed25519 signature (hex) with `key_hex`.
++#[cfg_attr(not(test), allow(dead_code))]
+ fn verify(key_hex: &str, body: &[u8], signature_hex: &str) -> Result<(), String> {
+     let key: [u8; 32] = hex(key_hex).and_then(|k| k.try_into().ok()).ok_or("this build has no update key")?;
+     let key = VerifyingKey::from_bytes(&key).map_err(|_| "the update key is not valid")?;
+@@ -92,6 +103,7 @@ fn verify(key_hex: &str, body: &[u8], signature_hex: &str) -> Result<(), String>
+         .map_err(|_| "the update manifest's signature does not match: not updating from it".to_string())
+ }
+ 
++#[cfg_attr(not(test), allow(dead_code))]
+ fn hex(text: &str) -> Option<Vec<u8>> {
+     if !text.len().is_multiple_of(2) {
+         return None;
+@@ -99,6 +111,16 @@ fn hex(text: &str) -> Option<Vec<u8>> {
+     (0..text.len()).step_by(2).map(|i| u8::from_str_radix(text.get(i..i + 2)?, 16).ok()).collect()
+ }
+ 
++/// Whether the manifest names an update for this build: a newer version, or
++/// a newer build of the fork for the same version (`revision`).
++pub fn update_for_this_build(latest: &str, revision: u64, current: &str) -> bool {
++    newer(latest, current) || (same_version(latest, current) && revision > CT_REVISION)
++}
++
++fn same_version(a: &str, b: &str) -> bool {
++    a.trim().trim_start_matches(['v', 'V']) == b.trim().trim_start_matches(['v', 'V'])
++}
++
+ /// Whether `latest` is newer than `current` ("2.0.80" against "2.0.79"; a
+ /// leading "v" and a "-pre" part are allowed, a release beats its
+ /// pre-release). Anything unreadable is not newer: never a downgrade.
+@@ -155,6 +177,14 @@ mod tests {
+         assert!(!newer("2.0.80\n\nClick Yes", "2.0.79"));
+     }
+ 
++    #[test]
++    fn a_newer_build_of_the_same_version_is_an_update() {
++        assert!(update_for_this_build("2.0.80", CT_REVISION + 1, "2.0.80"));
++        assert!(!update_for_this_build("2.0.80", CT_REVISION, "2.0.80"));
++        assert!(update_for_this_build("2.0.81", 0, "2.0.80"));
++        assert!(!update_for_this_build("2.0.79", 999, "2.0.80"));
++    }
++
+     #[test]
+     fn the_built_in_key_is_a_key() {
+         let key: [u8; 32] = hex(UPDATE_PUBLIC_KEY_HEX).unwrap().try_into().unwrap();
 -- 
 2.43.0
 

@@ -1,7 +1,7 @@
-From e24eed99f030e90ac477206bec54954e4eb92eb9 Mon Sep 17 00:00:00 2001
+From 47faf1a0f941c5a262b36285c949a80cf9881f55 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Sat, 24 Oct 2026 10:13:55 +0000
-Subject: [PATCH 06/22] No supporter features, donation or author links
+Subject: [PATCH 06/24] No supporter features, donation or author links
 
 This build is a fork; the app carries nothing that points to the original
 author's support channels:
@@ -24,16 +24,16 @@ Discord status, the A2 tag in a party).
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_01RBQati3x8VviBbpY9juEWf
 ---
- index.html            | 206 ------------------------------------------
- public/src/js/core.js |  25 +++--
+ index.html            | 173 ------------------------------------------
+ public/src/js/core.js |  25 +++---
  src-tauri/src/app.rs  |   8 +-
- 3 files changed, 17 insertions(+), 222 deletions(-)
+ 3 files changed, 17 insertions(+), 189 deletions(-)
 
 diff --git a/index.html b/index.html
-index ae3bea3..487a5c9 100644
+index 040d8cd..85b2bc0 100644
 --- a/index.html
 +++ b/index.html
-@@ -590,13 +590,6 @@
+@@ -584,13 +584,6 @@
                        <button class="settingsAction guestClaimBtn" type="button" data-i18n="settings.account.guestClaimButton">Get a claim code</button>
                      </div>
                    </div>
@@ -47,7 +47,7 @@ index ae3bea3..487a5c9 100644
                  </div>
                  <div class="accountCodeBox" style="display:none">
                    <div class="accountCodeLabel" data-i18n="settings.account.codePrompt">Approve this code in your browser:</div>
-@@ -847,28 +840,6 @@
+@@ -841,28 +834,6 @@
                        <div class="settingsDropdownMenu themeDropdownMenu" role="menu"></div>
                      </div>
                    </div>
@@ -76,7 +76,7 @@ index ae3bea3..487a5c9 100644
                    <div class="settingsRow settingsRowInput">
                      <div class="settingsInfo">
                        <div class="settingsLabel" data-i18n="settings.meterSaturation.label" title="How strong the bars' colours are: lower for softer, higher for more vivid." data-i18n-title="settings.tips.meterSaturation">Bar colour strength</div>
-@@ -1262,14 +1233,6 @@
+@@ -1274,14 +1245,6 @@
                        <span class="settingsToggleTrack" aria-hidden="true"></span>
                      </span>
                    </label>
@@ -91,7 +91,7 @@ index ae3bea3..487a5c9 100644
                  </div>
                  <div class="settingsRow settingsRowAction">
                    <button
-@@ -1343,31 +1306,6 @@
+@@ -1355,31 +1318,6 @@
              </div>
              <div class="settingsFooter">
                <div class="settingsFooterLinks">
@@ -123,43 +123,10 @@ index ae3bea3..487a5c9 100644
                </div>
                <button class="quitButton" type="button" data-i18n="settings.quit">Quit</button>
              </div>
-@@ -1542,150 +1480,6 @@
-         <button class="discordPromoDone partyPromoDone" type="button" data-i18n="discordPromo.done">Done</button>
+@@ -1599,117 +1537,6 @@
+         </div>
        </div>
      </div>
--    <div class="discordPromo accountPromo" id="accountPromo" aria-hidden="true">
--      <div
--        class="discordPromoCard"
--        role="dialog"
--        aria-modal="true"
--        aria-labelledby="accountPromoTitle">
--        <button
--          class="discordPromoClose accountPromoClose"
--          type="button"
--          data-i18n-aria-label="accountPromo.close"
--          aria-label="Close">
--          ×
--        </button>
--        <div class="discordPromoTitle" id="accountPromoTitle" data-i18n="accountPromo.title">Keep your boss fights on a2tools.app</div>
--        <div class="discordPromoText" data-i18n="accountPromo.text">Create a free account or sign in, and every boss fight is saved online: a link to share each one, your logs on any device, and your place on the leaderboard.</div>
--        <label class="discordPromoToggle">
--          <input type="checkbox" class="accountPromoCheckbox" checked />
--          <span data-i18n="settings.account.autoUpload">Upload boss fights automatically</span>
--        </label>
--        <div class="discordPromoHint" data-i18n="accountPromo.hint">Other players' names stay masked, and training dummies are never uploaded. You can change this any time in Settings.</div>
--        <div class="discordPromoHint" data-i18n="accountPromo.guestHint">No account? Fights still upload, and become yours when you sign in.</div>
--        <div class="accountPromoCodeBox" style="display:none">
--          <div class="discordPromoHint" data-i18n="settings.account.codePrompt">Approve this code in your browser:</div>
--          <div class="accountPromoCode"></div>
--        </div>
--        <div class="discordPromoHint accountPromoState"></div>
--        <div class="accountPromoActions">
--          <button class="accountPromoLater" type="button" data-i18n="accountPromo.later">Not now</button>
--          <button class="accountPromoLater accountPromoGuest" type="button" data-i18n="accountPromo.guest">No account</button>
--          <button class="discordPromoDone accountPromoSignIn" type="button" data-i18n="accountPromo.signIn">Sign in</button>
--        </div>
--      </div>
--    </div>
 -    <div class="supportModal" id="supportModal" aria-hidden="true">
 -      <div
 -        class="supportModalCard"
@@ -275,7 +242,7 @@ index ae3bea3..487a5c9 100644
      <script src="/src/js/battleTime.js"></script>
      <script src="/src/js/ttk.js"></script>
 diff --git a/public/src/js/core.js b/public/src/js/core.js
-index 6b25157..2d2223d 100644
+index 9c05a40..93ab177 100644
 --- a/public/src/js/core.js
 +++ b/public/src/js/core.js
 @@ -75,7 +75,8 @@ class DpsApp {
@@ -288,7 +255,7 @@ index 6b25157..2d2223d 100644
      this.mainPlayerDpsBold = true;
      this.includeMainMeterScreenshot = false;
      this.saveScreenshotToFolder = false;
-@@ -2750,10 +2751,8 @@ class DpsApp {
+@@ -2751,10 +2752,8 @@ class DpsApp {
        { name },
        `Signed in as ${name}`
      );
@@ -301,7 +268,7 @@ index 6b25157..2d2223d 100644
      if (this._claimedNote) label += " · " + this._claimedNote;
      this.setAccountState(label);
    }
-@@ -2909,10 +2908,8 @@ class DpsApp {
+@@ -2911,10 +2910,8 @@ class DpsApp {
      }
      const storedDebugLogging = this.safeGetSetting(this.storageKeys.debugLogging) === "true";
      const storedPinMeToTop = this.safeGetSetting(this.storageKeys.pinMeToTop) === "true";
@@ -314,7 +281,7 @@ index 6b25157..2d2223d 100644
      const mainPlayerNamesBoldSetting = this.safeGetSetting(this.storageKeys.mainPlayerNamesBold);
      const storedMainPlayerNamesBold = mainPlayerNamesBoldSetting !== "false";
      const mainPlayerDpsBoldSetting = this.safeGetSetting(this.storageKeys.mainPlayerDpsBold);
-@@ -3687,10 +3684,9 @@ class DpsApp {
+@@ -3702,10 +3699,9 @@ class DpsApp {
        else say(t("settings.update.failed", "Couldn't check. Try again later."));
      });
  
@@ -327,7 +294,7 @@ index 6b25157..2d2223d 100644
      });
  
      // Quit is wired in startApp, before anything that can be slow.
-@@ -5853,8 +5849,9 @@ class DpsApp {
+@@ -5868,8 +5864,9 @@ class DpsApp {
    }
  
    setSupporter(isSupporter) {
@@ -340,10 +307,10 @@ index 6b25157..2d2223d 100644
      this.syncBarTextureControl();
    }
 diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
-index ca29797..59bc46b 100644
+index 6d95f33..3fad777 100644
 --- a/src-tauri/src/app.rs
 +++ b/src-tauri/src/app.rs
-@@ -4059,8 +4059,12 @@ pub fn run() {
+@@ -4254,8 +4254,12 @@ pub fn run() {
              // — asking the server "is this player a supporter?" would hand it a
              // list of who you play with, every fight, for a cosmetic. The
              // private build fetches nothing: only a local override counts.
@@ -357,7 +324,7 @@ index ca29797..59bc46b 100644
                  let mut had_override = false;
                  // The published roster: asked for when due, with the ETag of
                  // the one held. The loop itself turns every 15 s, for the
-@@ -4131,7 +4135,7 @@ pub fn run() {
+@@ -4326,7 +4330,7 @@ pub fn run() {
                      }
                      tokio::time::sleep(wait).await;
                  }

@@ -1,7 +1,7 @@
-From 7ac033c7dd22c12c677950d4d3f4951b429034ba Mon Sep 17 00:00:00 2001
+From 6a2609631efb4f3780aa4cb849526ca28662407d Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Sat, 24 Oct 2026 20:12:56 +0000
-Subject: [PATCH 14/22] Meter: "Hide when AION2 isn't focused" only while AION2
+Subject: [PATCH 14/24] Meter: "Hide when AION2 isn't focused" only while AION2
  runs
 
 With the game closed, nothing that counts as the game or the meter could
@@ -15,14 +15,14 @@ comes back when the game closes or the setting is turned off.
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_01RBQati3x8VviBbpY9juEWf
 ---
- src-tauri/src/app.rs | 45 +++++++++++++++++++++++++++++++++++++++++++-
- 1 file changed, 44 insertions(+), 1 deletion(-)
+ src-tauri/src/app.rs | 47 ++++++++++++++++++++++++++++++++++++++++++--
+ 1 file changed, 45 insertions(+), 2 deletions(-)
 
 diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
-index 614f80e..ba476a1 100644
+index 75a5eac..9b62620 100644
 --- a/src-tauri/src/app.rs
 +++ b/src-tauri/src/app.rs
-@@ -302,15 +302,21 @@ fn auto_hide_now(app: &tauri::AppHandle) {
+@@ -303,15 +303,21 @@ fn auto_hide_now(app: &tauri::AppHandle) {
      if HIDDEN_BY_RULE.load(std::sync::atomic::Ordering::Relaxed) {
          return;
      }
@@ -44,7 +44,7 @@ index 614f80e..ba476a1 100644
      }
  }
  
-@@ -353,6 +359,17 @@ fn pointer_over_window(window: &tauri::WebviewWindow) -> bool {
+@@ -354,6 +360,17 @@ fn pointer_over_window(window: &tauri::WebviewWindow) -> bool {
      px >= at.x && px < at.x + size.width as i32 && py >= at.y && py < at.y + size.height as i32
  }
  
@@ -62,7 +62,7 @@ index 614f80e..ba476a1 100644
  /// Tell the main window whether to ignore the mouse: when locked, unless the
  /// pointer is over the lock button or a card is open.
  /// A screenshot tool (KDE's Spectacle) is the active window: every meter
-@@ -3880,6 +3897,10 @@ pub fn run() {
+@@ -4070,6 +4087,10 @@ pub fn run() {
                  let mut hidden_with_meter: std::collections::HashSet<String> = Default::default();
                  let mut others_delay: u32 = 0;
                  let mut last_odyle: Option<((u32, u32), Option<String>)> = None;
@@ -73,7 +73,7 @@ index 614f80e..ba476a1 100644
                  loop {
                      interval.tick().await;
                      tick_count += 1;
-@@ -3922,7 +3943,11 @@ pub fn run() {
+@@ -4112,7 +4133,11 @@ pub fn run() {
                          // hit; no keybind needed (#106, a headless stream).
                          let on = |key: &str| state.settings.get(key).as_deref() == Some("true");
                          if tick_count % 4 == 0 {
@@ -86,16 +86,20 @@ index 614f80e..ba476a1 100644
                              let solo = on("dpsMeter.hideWhenSolo") && state.data_storage.get_party_members().len() < 2;
                              closed_or_solo = closed || solo;
                          }
-@@ -3975,12 +4000,28 @@ pub fn run() {
+@@ -4165,15 +4190,31 @@ pub fn run() {
                          // of combat); the rest below doesn't: Ping's icon
                          // stayed over the browser with the meter hidden while
                          // solo (Hirai).
 +                        // Clicktrough: only while AION2 runs (GAME_RUNNING).
-                         let others_auto_hide = tick_count > 20
+                         let meter_auto_hide = tick_count > 20
 +                            && game_running
                              && state.settings.get("dpsMeter.autoHideMeter")
                                  .unwrap_or_default() == "true";
-                         let auto_hide = others_auto_hide
+                         // Plugins set to hide go too, with or without the meter.
+                         let others_auto_hide = meter_auto_hide
+-                            || (tick_count > 20 && crate::plugins::any_hide_unfocused(&handle));
++                            || (tick_count > 20 && game_running && crate::plugins::any_hide_unfocused(&handle));
+                         let auto_hide = meter_auto_hide
                              && !hidden_closed
                              && meter_wanted(&handle);
 +                        // Hidden by it, and now it doesn't apply (the game
@@ -115,7 +119,7 @@ index 614f80e..ba476a1 100644
                          if auto_hide {
                              if let Some(window) = handle.get_webview_window("main") {
                                  let aion_fg = platform::window_detector::is_aion2_foreground();
-@@ -3996,6 +4037,7 @@ pub fn run() {
+@@ -4189,6 +4230,7 @@ pub fn run() {
                                      || platform::window::is_hidden_in_place(&window);
                                  if aion_fg || is_self_fg {
                                      hide_delay = 0;
@@ -123,7 +127,7 @@ index 614f80e..ba476a1 100644
                                      if hidden {
                                          show_meter_again(&handle, &window);
                                      }
-@@ -4005,6 +4047,7 @@ pub fn run() {
+@@ -4198,6 +4240,7 @@ pub fn run() {
                                      hide_delay += 1;
                                      if hide_delay >= 3 {
                                          platform::window::minimize_off_top(&window);

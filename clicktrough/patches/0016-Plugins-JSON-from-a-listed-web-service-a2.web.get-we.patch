@@ -1,7 +1,7 @@
-From e9c335725c4a696a10b656c7a252bb0a7f602c93 Mon Sep 17 00:00:00 2001
+From e1d70e2d1752b2686a1b319cc7ae451a3d8ac19e Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Sat, 24 Oct 2026 22:44:44 +0000
-Subject: [PATCH 16/22] Plugins: JSON from a listed web service (a2.web.get,
+Subject: [PATCH 16/24] Plugins: JSON from a listed web service (a2.web.get,
  web:<host>)
 
 A plugin's page has no network at all, and some data plugins want is
@@ -69,10 +69,10 @@ index 7987f66..83faa6c 100644
          return t("settings.plugins.permDecoder", "Read your own game data: {name}", { name: permission.slice(8) });
        }
 diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
-index 9e2b0b0..ff78679 100644
+index 15ed4cc..7d4831d 100644
 --- a/src-tauri/src/app.rs
 +++ b/src-tauri/src/app.rs
-@@ -4244,6 +4244,7 @@ pub fn run() {
+@@ -4440,6 +4440,7 @@ pub fn run() {
              crate::plugins::plugin_hello,
              crate::plugins::plugin_share,
              crate::plugins::plugin_file,
@@ -106,10 +106,10 @@ index ca59ae0..da6693d 100644
      // Meter 2.0.72 on: the server's Abyss siege (artifact holders, cores).
      abyssSiege: (server) => call("abyssSiege", [Number(server)]),
 diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
-index 6031592..a077ff4 100644
+index 5f9c48c..a052e69 100644
 --- a/src-tauri/src/plugins/mod.rs
 +++ b/src-tauri/src/plugins/mod.rs
-@@ -1249,9 +1249,10 @@ fn describe_permission(t: &PromptTexts, permission: &str) -> String {
+@@ -1277,9 +1277,10 @@ fn describe_permission(t: &PromptTexts, permission: &str) -> String {
          "events:world" => "See where you and the monsters and objects around you are (from the game data)".into(),
          "share" => "Share what it follows with other plugins (e.g. the pets it tracks, for a map)".into(),
          "events:shared" => "See what other plugins share (e.g. the pets they track)".into(),
@@ -123,7 +123,7 @@ index 6031592..a077ff4 100644
          },
      }
  }
-@@ -2162,6 +2163,181 @@ async fn feed_file(_app: &tauri::AppHandle, _feed: &'static str, _server: u32) -
+@@ -2190,6 +2191,181 @@ async fn feed_file(_app: &tauri::AppHandle, _feed: &'static str, _server: u32) -
      Err("this meter is built without network features".into())
  }
  
@@ -305,12 +305,12 @@ index 6031592..a077ff4 100644
  #[tauri::command]
  pub fn plugin_storage_get(app: tauri::AppHandle, window: tauri::WebviewWindow, plugin: Option<String>, key: String) -> Result<Option<String>, String> {
      let id = window_plugin(&window, plugin.as_deref())?;
-@@ -2452,7 +2628,49 @@ fn percent_decode(s: &str) -> String {
+@@ -2495,7 +2671,49 @@ mod tests {
+         }
+     }
  
- #[cfg(test)]
- mod tests {
--    use super::{base64, content_policy, inline_page, inlined_policy, with_meter_fonts, prompt_texts, should_start, take_ready};
-+    use super::{base64, content_policy, inline_page, inlined_policy, with_meter_fonts, prompt_texts, should_start, take_ready, web_permission};
+-    use super::{allowed_from, base64, content_policy, inline_page, inlined_policy, with_meter_fonts, prompt_texts, should_start, take_ready};
++    use super::{allowed_from, base64, content_policy, inline_page, inlined_policy, with_meter_fonts, prompt_texts, should_start, take_ready, web_permission};
 +
 +    #[test]
 +    fn a_plugin_reads_only_the_listed_web_services_over_https() {

@@ -1,4 +1,4 @@
-From d1bb01ee41a7fccfa269f1f5e74c0c65759466c0 Mon Sep 17 00:00:00 2001
+From d5b187eb7dede5ae2930439aa59dd3ea89a725d0 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Fri, 23 Oct 2026 13:03:59 +0000
 Subject: [PATCH] Event Timers: the bosses due soon and the Artifact Siege in
@@ -20,7 +20,7 @@ Claude-Session: https://claude.ai/code/session_01TUNxq4V2zBL7bJg3yPJ3oC
  3 files changed, 126 insertions(+), 3 deletions(-)
 
 diff --git a/plugins/event-timers/index.html b/plugins/event-timers/index.html
-index 61b75b6..c697358 100644
+index 99e2639..0dde6ba 100644
 --- a/plugins/event-timers/index.html
 +++ b/plugins/event-timers/index.html
 @@ -26,6 +26,8 @@
@@ -41,7 +41,7 @@ index 61b75b6..c697358 100644
      <div class="modal" role="dialog" aria-modal="true" hidden>
        <div class="modalBox">
 diff --git a/plugins/event-timers/plugin.js b/plugins/event-timers/plugin.js
-index 5d2dacf..06c9369 100644
+index f64af56..bdda828 100644
 --- a/plugins/event-timers/plugin.js
 +++ b/plugins/event-timers/plugin.js
 @@ -37,6 +37,10 @@ const els = {
@@ -103,7 +103,7 @@ index 5d2dacf..06c9369 100644
  // The world boss timers: { server, bosses, at, error }, from the feed and the
  // player's own map, the newest report of each boss kept.
  let feed = null;
-@@ -646,6 +675,9 @@ function renderStatic() {
+@@ -669,6 +698,9 @@ function renderStatic() {
    els.defaultClosed.value = String(defaultClosed());
    els.scaleSelect.replaceChildren(...SCALES.map((x) => option(x, `${Math.round(x * 100)}%`)));
    els.scaleSelect.value = String(prefs.scale);
@@ -113,7 +113,7 @@ index 5d2dacf..06c9369 100644
    els.soundLabel.textContent = a.sound;
    els.testAlert.textContent = words.testAlert;
    els.alertOptionsBtn.textContent = words.alertOptions;
-@@ -944,12 +976,14 @@ function renderSchedule(list, events, now, { hideable, actions = false }) {
+@@ -967,12 +999,14 @@ function renderSchedule(list, events, now, { hideable, actions = false }) {
          render();
        });
      }
@@ -129,7 +129,7 @@ index 5d2dacf..06c9369 100644
    }));
    return shown;
  }
-@@ -1034,10 +1068,71 @@ function renderField(now) {
+@@ -1057,10 +1091,71 @@ function renderField(now) {
    els.field.replaceChildren(...items);
  }
  
@@ -201,7 +201,7 @@ index 5d2dacf..06c9369 100644
    // Not while a row's button is pressed; a focused one keeps its focus.
    if (rowPress) return;
    const focused = document.activeElement?.closest?.(".rowBtn");
-@@ -1899,6 +1994,11 @@ els.scaleSelect.addEventListener("change", () => {
+@@ -1953,6 +2048,11 @@ els.scaleSelect.addEventListener("change", () => {
    savePrefs();
    applyScale();
  });
@@ -213,7 +213,7 @@ index 5d2dacf..06c9369 100644
  els.regionSelect.addEventListener("change", () => {
    prefs.region = els.regionSelect.value;
    savePrefs();
-@@ -1937,7 +2037,10 @@ a2.on("bossMap", (m) => {
+@@ -1991,7 +2091,10 @@ a2.on("bossMap", (m) => {
  a2.on("game", (g) => {
    gameRunning = typeof g?.running === "boolean" ? g.running : null;
  });
@@ -226,7 +226,7 @@ index 5d2dacf..06c9369 100644
  (async () => {
    prefs = { ...prefs, ...((await a2.storage.get("prefs").catch(() => null)) || {}) };
 diff --git a/plugins/event-timers/style.css b/plugins/event-timers/style.css
-index e53f7de..bd425c5 100644
+index ad221aa..fdfbf65 100644
 --- a/plugins/event-timers/style.css
 +++ b/plugins/event-timers/style.css
 @@ -25,6 +25,23 @@ body.compact .eventList li:nth-child(n + 4) {
