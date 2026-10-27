@@ -1,4 +1,4 @@
-From f00c86cf0a4a0bf35c4bbee727f6c9852cd3235b Mon Sep 17 00:00:00 2001
+From 97156215de16fca5889ee45fb20b73b1ebbe5380 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Sat, 24 Oct 2026 12:42:42 +0000
 Subject: [PATCH 09/25] Plugins: a text size for each plugin

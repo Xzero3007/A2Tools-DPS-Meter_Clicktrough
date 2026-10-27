@@ -1,0 +1,587 @@
+From e71cf87b1e495e9cd9fe2a84dd1349ddbc8ba2cf Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Tue, 27 Oct 2026 00:51:38 +0000
+Subject: [PATCH 25/25] Nothing sent, no account: the private build, with what
+ it may download
+
+This build sends nothing to the original's services and asks for no
+account: it is built without `online`, the original's private build,
+which links none of that code: the A2 Tools account and sign-in, sharing
+fights and the leaderboards (the "Help build the leaderboards?" prompt),
+field boss and supply reports, party presence, the live boss connection,
+the plugin catalog (this build's plugins come with its releases), the
+supporter roster, Send Logs to Dev, Discord activity and the stream
+overlay. The pages hide all of it (html.a2-offline).
+
+A new feature `net` brings back the network client for what this build
+downloads, and nothing else (net_guard.rs): its own releases (the update
+check, the updater), the web services plugins list (a2.web.get, the
+Market's prices), and the world boss and Abyss siege timers players
+share (plain downloads of the feed files; nothing is reported back). The
+client resolves only those hosts and follows redirects only to those
+places, and each request checks its address. build_features tells the
+pages `updates`, so the green button and Settings' update check stay. The
+Arch package builds with `desktop,net`.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01RahWACwaxzLAcYgwc9jk8C
+---
+ packaging/arch/PKGBUILD       |   8 +-
+ public/src/js/core.js         |   5 +-
+ public/src/js/tauriBridge.js  |  10 ++-
+ src-tauri/Cargo.toml          |   8 ++
+ src-tauri/src/app.rs          |  37 ++++----
+ src-tauri/src/lib.rs          |   5 +-
+ src-tauri/src/net_guard.rs    | 164 ++++++++++++++++++++++++++++++++++
+ src-tauri/src/plugins/mod.rs  |  36 ++++----
+ src-tauri/src/update_check.rs |   1 +
+ 9 files changed, 231 insertions(+), 43 deletions(-)
+ create mode 100644 src-tauri/src/net_guard.rs
+
+diff --git a/packaging/arch/PKGBUILD b/packaging/arch/PKGBUILD
+index 2a0a79f..ae20df5 100644
+--- a/packaging/arch/PKGBUILD
++++ b/packaging/arch/PKGBUILD
+@@ -63,10 +63,14 @@ build() {
+   cp src/data/skill_icons.json src/data/dot_skill_ids.json public/data/
+   cp src/data/skill_icons.json src/data/dot_skill_ids.json public/src/data/
+   npm ci
+-  npx tauri build --no-bundle
++  # Clicktrough: without `online` (no A2 Tools account, uploads, feeds,
++  # catalog, supporter roster, Send Logs or Discord), with `net` for this
++  # fork's updates and the plugins' listed web services (Cargo.toml).
++  npx tauri build --no-bundle -- --no-default-features --features desktop,net
+   # The hotkeys helper, run without the meter's capture permission
+   # (platform/linux/hotkeys.rs); the .install script gives caps to the meter only.
+-  cargo build --release --manifest-path src-tauri/Cargo.toml --bin a2tools-hotkeys
++  cargo build --release --manifest-path src-tauri/Cargo.toml --bin a2tools-hotkeys \
++    --no-default-features --features desktop,net
+ }
+ 
+ package() {
+diff --git a/public/src/js/core.js b/public/src/js/core.js
+index 6791b8c..5fa5ddb 100644
+--- a/public/src/js/core.js
++++ b/public/src/js/core.js
+@@ -661,7 +661,8 @@ class DpsApp {
+     // Not in the private build, which checks for nothing (build_features).
+     if (window.A2_VIEW === "main") {
+       Promise.resolve(window.a2BuildReady).then((build) => {
+-        if (build?.online !== false) this.setupUpdatesButton();
++        // Clicktrough: this fork's updates, in its build without the rest.
++        if (build?.updates !== false) this.setupUpdatesButton();
+       });
+     }
+     this.setupConsoleDebugging();
+@@ -3680,7 +3681,7 @@ class DpsApp {
+     const updateBtn = document.querySelector(".settingsUpdateBtn");
+     const updateStatus = document.querySelector(".settingsUpdateStatus");
+     Promise.resolve(window.a2BuildReady).then((build) => {
+-      if (updateBtn && build?.online !== false && window.ReleaseChecker?.checkNow) updateBtn.hidden = false;
++      if (updateBtn && build?.updates !== false && window.ReleaseChecker?.checkNow) updateBtn.hidden = false;
+     });
+     updateBtn?.addEventListener("click", async () => {
+       if (updateBtn.classList.contains("isChecking")) return;
+diff --git a/public/src/js/tauriBridge.js b/public/src/js/tauriBridge.js
+index 83344d1..cfab96a 100644
+--- a/public/src/js/tauriBridge.js
++++ b/public/src/js/tauriBridge.js
+@@ -12,10 +12,16 @@
+   // build, compiled without online features, has no account, uploads, update
+   // check, Send Logs to Dev, Discord activity or stream overlay: html.a2-offline
+   // hides them (styles.css) and the code below skips them.
+-  window.a2Build = { online: true };
++  // Clicktrough: `updates`, this fork's update check, which its release has
++  // without the rest of the online parts (build_features).
++  window.a2Build = { online: true, updates: true };
+   window.a2BuildReady = invoke("build_features")
+     .then((features) => {
+-      window.a2Build = { online: features?.online !== false, devSupporter: features?.devSupporter === true };
++      window.a2Build = {
++        online: features?.online !== false,
++        updates: features?.updates !== false,
++        devSupporter: features?.devSupporter === true,
++      };
+       document.documentElement.classList.toggle("a2-offline", !window.a2Build.online);
+       return window.a2Build;
+     })
+diff --git a/src-tauri/Cargo.toml b/src-tauri/Cargo.toml
+index 9fd99ae..b45f7b0 100644
+--- a/src-tauri/Cargo.toml
++++ b/src-tauri/Cargo.toml
+@@ -23,6 +23,13 @@ crate-type = ["staticlib", "cdylib", "rlib"]
+ #
+ # is the check that enforces it.
+ default = ["desktop", "online"]
++# Clicktrough: the network client alone, for the two things this fork's
++# release reaches: its own releases (the update check and the updater) and
++# the web services plugins list (a2.web.get: the Market's prices). Its
++# release is built with `desktop,net`, without `online`: no A2 Tools account,
++# uploads, leaderboards, field boss feeds, plugin catalog, supporter roster,
++# Send Logs to Dev, Discord activity or stream overlay.
++net = ["dep:reqwest", "dep:futures-util", "dep:ed25519-dalek"]
+ # Everything that talks to a service outside this computer: the A2 Tools
+ # account and uploads, the supporter roster, update checks and the updater,
+ # Send Logs to Dev, Discord activity, the OBS stream overlay and the Npcap
+@@ -33,6 +40,7 @@ default = ["desktop", "online"]
+ #
+ online = [
+     "desktop",
++    "net",
+     "dep:reqwest",
+     "dep:futures-util",
+     "dep:urlencoding",
+diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
+index 3646027..f8b5d85 100644
+--- a/src-tauri/src/app.rs
++++ b/src-tauri/src/app.rs
+@@ -74,7 +74,7 @@ pub struct AppState {
+     /// One client, reused. The update check and the MSI download each used a
+     /// one-shot `reqwest::get`, which builds a fresh client and TLS stack per
+     /// call; anything periodic wants a pool rather than a handshake every time.
+-    #[cfg(feature = "online")]
++    #[cfg(feature = "net")]
+     pub http: reqwest::Client,
+     /// The header's suspend button: while set, the capture dispatcher drops
+     /// every packet. Shared with it (`CaptureDispatcher::use_suspend_flag`).
+@@ -1661,7 +1661,7 @@ async fn write_cached_icon(app: tauri::AppHandle, key: String, data: String) ->
+ }
+ 
+ 
+-#[cfg(feature = "online")]
++#[cfg(feature = "net")]
+ /// Look for an update (2.0.80 on): the meter fetches and checks the manifest
+ /// itself (`update_check`: signature, newer than this version) and offers
+ /// what it names. `ask` false: only whether there is one to offer (the green
+@@ -1707,7 +1707,7 @@ async fn check_for_update(app: tauri::AppHandle, state: tauri::State<'_, AppStat
+     Ok(serde_json::json!({ "state": state, "latest": latest }))
+ }
+ 
+-#[cfg(feature = "online")]
++#[cfg(feature = "net")]
+ /// Offer the update `check_for_update` found. Not a command any more: the
+ /// page used to call it with a URL and hash of its own (security audit H1).
+ #[allow(clippy::too_many_arguments)]
+@@ -1793,11 +1793,11 @@ async fn show_update_window(
+     Ok(accepted)
+ }
+ 
+-#[cfg(feature = "online")]
++#[cfg(feature = "net")]
+ /// Whether a downloaded package is the one the manifest names: its SHA-256,
+ /// in hex, equals the manifest's. A manifest without a hash matches nothing.
+ /// An update package on our CDN, over https, with a plain path.
+-#[cfg_attr(not(feature = "online"), allow(dead_code))]
++#[cfg_attr(not(feature = "net"), allow(dead_code))]
+ fn update_url_allowed(url: &str) -> bool {
+     // This build's packages: only the Clicktrough fork's releases, never the
+     // original's CDN.
+@@ -1808,7 +1808,7 @@ fn update_url_allowed(url: &str) -> bool {
+ }
+ 
+ /// What follows the version in the shown text: nothing, or " (Clicktrough N)".
+-#[cfg_attr(not(feature = "online"), allow(dead_code))]
++#[cfg_attr(not(feature = "net"), allow(dead_code))]
+ fn clicktrough_suffix_shaped(shown: &str) -> bool {
+     match shown.split_once(" (Clicktrough ") {
+         None => true,
+@@ -1819,7 +1819,7 @@ fn clicktrough_suffix_shaped(shown: &str) -> bool {
+ }
+ 
+ /// "2.0.80": digits and dots, short.
+-#[cfg_attr(not(feature = "online"), allow(dead_code))]
++#[cfg_attr(not(feature = "net"), allow(dead_code))]
+ fn version_shaped(v: &str) -> bool {
+     (1..=20).contains(&v.len()) && v.chars().all(|c| c.is_ascii_digit() || c == '.') && v.contains('.')
+ }
+@@ -1828,7 +1828,7 @@ fn version_shaped(v: &str) -> bool {
+ /// could carry a backslash path on Windows, audit L9), random so it can't be
+ /// guessed beforehand, with the package's own extension, which the installer
+ /// and package managers go by.
+-#[cfg(feature = "online")]
++#[cfg(feature = "net")]
+ fn update_download_path(url: &str) -> Result<std::path::PathBuf, String> {
+     let ext = [".msi", ".pkg.tar.zst", ".deb", ".rpm"]
+         .into_iter()
+@@ -1847,7 +1847,7 @@ fn package_hash_matches(expected: &str, actual_hex: &str) -> bool {
+         && expected.eq_ignore_ascii_case(actual_hex)
+ }
+ 
+-#[cfg(feature = "online")]
++#[cfg(feature = "net")]
+ async fn download_and_install_update(app: &tauri::AppHandle, url: &str, expected_sha256: &str) -> Result<(), String> {
+     use tokio::io::AsyncWriteExt;
+     use futures_util::StreamExt;
+@@ -1863,6 +1863,7 @@ async fn download_and_install_update(app: &tauri::AppHandle, url: &str, expected
+     let app_clone = app.clone();
+     let url_owned = url.to_string();
+ 
++    crate::net_guard::check(&url_owned)?;
+     let response = app
+         .state::<AppState>()
+         .http
+@@ -2128,7 +2129,7 @@ async fn send_logs_to_dev() -> Result<serde_json::Value, String> {
+     Err(NOT_IN_THIS_BUILD.into())
+ }
+ 
+-#[cfg(not(feature = "online"))]
++#[cfg(not(feature = "net"))]
+ #[tauri::command]
+ async fn check_for_update(ask: Option<bool>) -> Result<serde_json::Value, String> {
+     let _ = ask;
+@@ -2148,7 +2149,9 @@ fn build_features() -> serde_json::Value {
+     // supporter's account (bar textures), to test those without one. A
+     // release build ignores it.
+     let dev_supporter = cfg!(debug_assertions) && std::env::var_os("A2_DEV_SUPPORTER").is_some();
+-    serde_json::json!({ "online": cfg!(feature = "online"), "devSupporter": dev_supporter })
++    // Clicktrough: `updates`, this fork's update check (feature `net`), on in
++    // its release, which is built without `online`.
++    serde_json::json!({ "online": cfg!(feature = "online"), "updates": cfg!(feature = "net"), "devSupporter": dev_supporter })
+ }
+ 
+ /// Open a link in the browser. Web and mail links only: the shell hands
+@@ -3815,13 +3818,9 @@ pub fn run() {
+                 npc_lookup: npc_lookup.clone(),
+                 app_data_dir: app_data_dir.clone(),
+                 i18n_data_dir: found_data_dir.clone(),
+-                #[cfg(feature = "online")]
+-                http: reqwest::Client::builder()
+-                    .user_agent(concat!("A2Tools-DPS-Meter/", env!("CARGO_PKG_VERSION")))
+-                    .connect_timeout(Duration::from_secs(10))
+-                    .timeout(Duration::from_secs(30))
+-                    .build()
+-                    .unwrap_or_default(),
++                #[cfg(feature = "net")]
++                // Clicktrough: only the places net_guard lists.
++                http: crate::net_guard::build(crate::net_guard::builder()),
+                 capture_suspended: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                 overlay_lock: Arc::new(OverlayLock::default()),
+                 #[cfg(feature = "online")]
+@@ -4698,7 +4697,7 @@ mod tests {
+         assert!(InFlight::start("in-flight-test").is_some());
+     }
+ 
+-    #[cfg(feature = "online")]
++    #[cfg(feature = "net")]
+     #[test]
+     fn only_a_package_with_the_manifest_hash_is_installed() {
+         let actual = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08";
+diff --git a/src-tauri/src/lib.rs b/src-tauri/src/lib.rs
+index b02eec2..4a3ce1b 100644
+--- a/src-tauri/src/lib.rs
++++ b/src-tauri/src/lib.rs
+@@ -38,8 +38,11 @@ pub mod plugins;
+ mod tray;
+ #[cfg(feature = "online")]
+ mod boss_report;
+-#[cfg(feature = "online")]
++#[cfg(feature = "net")]
+ mod update_check;
++// Clicktrough: the only places the network client reaches.
++#[cfg(feature = "net")]
++pub mod net_guard;
+ #[cfg(feature = "online")]
+ mod supply_report;
+ #[cfg(feature = "online")]
+diff --git a/src-tauri/src/net_guard.rs b/src-tauri/src/net_guard.rs
+new file mode 100644
+index 0000000..4fd54f8
+--- /dev/null
++++ b/src-tauri/src/net_guard.rs
+@@ -0,0 +1,164 @@
++//! Clicktrough: the only places this build's network client reaches.
++//!
++//! The meter here downloads and sends nothing else: its own updates (this
++//! fork's releases), the market prices plugins read (`a2.web.get`), and the
++//! world boss and Abyss siege timers players share (a plain download of the
++//! file; nothing is reported back). Every client is built through `builder`:
++//! its name lookups answer only for the hosts below, and it follows a
++//! redirect only to an address `allowed` takes. Each request also checks
++//! its own address first (`check`). Anything else is refused, so code the
++//! original adds later can't reach out through this client either.
++
++use std::net::SocketAddr;
++use std::sync::Arc;
++use std::time::Duration;
++
++/// Each place as (host, path prefix), over https only.
++const ALLOWED: &[(&str, &str)] = &[
++    // This fork's update manifest and packages.
++    ("github.com", "/Xzero3007/A2Tools-DPS-Meter_Clicktrough/releases/"),
++    // Where GitHub sends a release download (a signed, short-lived address).
++    ("release-assets.githubusercontent.com", "/"),
++    ("objects.githubusercontent.com", "/"),
++    // The fork's hourly copy of the market prices (branch market-data).
++    ("raw.githubusercontent.com", "/Xzero3007/A2Tools-DPS-Meter_Clicktrough/market-data/"),
++    // The market prices themselves.
++    ("aion2.exchange", "/"),
++    // The shared world boss and Abyss siege timers: the files, read only.
++    ("cdn.a2tools.app", "/feeds/boss-timers/"),
++    ("cdn.a2tools.app", "/feeds/abyss-artifacts/"),
++];
++
++/// Whether `url` is one of the places above: https, no port, user or
++/// password, and no way out of the path.
++pub fn allowed(url: &str) -> bool {
++    let Some(rest) = url.strip_prefix("https://") else { return false };
++    let (host, path) = match rest.find('/') {
++        Some(i) => (&rest[..i], &rest[i..]),
++        None => (rest, "/"),
++    };
++    if host.contains(['@', ':']) || path.contains("..") || path.to_ascii_lowercase().contains("%2e") || path.contains('\\') {
++        return false;
++    }
++    let host = host.to_ascii_lowercase();
++    ALLOWED.iter().any(|(h, prefix)| host == *h && path.starts_with(prefix))
++}
++
++/// `Ok` for an allowed address, else why not.
++pub fn check(url: &str) -> Result<(), String> {
++    if allowed(url) {
++        Ok(())
++    } else {
++        tracing::warn!("Network: refused {url} (not on this build's list)");
++        Err("this build doesn't connect there".into())
++    }
++}
++
++fn host_allowed(host: &str) -> bool {
++    let host = host.trim_end_matches('.').to_ascii_lowercase();
++    ALLOWED.iter().any(|(h, _)| host == *h)
++}
++
++/// Name lookups for the allowed hosts only: any other host doesn't resolve.
++struct Resolver;
++
++impl reqwest::dns::Resolve for Resolver {
++    fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
++        let host = name.as_str().to_string();
++        Box::pin(async move {
++            if !host_allowed(&host) {
++                tracing::warn!("Network: refused {host} (not on this build's list)");
++                return Err(format!("{host}: this build doesn't connect there").into());
++            }
++            let addrs: Vec<SocketAddr> = tokio::net::lookup_host((host.as_str(), 0)).await?.collect();
++            Ok(Box::new(addrs.into_iter()) as reqwest::dns::Addrs)
++        })
++    }
++}
++
++/// A client builder that reaches only the allowed places (see the top).
++pub fn builder() -> reqwest::ClientBuilder {
++    reqwest::Client::builder()
++        .user_agent(concat!("A2Tools-DPS-Meter/", env!("CARGO_PKG_VERSION")))
++        .connect_timeout(Duration::from_secs(10))
++        .timeout(Duration::from_secs(30))
++        .dns_resolver(Arc::new(Resolver))
++        .no_proxy()
++        .redirect(reqwest::redirect::Policy::custom(|attempt| {
++            if attempt.previous().len() >= 10 {
++                attempt.error("too many redirects")
++            } else if allowed(attempt.url().as_str()) {
++                attempt.follow()
++            } else {
++                tracing::warn!("Network: refused a redirect to {}", attempt.url());
++                attempt.stop()
++            }
++        }))
++}
++
++/// Build `builder`'s client. Never a plain client in its place: one that
++/// can't be built with the guard isn't built at all.
++pub fn build(builder: reqwest::ClientBuilder) -> reqwest::Client {
++    builder.build().unwrap_or_else(|e| {
++        tracing::error!("Network: the client could not be built ({e}); nothing goes out");
++        // The guard alone, which takes nothing: every lookup fails.
++        reqwest::Client::builder()
++            .dns_resolver(Arc::new(Resolver))
++            .redirect(reqwest::redirect::Policy::none())
++            .build()
++            .expect("a network client")
++    })
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn only_the_listed_places() {
++        for ok in [
++            "https://github.com/Xzero3007/A2Tools-DPS-Meter_Clicktrough/releases/latest/download/latest-v2.json",
++            "https://release-assets.githubusercontent.com/github-production-release-asset/1/2?x=y",
++            "https://raw.githubusercontent.com/Xzero3007/A2Tools-DPS-Meter_Clicktrough/market-data/prices/12305.json",
++            "https://aion2.exchange/api/items?server=12305",
++            "https://cdn.a2tools.app/feeds/boss-timers/2001.json",
++            "https://cdn.a2tools.app/feeds/abyss-artifacts/2001.json",
++        ] {
++            assert!(allowed(ok), "{ok}");
++        }
++        for bad in [
++            "https://a2tools.app/api/logs",
++            "https://a2tools.app/api/device/code",
++            "https://cdn.a2tools.app/plugins/index.json",
++            "https://cdn.a2tools.app/patrons-v2.bin",
++            "https://cdn.a2tools.app/latest-v2.json",
++            "https://cdn.a2tools.app/feeds/boss-timers/../../api/x",
++            "https://cdn.a2tools.app/feeds/boss-timers/%2e%2e/x",
++            "http://cdn.a2tools.app/feeds/boss-timers/2001.json",
++            "https://github.com/taengu/A2Tools-DPS-Meter/releases/latest",
++            "https://user@aion2.exchange/api",
++            "https://aion2.exchange:8443/api",
++            "https://aion2.exchange.evil.example/api",
++            "https://discord.gg/x",
++            "wss://a2tools.app/api/boss-timers/live?server=2001",
++        ] {
++            assert!(!allowed(bad), "{bad}");
++        }
++        assert!(host_allowed("github.com"));
++        assert!(host_allowed("AION2.exchange."));
++        assert!(!host_allowed("a2tools.app"));
++        assert!(!host_allowed("logs.a2tools.app"));
++    }
++
++    /// The client itself, not only `allowed`: a host off the list isn't
++    /// even looked up, so nothing leaves the PC for it.
++    #[tokio::test]
++    async fn the_client_reaches_no_other_host() {
++        let client = build(builder());
++        for url in ["https://a2tools.app/api/logs", "https://logs.a2tools.app/", "https://discord.com/"] {
++            let e = client.post(url).body("x").send().await.unwrap_err();
++            let text = format!("{e:?}");
++            assert!(text.contains("doesn't connect there"), "{url}: {text}");
++        }
++    }
++}
+diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
+index 48a6483..68f335b 100644
+--- a/src-tauri/src/plugins/mod.rs
++++ b/src-tauri/src/plugins/mod.rs
+@@ -2324,18 +2324,21 @@ pub async fn plugin_abyss_siege(app: tauri::AppHandle, window: tauri::WebviewWin
+     feed_file(&app, "abyss-artifacts", server).await
+ }
+ 
+-#[cfg(feature = "online")]
++#[cfg(feature = "net")]
+ async fn boss_timers(app: &tauri::AppHandle, server: u32) -> Result<Option<Value>, String> {
+     feed_file(app, "boss-timers", server).await
+ }
+ 
+-#[cfg(not(feature = "online"))]
++#[cfg(not(feature = "net"))]
+ async fn boss_timers(_app: &tauri::AppHandle, _server: u32) -> Result<Option<Value>, String> {
+     Err("this meter is built without network features".into())
+ }
+ 
+ /// One server's file of a feed on the CDN (`feeds/<feed>/<server>.json`).
+-#[cfg(feature = "online")]
++/// Clicktrough: in its build (`net`) too, as a plain download that sends
++/// nothing but the file's address; reporting to the feed stays out
++/// (`boss_report.rs` is `online` only).
++#[cfg(feature = "net")]
+ async fn feed_file(app: &tauri::AppHandle, feed: &'static str, server: u32) -> Result<Option<Value>, String> {
+     static CACHE: std::sync::OnceLock<Mutex<HashMap<(&'static str, u32), (Instant, Option<Value>)>>> = std::sync::OnceLock::new();
+     let cache = CACHE.get_or_init(Mutex::default);
+@@ -2350,6 +2353,7 @@ async fn feed_file(app: &tauri::AppHandle, feed: &'static str, server: u32) -> R
+     }
+     let state = app.try_state::<AppState>().ok_or("no app state")?;
+     let url = format!("https://cdn.a2tools.app/feeds/{feed}/{server}.json");
++    crate::net_guard::check(&url)?;
+     let res = state.http.get(&url).timeout(Duration::from_secs(15)).send().await.map_err(|e| e.to_string())?;
+     let value = match res.status() {
+         s if s == reqwest::StatusCode::NOT_FOUND => None,
+@@ -2360,7 +2364,7 @@ async fn feed_file(app: &tauri::AppHandle, feed: &'static str, server: u32) -> R
+     Ok(value)
+ }
+ 
+-#[cfg(not(feature = "online"))]
++#[cfg(not(feature = "net"))]
+ async fn feed_file(_app: &tauri::AppHandle, _feed: &'static str, _server: u32) -> Result<Option<Value>, String> {
+     Err("this meter is built without network features".into())
+ }
+@@ -2409,7 +2413,7 @@ pub async fn plugin_web_get(app: tauri::AppHandle, window: tauri::WebviewWindow,
+     web_get(&app, &url).await
+ }
+ 
+-#[cfg(feature = "online")]
++#[cfg(feature = "net")]
+ async fn web_get(app: &tauri::AppHandle, url: &str) -> Result<Value, String> {
+     static CACHE: std::sync::OnceLock<Mutex<HashMap<String, (Instant, Value)>>> = std::sync::OnceLock::new();
+     static NEXT: std::sync::OnceLock<tokio::sync::Mutex<Instant>> = std::sync::OnceLock::new();
+@@ -2439,6 +2443,7 @@ async fn web_get(app: &tauri::AppHandle, url: &str) -> Result<Value, String> {
+     let mut first_error: Option<String> = None;
+     let res = loop {
+         let client = if ipv4 { ipv4_client() } else { &state.http };
++        crate::net_guard::check(url)?;
+         let sent = client.get(url)
+             .header("Accept", "application/json")
+             .header("User-Agent", concat!("A2Tools-DPS-Meter/", env!("CARGO_PKG_VERSION"),
+@@ -2490,28 +2495,25 @@ async fn web_get(app: &tauri::AppHandle, url: &str) -> Result<Value, String> {
+ 
+ /// Plugins' web requests go over IPv4 alone: set once IPv4 worked where the
+ /// usual connection (IPv6 first, where there is IPv6) failed.
+-#[cfg(feature = "online")]
++#[cfg(feature = "net")]
+ static WEB_OVER_IPV4: AtomicBool = AtomicBool::new(false);
+ 
+ /// The meter's client, but bound to IPv4: it connects to IPv4 addresses only.
+-#[cfg(feature = "online")]
++#[cfg(feature = "net")]
+ fn ipv4_client() -> &'static reqwest::Client {
+     static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+     CLIENT.get_or_init(|| {
+-        reqwest::Client::builder()
+-            .user_agent(concat!("A2Tools-DPS-Meter/", env!("CARGO_PKG_VERSION")))
+-            .local_address(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED))
+-            .connect_timeout(Duration::from_secs(10))
+-            .timeout(Duration::from_secs(30))
+-            .build()
+-            .unwrap_or_default()
++        // Clicktrough: only the places net_guard lists.
++        crate::net_guard::build(
++            crate::net_guard::builder().local_address(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED)),
++        )
+     })
+ }
+ 
+ /// A failed request in words the player can act on. reqwest's own ("error
+ /// sending request for url (...)") hides why; its causes say it: a DNS
+ /// error, a refused or timed-out connection, a certificate refused ...
+-#[cfg(feature = "online")]
++#[cfg(feature = "net")]
+ fn web_error(e: &reqwest::Error) -> String {
+     let mut out = String::from(if e.is_timeout() {
+         "no answer in time"
+@@ -2535,7 +2537,7 @@ fn web_error(e: &reqwest::Error) -> String {
+     out
+ }
+ 
+-#[cfg(not(feature = "online"))]
++#[cfg(not(feature = "net"))]
+ async fn web_get(_app: &tauri::AppHandle, _url: &str) -> Result<Value, String> {
+     Err("this meter is built without network features".into())
+ }
+@@ -2890,7 +2892,7 @@ mod tests {
+ 
+     /// A failed request says why ("Connection refused"), not only reqwest's
+     /// "error sending request for url (...)".
+-    #[cfg(feature = "online")]
++    #[cfg(feature = "net")]
+     #[tokio::test]
+     async fn a_failed_web_request_says_why() {
+         // A port nothing listens on: bound, then let go.
+diff --git a/src-tauri/src/update_check.rs b/src-tauri/src/update_check.rs
+index a3648a0..001fe61 100644
+--- a/src-tauri/src/update_check.rs
++++ b/src-tauri/src/update_check.rs
+@@ -80,6 +80,7 @@ pub async fn fetch(client: &reqwest::Client) -> Result<Manifest, String> {
+ 
+ /// A file's bytes, or None when it isn't there (404).
+ async fn get(client: &reqwest::Client, url: &str) -> Result<Option<Vec<u8>>, String> {
++    crate::net_guard::check(url)?;
+     let response = client.get(url).timeout(TIMEOUT).send().await.map_err(|e| e.to_string())?;
+     if response.status() == reqwest::StatusCode::NOT_FOUND {
+         return Ok(None);
+-- 
+2.43.0
+

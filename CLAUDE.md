@@ -18,15 +18,20 @@ learnt, so nothing has to be asked or worked out again.
 
 ## Hard rules
 
-- **No connections and no links the person hasn't approved.** The meter and
-  every plugin it ships reach only: this repo's releases (updates), the web
-  services plugins list in `WEB_HOSTS` (aion2.exchange and this repo's
-  `market-data`, for the Market), and the game's skill icon server
-  (assets.playnccdn.com, the original's private build keeps it). No A2 Tools
-  account, sign-in, uploads, leaderboards, feeds, catalog, Discord, donation
-  or "report it here" links, no link to any website in a page. The release is
+- **Write down the plan before changing anything**, in plain words, and wait
+  for the person's yes. They decide; don't take features away on your own.
+- **Nothing is sent, no account, no prompts, no links out.** The person wants
+  every plugin (new ones too, through this repo's releases only, never the
+  original's catalog), the timers, Pet Soul Tracker and Pet Finder, the
+  market prices, and nothing sent anywhere: no A2 Tools account, sign-in,
+  uploads, leaderboards, reports, live connection, Discord, donation or
+  "report it here" links, no pop-up asking to sign in or share, no link to
+  a website in any page. Downloads allowed (net_guard.rs, patch 0025): this
+  repo's releases, the market prices (`WEB_HOSTS`), the shared world boss
+  and Abyss siege timer files (cdn.a2tools.app/feeds/, read only), and the
+  game's skill icon server (assets.playnccdn.com, page CSP). The release is
   the original's private build (`--no-default-features --features
-  desktop,net`, patch 0025). Anything else needs the person's yes first.
+  desktop,net`). Anything else needs the person's yes first.
 - **After every new version of the original, and before saying a release is
   done: build it and look.** Run the meter (`setup-workspace.sh --build`,
   `run-meter.sh start`), click through the meter, Settings (every section)

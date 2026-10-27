@@ -1,4 +1,4 @@
-From 5b583988337982d836287982cd20ffaf6c480ac9 Mon Sep 17 00:00:00 2001
+From a9c3ffdc834ea96284edadd2501e678e072132ac Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Sat, 24 Oct 2026 10:31:21 +0000
 Subject: [PATCH 07/25] Locked windows keep their buttons clickable

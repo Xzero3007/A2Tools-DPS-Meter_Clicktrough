@@ -1,4 +1,4 @@
-From bdf8b1c4273238667ce3648ae50287df6e7061b4 Mon Sep 17 00:00:00 2001
+From 715ebedf2ccf5c52d8a4a95737d87b1269b27fbb Mon Sep 17 00:00:00 2001
 From: Claude <noreply@anthropic.com>
 Date: Tue, 27 Oct 2026 00:11:33 +0000
 Subject: [PATCH 24/25] Plugins: this build's plugin calls pass 2.0.80's
