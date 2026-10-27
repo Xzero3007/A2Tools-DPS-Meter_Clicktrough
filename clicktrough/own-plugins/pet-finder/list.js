@@ -494,7 +494,18 @@ function nameOf(p, { pinned, farming }, { genus = true } = {}) {
   const text = el("span", "nameText", p.name);
   text.title = `${p.name}${p.genus ? ` · ${genusName(p.genus)}` : ""} (double-click to rename)`;
   text.addEventListener("dblclick", () => rename(p.id, text));
-  name.append(pin, text);
+  // Its portrait, as the Nearby and Merchant tabs show it (images.js).
+  const src = globalThis.PET_IMAGES?.portraits?.[p.id];
+  if (src) {
+    const img = document.createElement("img");
+    img.className = "petPic";
+    img.alt = "";
+    img.src = src;
+    img.decoding = "async";
+    name.append(pin, img, text);
+  } else {
+    name.append(pin, text);
+  }
   if (genus && p.genus) name.append(el("span", "genusTag", genusName(p.genus)));
   if (farming) {
     const tag = el("span", "farming", "farming");

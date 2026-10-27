@@ -258,6 +258,16 @@ body.compact #petsView .foot {
   align-items: center;
   min-width: 0;
 }
+/* The pet's portrait beside its name, sized with the text. */
+#petsView .petPic {
+  flex: none;
+  width: 2em;
+  height: 2em;
+  margin-right: 6px;
+  border-radius: 5px;
+  object-fit: cover;
+  background: rgba(255, 255, 255, 0.05);
+}
 #petsView .nameText {
   overflow: hidden;
   white-space: nowrap;

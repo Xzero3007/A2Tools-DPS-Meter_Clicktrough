@@ -421,20 +421,38 @@ data = {
     "regions": regions,
     "calibration": calibration,
 }
-# The level of each monster that drops pet souls, from Pet Finder's copy of
-# the Pet Soul Tracker's sources.js (A2 Tools, GPL-3.0: the game's own tables).
-def npc_levels():
+# Pet Finder's copy of the Pet Soul Tracker's sources.js (A2 Tools, GPL-3.0:
+# the game's own drop tables), or None.
+def game_sources():
     path = os.path.join(OUT, "..", "pet-finder", "sources.js")
     try:
         text = open(path, encoding="utf8").read()
     except OSError:
-        return {}
+        return None
     start = text.index("const PET_SOURCES = ") + len("const PET_SOURCES = ")
     sources, _ = json.JSONDecoder().raw_decode(text[start:])
-    return {str(d["npcId"]): d["level"] for s in sources.values() for d in s.get("drops", []) if d.get("npcId") and d.get("level")}
+    return sources
 
 
-data["npcLevels"] = npc_levels()
+# The level of each monster that drops pet souls.
+def npc_levels(sources):
+    return {str(d["npcId"]): d["level"] for s in (sources or {}).values() for d in s.get("drops", []) if d.get("npcId") and d.get("level")}
+
+
+# Which pet's souls each monster drops, from the game's drop tables: the same
+# as Pet Finder's list and Map button. SkeeveAN's pets.json also names
+# monsters the drop tables don't (a second "Contaminated Swarm" in Altgard
+# as a Drana Swarm, whose souls drop only in Verteron), so it is used only
+# without Pet Finder's data.
+def npc_pets_from_game(sources):
+    return {str(d["npcId"]): int(pet) for pet, s in sources.items() for d in s.get("drops", []) if d.get("npcId")}
+
+
+GAME_SOURCES = game_sources()
+data["npcLevels"] = npc_levels(GAME_SOURCES)
+if GAME_SOURCES:
+    npc_pets = npc_pets_from_game(GAME_SOURCES)
+    data["npcPets"] = npc_pets
 if GAME:
     data["pictures"] = {"repo": "https://github.com/aion2-interactive-map/aion2-interactive-map", "branch": "gh-pages",
                         "commit": game_commit, "path": "UI/Map/WorldMap", "owner": "NCSOFT (the game's own map pictures)"}
@@ -452,7 +470,7 @@ with open(os.path.join(OUT, "data.js"), "w", encoding="utf8") as f:
     f.write("// (CC BY-NC 4.0, Yihao Liu (tc-imba); see NOTICE-AION2-Interactive-Map.txt). Do not edit by hand.\n")
     f.write("// The world map pictures (tiles/) of Verteron, Altgard, the Abyss, Poeta and Ishalgen are the\n")
     f.write("// game's own, as the AION2 Interactive Map publishes them (its gh-pages branch).\n")
-    f.write("// npcLevels: from Pet Finder's sources.js (A2 Tools' Pet Soul Tracker, GPL-3.0).\n")
+    f.write("// npcLevels, npcPets: from Pet Finder's sources.js (A2 Tools' Pet Soul Tracker, GPL-3.0).\n")
     f.write("// AION 2 names, maps and game data belong to their respective owners.\n")
     f.write("globalThis.MAP_DATA = ")
     json.dump(data, f, ensure_ascii=False, separators=(",", ":"))

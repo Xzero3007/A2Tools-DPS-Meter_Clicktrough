@@ -31,7 +31,9 @@ follows you over the game.
   goes by Pet Finder's alone. With no pet followed, or with **All pets**,
   every pet's spawn points show: **red in a white ring** while the pet is not
   at level 3 yet, **small and grey** at level 3 (Pet Finder tells which once it
-  has read your pet list; before, small and white). The pet monsters around
+  has read your pet list; before, small and white). Which monster gives which pet's
+  souls comes from the game's drop tables (Pet Finder's `sources.js`), so the
+  map shows the same monsters as Pet Finder's list and Map button. The pet monsters around
   you right now are the large marks with a white halo, and every one not at
   level 3 yet shows, followed or not. A legend under the map explains them.
   **Under the map**, as the Pet Soul Tracker's map lists them: the nearest
