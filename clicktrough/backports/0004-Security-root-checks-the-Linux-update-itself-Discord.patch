@@ -1,0 +1,496 @@
+From d6c09b55b7780508de8fb2a15d5e5be81d4dd2b1 Mon Sep 17 00:00:00 2001
+From: taengu <7606218+taengu@users.noreply.github.com>
+Date: Wed, 28 Oct 2026 09:04:52 +0800
+Subject: [PATCH] Security: root checks the Linux update itself; Discord
+ replies capped; CI pinned
+
+From the 2026-10-26 security audit:
+- A Linux update is copied into a folder only root can write, its SHA-256
+  checked there and that copy installed, all in the one pkexec step: the
+  download in the player's /tmp could be swapped after the meter checked
+  it (M2).
+- A Discord socket's reply longer than 1 MiB is refused before the crate
+  allocates it (anything can create /tmp/discord-ipc-N or the pipe, and
+  claim up to 4 GiB); Windows opens the pipe at identification level (M9).
+- A plugin page's `%` before a non-ASCII character no longer panics the
+  protocol handler (L7).
+- The Linux hotkeys helper is never looked up on PATH (I1).
+- Every CI action is pinned to a commit (M13).
+---
+ .github/workflows/arch-package.yml            | 32 +++++++++--------
+ .github/workflows/ci.yml                      | 29 ++++++++-------
+ .github/workflows/slice-v3-convert.yml        | 14 ++++----
+ src-tauri/src/app.rs                          |  2 +-
+ src-tauri/src/platform/linux/hotkeys.rs       |  3 +-
+ src-tauri/src/platform/linux/updater.rs       | 36 +++++++++++++++++--
+ src-tauri/src/platform/unsupported/updater.rs |  2 +-
+ src-tauri/src/platform/win32/discord_ipc.rs   | 10 +++++-
+ src-tauri/src/platform/win32/updater.rs       |  2 +-
+ src-tauri/src/plugins/mod.rs                  | 14 ++++++--
+ src-tauri/src/presence.rs                     | 24 +++++++++++--
+ 11 files changed, 123 insertions(+), 45 deletions(-)
+
+diff --git a/.github/workflows/arch-package.yml b/.github/workflows/arch-package.yml
+index ccbf6ce..b416568 100644
+--- a/.github/workflows/arch-package.yml
++++ b/.github/workflows/arch-package.yml
+@@ -54,11 +54,11 @@ jobs:
+           pacman -Syu --noconfirm --needed git \
+             webkit2gtk-4.1 gtk3 libpcap libcap hicolor-icon-theme \
+             gst-plugins-base gst-plugins-good
+-      - uses: actions/checkout@v7
++      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+         with:
+           ref: ${{ inputs.ref }}
+           fetch-depth: 0
+-      - uses: actions/download-artifact@v8
++      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+         with:
+           name: linux-binaries
+           path: src-tauri/target/release
+@@ -75,7 +75,7 @@ jobs:
+           chown -R builder "$GITHUB_WORKSPACE"
+           su builder -c "cd '$GITHUB_WORKSPACE/packaging/arch' && A2T_PREBUILT=1 makepkg --noconfirm --nodeps"
+           ls -la "$GITHUB_WORKSPACE"/packaging/arch/*.pkg.tar.zst
+-      - uses: actions/upload-artifact@v7
++      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+         with:
+           name: arch-package
+           path: packaging/arch/*.pkg.tar.zst
+@@ -85,22 +85,24 @@ jobs:
+     name: .deb and .rpm
+     runs-on: ubuntu-22.04
+     steps:
+-      - uses: actions/checkout@v7
++      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+         with:
+           ref: ${{ inputs.ref }}
+-      - uses: dtolnay/rust-toolchain@stable
+-      - uses: Swatinem/rust-cache@v2
++      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
++        with:
++          toolchain: stable
++      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+         with:
+           workspaces: src-tauri
+           key: deb-rpm
+-      - uses: actions/setup-node@v7
++      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+         with:
+           node-version: 20
+           cache: npm
+       # Cached between runs (it took a minute to download and install every
+       # time); the list is the cache key, so changing it fetches afresh.
+       - name: Build dependencies
+-        uses: awalsh128/cache-apt-pkgs-action@v1
++        uses: awalsh128/cache-apt-pkgs-action@553a35bb8ebd9fcabcb1c9451aa4c98e1b4ca8a9 # v1
+         with:
+           packages: libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev rpm cpio mold
+           version: 1
+@@ -127,7 +129,7 @@ jobs:
+           cargo build --release --manifest-path src-tauri/Cargo.toml --bin a2tools-hotkeys
+           npx tauri build --bundles deb,rpm
+       # The same two binaries for the Arch package (the makepkg job).
+-      - uses: actions/upload-artifact@v7
++      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+         with:
+           name: linux-binaries
+           path: |
+@@ -179,7 +181,7 @@ jobs:
+           rpm -qlp out/*.rpm | grep -E '^/usr/(bin|share/applications)/'
+           dpkg-deb --contents out/*.deb | grep -q usr/bin/a2tools-hotkeys
+           rpm -qlp out/*.rpm | grep -qx /usr/bin/a2tools-hotkeys
+-      - uses: actions/upload-artifact@v7
++      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+         with:
+           name: deb-rpm-packages
+           path: out/*
+@@ -201,7 +203,7 @@ jobs:
+           - image: fedora:41
+             install: dnf install -y ./a2tools-dps-meter-*.x86_64.rpm
+     steps:
+-      - uses: actions/download-artifact@v8
++      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+         with:
+           name: deb-rpm-packages
+       # Dependencies resolve, the install script grants capture permission,
+@@ -229,7 +231,7 @@ jobs:
+     runs-on: ubuntu-24.04
+     container: fedora:41
+     steps:
+-      - uses: actions/download-artifact@v8
++      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+         with:
+           name: deb-rpm-packages
+       - name: Metadata
+@@ -248,7 +250,7 @@ jobs:
+           dnf install -y a2-tools-dps-meter
+           getcap /usr/bin/a2tools-dps-meter | grep cap_net_raw
+           test -x /usr/bin/a2tools-hotkeys && test -z "$(getcap /usr/bin/a2tools-hotkeys)"
+-      - uses: actions/upload-artifact@v7
++      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+         with:
+           name: rpm-repo
+           path: repo
+@@ -280,7 +282,7 @@ jobs:
+             wait
+             df -h /
+           fi
+-      - uses: actions/download-artifact@v8
++      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+         with:
+           name: rpm-repo
+           path: repo
+@@ -318,7 +320,7 @@ jobs:
+     # in 2.0.56). A real Steam Deck is still unconfirmed (docs/linux.md).
+     runs-on: ubuntu-24.04
+     steps:
+-      - uses: actions/download-artifact@v8
++      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+         with:
+           name: arch-package
+           path: pkg
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index ecae09b..143ee4e 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -19,8 +19,8 @@ jobs:
+     name: Frontend build and tests
+     runs-on: ubuntu-24.04
+     steps:
+-      - uses: actions/checkout@v7
+-      - uses: actions/setup-node@v7
++      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
++      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+         with:
+           node-version: "24"
+           cache: npm
+@@ -32,9 +32,11 @@ jobs:
+     name: Desktop build and tests
+     runs-on: windows-latest
+     steps:
+-      - uses: actions/checkout@v7
+-      - uses: dtolnay/rust-toolchain@stable
+-      - uses: Swatinem/rust-cache@v2
++      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
++      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
++        with:
++          toolchain: stable
++      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+         with:
+           workspaces: src-tauri
+       - name: Test
+@@ -51,7 +53,7 @@ jobs:
+     name: OS code stays in src/platform
+     runs-on: ubuntu-24.04
+     steps:
+-      - uses: actions/checkout@v7
++      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+       # Windows and (later) Linux builds share one codebase. What keeps them from
+       # getting tangled is that only src/platform/ may know which OS it is on:
+       # it picks one implementation (win32/ or unsupported/, later linux/) and
+@@ -73,9 +75,11 @@ jobs:
+     name: Desktop builds and tests on Linux
+     runs-on: ubuntu-24.04
+     steps:
+-      - uses: actions/checkout@v7
+-      - uses: dtolnay/rust-toolchain@stable
+-      - uses: Swatinem/rust-cache@v2
++      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
++      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
++        with:
++          toolchain: stable
++      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+         with:
+           workspaces: src-tauri
+       # Tauri's Linux build dependencies (WebKitGTK and friends).
+@@ -107,11 +111,12 @@ jobs:
+     name: Parser compiles to wasm32
+     runs-on: ubuntu-24.04
+     steps:
+-      - uses: actions/checkout@v7
+-      - uses: dtolnay/rust-toolchain@stable
++      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
++      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+         with:
++          toolchain: stable
+           targets: wasm32-unknown-unknown
+-      - uses: Swatinem/rust-cache@v2
++      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+         with:
+           workspaces: src-tauri
+       # This is not a nice-to-have. The log service re-derives an uploaded fight
+diff --git a/.github/workflows/slice-v3-convert.yml b/.github/workflows/slice-v3-convert.yml
+index 25df319..8a6053a 100644
+--- a/.github/workflows/slice-v3-convert.yml
++++ b/.github/workflows/slice-v3-convert.yml
+@@ -28,13 +28,15 @@ jobs:
+     outputs:
+       shards: ${{ steps.shards.outputs.list }}
+     steps:
+-      - uses: actions/checkout@v4
+-      - uses: dtolnay/rust-toolchain@stable
+-      - uses: Swatinem/rust-cache@v2
++      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
++      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
++        with:
++          toolchain: stable
++      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+         with:
+           workspaces: tools/slice-v3
+       - run: cargo build --release --manifest-path tools/slice-v3/Cargo.toml
+-      - uses: actions/upload-artifact@v4
++      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+         with:
+           name: slice-v3
+           path: tools/slice-v3/target/release/slice-v3
+@@ -54,8 +56,8 @@ jobs:
+       matrix:
+         shard: ${{ fromJSON(needs.build.outputs.shards) }}
+     steps:
+-      - uses: actions/checkout@v4
+-      - uses: actions/download-artifact@v4
++      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
++      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+         with:
+           name: slice-v3
+       - run: chmod +x slice-v3 && pip install --quiet --upgrade "boto3>=1.36" "botocore>=1.36"
+diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
+index c8a47bb..bb20d70 100644
+--- a/src-tauri/src/app.rs
++++ b/src-tauri/src/app.rs
+@@ -1794,7 +1794,7 @@ async fn download_and_install_update(app: &tauri::AppHandle, url: &str, expected
+ 
+     // Launch the installer (msiexec on Windows; see platform::updater).
+     flush_settings_before_exit(app);
+-    platform::updater::run_installer(&msi_path, &install_dir)?;
++    platform::updater::run_installer(&msi_path, expected_sha256.trim(), &install_dir)?;
+ 
+     // Give installer time to start, then exit
+     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+diff --git a/src-tauri/src/platform/linux/hotkeys.rs b/src-tauri/src/platform/linux/hotkeys.rs
+index 3c15196..a61938a 100644
+--- a/src-tauri/src/platform/linux/hotkeys.rs
++++ b/src-tauri/src/platform/linux/hotkeys.rs
+@@ -103,7 +103,8 @@ impl HotkeyManager {
+             .ok()
+             .and_then(|exe| exe.parent().map(|dir| dir.join(HELPER)))
+             .filter(|path| path.exists())
+-            .unwrap_or_else(|| std::path::PathBuf::from(HELPER));
++            // Where the packages put it; never looked up on PATH (audit I1).
++            .unwrap_or_else(|| std::path::Path::new("/usr/bin").join(HELPER));
+         let mut child = match Command::new(&path)
+             .args(&args)
+             // Its stdin is how it learns the meter is gone: it exits at EOF.
+diff --git a/src-tauri/src/platform/linux/updater.rs b/src-tauri/src/platform/linux/updater.rs
+index b4f8295..c3f8f5c 100644
+--- a/src-tauri/src/platform/linux/updater.rs
++++ b/src-tauri/src/platform/linux/updater.rs
+@@ -103,20 +103,38 @@ pub fn package_url<'a>(packages: &UpdatePackages<'a>) -> &'a str {
+     manager().map_or("", |m| m.package(packages))
+ }
+ 
++/// What runs as root: the package copied into a folder only root can write,
++/// its SHA-256 checked there, and that copy installed. The download sits in
++/// the player's own /tmp file until then, where anything running as the
++/// player could swap it after the meter checked it (security audit M2).
++fn root_script(install: &str) -> String {
++    format!(
++        r#"d=$(/usr/bin/mktemp -d) || exit 1
++f="$d/$(/usr/bin/basename "$1")"
++/usr/bin/cp -- "$1" "$f" && echo "$2  $f" | /usr/bin/sha256sum -c --status && {install} "$f"
++s=$?
++/usr/bin/rm -rf "$d"
++exit $s"#
++    )
++}
++
+ /// Hand the package to its package manager once the meter has exited, then
+ /// start the meter again: the new one, or the old one if the password prompt
+ /// was cancelled, so a refused update never leaves the player without a meter.
+-pub fn run_installer(package: &Path, _install_dir: &str) -> Result<(), String> {
++pub fn run_installer(package: &Path, sha256: &str, _install_dir: &str) -> Result<(), String> {
+     use std::os::unix::process::CommandExt;
+     let manager = manager().ok_or("this install cannot update itself")?;
++    if sha256.len() != 64 || !sha256.bytes().all(|b| b.is_ascii_hexdigit()) {
++        return Err("no checksum for the package".into());
++    }
+     let script = format!(
+         r#"
+         while kill -0 "$2" 2>/dev/null; do sleep 0.2; done
+-        pkexec {install} "$1"
++        pkexec /bin/sh -c '{root}' a2tools-update "$1" "$3"
+         rm -f "$1"
+         exec {INSTALLED_BINARY}
+     "#,
+-        install = manager.install_command(),
++        root = root_script(manager.install_command()),
+     );
+     tracing::info!("Updating through {:?}: {}", manager, package.display());
+     Command::new("/bin/sh")
+@@ -125,6 +143,7 @@ pub fn run_installer(package: &Path, _install_dir: &str) -> Result<(), String> {
+         .arg("a2tools-update")
+         .arg(package)
+         .arg(std::process::id().to_string())
++        .arg(sha256.to_ascii_lowercase())
+         .stdin(Stdio::null())
+         // Its own process group, so closing a terminal the meter was started
+         // from does not take the update down with it.
+@@ -149,6 +168,17 @@ mod tests {
+         assert_eq!(Manager::Rpm.package(&p), "r");
+     }
+ 
++    #[test]
++    fn root_checks_its_own_copy_before_installing_it() {
++        let script = root_script(Manager::Pacman.install_command());
++        // Quoted once inside sh -c '…': no single quote of its own.
++        assert!(!script.contains('\''));
++        let check = script.find("sha256sum -c").unwrap();
++        let install = script.find("/usr/bin/pacman -U").unwrap();
++        assert!(script.find("cp --").unwrap() < check && check < install);
++        assert!(script.contains(r#"&& /usr/bin/pacman -U --noconfirm "$f""#));
++    }
++
+     #[test]
+     fn a_test_run_is_not_an_installed_meter() {
+         // The test binary is not /usr/bin/a2tools-dps-meter.
+diff --git a/src-tauri/src/platform/unsupported/updater.rs b/src-tauri/src/platform/unsupported/updater.rs
+index afe6379..23fd6e1 100644
+--- a/src-tauri/src/platform/unsupported/updater.rs
++++ b/src-tauri/src/platform/unsupported/updater.rs
+@@ -10,6 +10,6 @@ pub fn package_url<'a>(_packages: &crate::platform::UpdatePackages<'a>) -> &'a s
+ }
+ 
+ /// There is no installer format for this platform yet.
+-pub fn run_installer(_package: &Path, _install_dir: &str) -> Result<(), String> {
++pub fn run_installer(_package: &Path, _sha256: &str, _install_dir: &str) -> Result<(), String> {
+     Err("automatic updates are not supported on this platform yet".to_string())
+ }
+diff --git a/src-tauri/src/platform/win32/discord_ipc.rs b/src-tauri/src/platform/win32/discord_ipc.rs
+index e36d3c8..5e0b316 100644
+--- a/src-tauri/src/platform/win32/discord_ipc.rs
++++ b/src-tauri/src/platform/win32/discord_ipc.rs
+@@ -15,7 +15,15 @@ pub fn socket_paths() -> Vec<PathBuf> {
+ /// without closing its end blocks the read until it does. So `presence.rs`
+ /// runs each handshake on its own thread and waits for it only so long.
+ pub fn connect(path: &Path) -> std::io::Result<Stream> {
+-    std::fs::OpenOptions::new().read(true).write(true).open(path)
++    use std::os::windows::fs::OpenOptionsExt;
++    // Identification only: whatever serves a pipe by this name learns who
++    // connected, it can't act as the meter (security audit M9).
++    const SECURITY_IDENTIFICATION: u32 = 1 << 16;
++    std::fs::OpenOptions::new()
++        .read(true)
++        .write(true)
++        .security_qos_flags(SECURITY_IDENTIFICATION)
++        .open(path)
+ }
+ 
+ /// No identity to tell one pipe instance from the next without opening it.
+diff --git a/src-tauri/src/platform/win32/updater.rs b/src-tauri/src/platform/win32/updater.rs
+index 39bf524..58b436a 100644
+--- a/src-tauri/src/platform/win32/updater.rs
++++ b/src-tauri/src/platform/win32/updater.rs
+@@ -19,7 +19,7 @@ pub fn package_url<'a>(packages: &crate::platform::UpdatePackages<'a>) -> &'a st
+ /// PROPERTY="value" pairs with spaces require literal embedded quotes, which
+ /// std::process::Command's normal arg quoting does not produce. raw_arg
+ /// controls the exact command line.
+-pub fn run_installer(package: &Path, install_dir: &str) -> Result<(), String> {
++pub fn run_installer(package: &Path, _sha256: &str, install_dir: &str) -> Result<(), String> {
+     use std::os::windows::process::CommandExt;
+     let mut cmd = std::process::Command::new("msiexec");
+     cmd.raw_arg("/i")
+diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
+index c62b53b..785847c 100644
+--- a/src-tauri/src/plugins/mod.rs
++++ b/src-tauri/src/plugins/mod.rs
+@@ -2466,9 +2466,12 @@ fn percent_decode(s: &str) -> String {
+     let mut out = Vec::with_capacity(bytes.len());
+     let mut i = 0;
+     while i < bytes.len() {
++        // Read as bytes: a `%` before a non-ASCII character would split it
++        // as a str, and the panic ends the protocol handler (audit L7).
++        let hex = |b: u8| (b as char).to_digit(16);
+         if bytes[i] == b'%' && i + 2 < bytes.len() {
+-            if let Ok(v) = u8::from_str_radix(&s[i + 1..i + 3], 16) {
+-                out.push(v);
++            if let (Some(hi), Some(lo)) = (hex(bytes[i + 1]), hex(bytes[i + 2])) {
++                out.push((hi * 16 + lo) as u8);
+                 i += 3;
+                 continue;
+             }
+@@ -2481,6 +2484,13 @@ fn percent_decode(s: &str) -> String {
+ 
+ #[cfg(test)]
+ mod tests {
++    #[test]
++    fn percent_decode_takes_any_text() {
++        assert_eq!(super::percent_decode("a%20b%2Fc"), "a b/c");
++        assert_eq!(super::percent_decode("%é%"), "%é%");
++        assert_eq!(super::percent_decode("x%4"), "x%4");
++    }
++
+     #[test]
+     fn plugin_windows_reach_only_their_own_commands() {
+         for label in ["plugin-ping", "plugins-dock", "pw_ping_ping"] {
+diff --git a/src-tauri/src/presence.rs b/src-tauri/src/presence.rs
+index 6300e3a..e0ad5bf 100644
+--- a/src-tauri/src/presence.rs
++++ b/src-tauri/src/presence.rs
+@@ -151,8 +151,17 @@ fn run(app: tauri::AppHandle) {
+ struct Socket {
+     path: PathBuf,
+     stream: Option<IpcStream>,
++    /// The crate reads a message as an 8-byte header, then as many bytes as
++    /// the header says: this read is the header.
++    header_next: bool,
+ }
+ 
++/// The longest reply taken from a socket. Discord's are a few KB; anything
++/// can make a socket by that name (`/tmp/discord-ipc-1` on Linux, a pipe on
++/// Windows), and the crate allocates whatever length the header claims, up
++/// to 4 GiB (security audit M9).
++const MAX_REPLY: u32 = 1 << 20;
++
+ impl DiscordIpc for Socket {
+     fn get_client_id(&self) -> &str {
+         DISCORD_APPLICATION_ID
+@@ -161,6 +170,7 @@ impl DiscordIpc for Socket {
+     fn connect_ipc(&mut self) -> IpcResult<()> {
+         let stream = discord_ipc::connect(&self.path).map_err(|_| IpcError::IPCConnectionFailed)?;
+         self.stream = Some(stream);
++        self.header_next = true;
+         Ok(())
+     }
+ 
+@@ -172,7 +182,17 @@ impl DiscordIpc for Socket {
+ 
+     fn read(&mut self, buffer: &mut [u8]) -> IpcResult<()> {
+         let stream = self.stream.as_mut().ok_or(IpcError::NotConnected)?;
+-        stream.read_exact(buffer).map_err(IpcError::ReadError)
++        stream.read_exact(buffer).map_err(IpcError::ReadError)?;
++        let header = self.header_next;
++        self.header_next = !header;
++        if header && buffer.len() == 8 {
++            let length = u32::from_le_bytes([buffer[4], buffer[5], buffer[6], buffer[7]]);
++            if length > MAX_REPLY {
++                self.stream = None;
++                return Err(IpcError::ReadError(std::io::Error::other(format!("a {length}-byte reply"))));
++            }
++        }
++        Ok(())
+     }
+ 
+     fn close(&mut self) -> IpcResult<()> {
+@@ -229,7 +249,7 @@ impl Discords {
+                 continue;
+             }
+             let tx = self.done_tx.clone();
+-            let mut socket = Socket { path: path.clone(), stream: None };
++            let mut socket = Socket { path: path.clone(), stream: None, header_next: true };
+             let spawned = std::thread::Builder::new().name("discord-ipc".into()).spawn(move || {
+                 let result = socket.connect().map_err(|e| e.to_string());
+                 let _ = tx.send((socket, result));
+-- 
+2.43.0
+

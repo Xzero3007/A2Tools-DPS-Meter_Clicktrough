@@ -1,0 +1,505 @@
+From 3028fa6354366c041475888be5c96d65affbb44c Mon Sep 17 00:00:00 2001
+From: taengu <7606218+taengu@users.noreply.github.com>
+Date: Tue, 27 Oct 2026 10:48:44 +0800
+Subject: [PATCH] Capture: read the server's bytes in TCP order, and read past
+ a hole cleanly
+
+Segments were read in arrival order and their sequence numbers never
+looked at. When one never reached the capture (a Wi-Fi player's zone
+loads, 2026-10-27), the bytes after it were taken for a frame length:
+the walk read mid-packet bytes as lengths for minutes, the zone's spawn
+bundle was swallowed, and Scholar Aulla's fight was never shown,
+Bloodfang Pnyn's HP was misread (59,408 for 160 million) and his bar
+stayed empty.
+
+tcp_order puts late segments back in place, reads retransmitted bytes
+once, and reports a hole once it has waited 250 ms (or 256 KB) for its
+bytes. The assembler then drops the frame the hole cut and starts again
+at the next whole frame (framing::resync_start: frames that walk to the
+end, opening with the opcodes 99.3% of packets have). Replayed with the
+hole marked, Aulla's spawn is read (2100988), and without it is not.
+The packet log and the share ring now keep the ordered bytes. A payload
+without a sequence number (a replay's) is read as before.
+---
+ src-tauri/src/capture/framing.rs           |  89 ++++++++++
+ src-tauri/src/capture/mod.rs               |   1 +
+ src-tauri/src/capture/stream_assembler.rs  |  27 +++
+ src-tauri/src/capture/tcp_order.rs         | 184 +++++++++++++++++++++
+ src-tauri/src/combat/capture_dispatcher.rs |  57 +++++--
+ 5 files changed, 347 insertions(+), 11 deletions(-)
+ create mode 100644 src-tauri/src/capture/tcp_order.rs
+
+diff --git a/src-tauri/src/capture/framing.rs b/src-tauri/src/capture/framing.rs
+index a36e8be..2e94d52 100644
+--- a/src-tauri/src/capture/framing.rs
++++ b/src-tauri/src/capture/framing.rs
+@@ -174,6 +174,68 @@ pub fn walk(buffer: &[u8]) -> Framing {
+     out
+ }
+ 
++/// Where the first whole frame starts in `buffer`, bytes that came right
++/// after a hole in the stream (`tcp_order`): the hole took the start of the
++/// frame they continue, so the walk must not read them as a length.
++///
++/// A place counts when frames walk from it to the buffer's very end (a
++/// segment ends where a frame does more often than not): two of them, or one
++/// that is a bundle; or when three walk whole from it and the next is only
++/// still to come. And its first two frames must open as nearly every packet
++/// does (`COMMON_OPCODE_HIGH`): lengths alone, a stretch of a frame's middle
++/// walked from its third byte to the end of the stream (a test of the
++/// capture of 2026-10-27). Looked for in the first `RESYNC_SEARCH` bytes.
++/// `None`: no such place yet, wait for more.
++pub fn resync_start(buffer: &[u8]) -> Option<usize> {
++    let tiles = |from: usize| -> bool {
++        let mut at = from;
++        let mut whole = 0;
++        let mut first_is_bundle = false;
++        while at < buffer.len() {
++            if buffer[at] == 0x00 {
++                at += 1;
++                continue;
++            }
++            let length = read_varint(buffer, at);
++            if length.length <= 0 || length.value <= 0 {
++                return false;
++            }
++            let Some(size) = frame_size(length.value, length.length) else { return false };
++            if size > MAX_PACKET_BYTES {
++                return false;
++            }
++            if at + size > buffer.len() {
++                let limit = if bundle_header_at(buffer, at + length.length as usize) {
++                    MAX_BUNDLE_WAIT_BYTES
++                } else {
++                    MAX_FRAGMENT_WAIT_BYTES
++                };
++                return whole >= 3 && size <= limit;
++            }
++            let payload = at + length.length as usize;
++            if whole < 2 && !buffer.get(payload + 1).is_some_and(|b| COMMON_OPCODE_HIGH.contains(b)) {
++                return false;
++            }
++            if whole == 0 {
++                first_is_bundle = bundle_header_at(buffer, payload);
++            }
++            whole += 1;
++            at += size;
++        }
++        whole >= 2 || (whole == 1 && first_is_bundle)
++    };
++    (0..buffer.len().min(RESYNC_SEARCH)).find(|&from| buffer[from] != 0x00 && tiles(from))
++}
++
++/// The second byte of 99.3% of packets' opcodes (55,954 frames of a capture
++/// of 2026-10-27): `xx 36`, `xx 37`, `xx 38`, `00 8D` and a bundle's `FF FF`.
++const COMMON_OPCODE_HIGH: [u8; 5] = [0x36, 0x37, 0x38, 0x8D, 0xFF];
++
++/// How far into the bytes after a hole the next frame is looked for. The
++/// largest packet is 64 KB, but a frame cut by a hole ends within one or two
++/// segments of it.
++pub const RESYNC_SEARCH: usize = 8192;
++
+ /// Whether a bundle's header starts at `at`: `FF FF`, then a little-endian
+ /// decompressed size that is non-zero and within what decompress_bundle
+ /// accepts. Only the header need have arrived.
+@@ -336,6 +398,33 @@ mod tests {
+         b
+     }
+ 
++    /// After a hole (2026-10-27, port 13328, 10:19:42): a segment that is the
++    /// middle of a zone-load message, then the bundle with the zone's spawns.
++    /// Read from its first byte, `B0 0C` made a 1,582-byte frame of it and
++    /// swallowed the bundle; read from where it resyncs, the bundle frames.
++    #[test]
++    fn after_a_hole_reading_starts_at_a_whole_frame() {
++        let text = "B00C3792000087091000114A3C00022D00510000150140E8000402004201000C02120060014E2C960F2F72\
++                    0002670A052700F400080000440E4446AC27B94750FA1647720AF000700A00000A57756E64657277616C64\
++                    A700222A1E9009C0010E0036411F287BA1010000";
++        let middle: Vec<u8> = (0..text.len()).step_by(2).map(|i| u8::from_str_radix(&text[i..i + 2], 16).unwrap()).collect();
++        let spawns = bundle(&[packet(&body(0x41, 40)), packet(&body(0x45, 30))].concat());
++        let rest = [packet(&body(0x1D, 12)), packet(&body(0x0E, 7))].concat();
++        let stream = [middle.clone(), spawns.clone(), rest.clone()].concat();
++
++        let wrong = walk(&stream);
++        assert!(!wrong.frames.iter().any(|f| f.kind == FrameKind::Bundle), "read from the start, the bundle is swallowed");
++
++        let start = resync_start(&stream).expect("a frame start");
++        let framed = walk(&stream[start..]);
++        let bundle_at = middle.len() - start;
++        assert!(framed.frames.iter().any(|f| f.kind == FrameKind::Bundle && f.start == bundle_at), "{start}");
++        assert_eq!(framed.consumed, stream.len() - start);
++
++        // With only the middle and part of the bundle there yet: wait.
++        assert_eq!(resync_start(&middle[..60]), None);
++    }
++
+     #[test]
+     fn a_bundle_over_16_kb_split_across_reads_is_waited_for() {
+         // Incompressible inner packets, so the bundle stays past 16 KB as the
+diff --git a/src-tauri/src/capture/mod.rs b/src-tauri/src/capture/mod.rs
+index e7a084a..a38c5ec 100644
+--- a/src-tauri/src/capture/mod.rs
++++ b/src-tauri/src/capture/mod.rs
+@@ -12,6 +12,7 @@ pub mod framing;
+ pub mod packet_accumulator;
+ pub mod stream_assembler;
+ pub mod stream_processor;
++pub mod tcp_order;
+ 
+ // Live capture. pcap needs libloading, the port detector reads the wall clock,
+ // and the file replay drives them both — none of which exist on wasm32.
+diff --git a/src-tauri/src/capture/stream_assembler.rs b/src-tauri/src/capture/stream_assembler.rs
+index 3a50d02..29097da 100644
+--- a/src-tauri/src/capture/stream_assembler.rs
++++ b/src-tauri/src/capture/stream_assembler.rs
+@@ -1,15 +1,20 @@
++use super::framing::{resync_start, RESYNC_SEARCH};
+ use super::packet_accumulator::PacketAccumulator;
+ use super::stream_processor::StreamProcessor;
+ 
+ /// Reassembles TCP stream fragments and feeds complete data to the StreamProcessor.
+ pub struct StreamAssembler {
+     accumulator: PacketAccumulator,
++    /// Bytes were lost before what comes next (`tcp_order`): read nothing
++    /// until a frame starts.
++    after_gap: bool,
+ }
+ 
+ impl StreamAssembler {
+     pub fn new() -> Self {
+         Self {
+             accumulator: PacketAccumulator::new(),
++            after_gap: false,
+         }
+     }
+ 
+@@ -18,6 +23,19 @@ impl StreamAssembler {
+         self.accumulator.append(data);
+         let mut parsed_any = false;
+ 
++        if self.after_gap {
++            match resync_start(self.accumulator.snapshot()) {
++                Some(start) => {
++                    self.accumulator.discard_bytes(start);
++                    self.after_gap = false;
++                }
++                // Nowhere yet: wait for more, unless the search has seen all
++                // it looks at, then read on as before.
++                None if self.accumulator.size() < 2 * RESYNC_SEARCH => return false,
++                None => self.after_gap = false,
++            }
++        }
++
+         loop {
+             if self.accumulator.size() == 0 {
+                 break;
+@@ -37,6 +55,15 @@ impl StreamAssembler {
+         parsed_any
+     }
+ 
++    /// Bytes were lost from the stream here: the frame being read lost its
++    /// rest (or its start), so it goes, and reading starts again at the next
++    /// whole frame.
++    pub fn lose_bytes(&mut self) {
++        let size = self.accumulator.size();
++        self.accumulator.discard_bytes(size);
++        self.after_gap = true;
++    }
++
+     pub fn buffered_bytes(&self) -> usize {
+         self.accumulator.size()
+     }
+diff --git a/src-tauri/src/capture/tcp_order.rs b/src-tauri/src/capture/tcp_order.rs
+new file mode 100644
+index 0000000..a679ad8
+--- /dev/null
++++ b/src-tauri/src/capture/tcp_order.rs
+@@ -0,0 +1,184 @@
++//! A connection's bytes in the order the server sent them.
++//!
++//! libpcap hands segments over as they arrive. On Wi-Fi they can come late
++//! (after the ones that followed them), twice (a retransmission, cut where
++//! the first copy was not), or not at all (lost before the capture saw them),
++//! and the stream was read in arrival order. One segment missing from a
++//! zone load turned the next bytes into a frame length: the walk then read
++//! mid-packet bytes as lengths for minutes, a boss's spawn went with them, and
++//! its fight was never shown (2026-10-27: Ritualist Garshim, an unnamed field
++//! boss, Bloodfang Pnyn's HP).
++//!
++//! Each segment's sequence number says where its bytes go. Bytes already had
++//! are dropped, a segment from ahead waits for the ones before it, and when
++//! those do not come in time the hole is reported, so the reader can drop the
++//! frame it was in and find the next one, rather than reading on through it.
++
++/// How long a hole may wait for its bytes (capture time): Wi-Fi's late
++/// segments come within a few milliseconds, a retransmission within a
++/// round trip or two.
++const GAP_WAIT_MS: i64 = 250;
++/// Or this many bytes waiting behind it, whichever comes first.
++const MAX_WAITING_BYTES: usize = 256 * 1024;
++/// A segment this far from where the stream is (either way) is another
++/// stream in all but name (a reconnect from the same ports): start over.
++const FAR: i64 = 4 * 1024 * 1024;
++
++/// What the reader gets: bytes in order, or a hole of `missing` bytes.
++#[derive(Debug, PartialEq, Eq)]
++pub enum Piece {
++    Bytes(Vec<u8>),
++    Gap { missing: u32 },
++}
++
++#[derive(Default)]
++pub struct TcpOrder {
++    /// The sequence number of the next byte owed to the reader.
++    next: Option<u32>,
++    /// Segments from ahead of `next`, by sequence number, with when each came.
++    waiting: Vec<(u32, Vec<u8>, i64)>,
++    waiting_bytes: usize,
++}
++
++/// Where `seq` lies from `from`, in bytes, wrapping as sequence numbers do.
++fn distance(from: u32, seq: u32) -> i64 {
++    seq.wrapping_sub(from) as i32 as i64
++}
++
++impl TcpOrder {
++    /// Take segment `data` starting at sequence number `seq`, captured at
++    /// `at_ms`, and give back what can be read now, in order.
++    pub fn push(&mut self, seq: u32, data: &[u8], at_ms: i64) -> Vec<Piece> {
++        let mut out = Vec::new();
++        if data.is_empty() {
++            return out;
++        }
++        let Some(next) = self.next else {
++            self.next = Some(seq.wrapping_add(data.len() as u32));
++            out.push(Piece::Bytes(data.to_vec()));
++            return out;
++        };
++        let d = distance(next, seq);
++        if !(-FAR..=FAR).contains(&d) {
++            // Not this stream's bytes any more: whatever waits is lost with it.
++            self.waiting.clear();
++            self.waiting_bytes = 0;
++            self.next = Some(seq.wrapping_add(data.len() as u32));
++            out.push(Piece::Gap { missing: 0 });
++            out.push(Piece::Bytes(data.to_vec()));
++            return out;
++        }
++        if d <= 0 {
++            self.take(seq, data, &mut out);
++            self.drain(&mut out);
++        } else if !self.waiting.iter().any(|(s, b, _)| *s == seq && b.len() >= data.len()) {
++            self.waiting.push((seq, data.to_vec(), at_ms));
++            self.waiting_bytes += data.len();
++            self.waiting.sort_by_key(|(s, _, _)| distance(next, *s));
++        }
++        // A hole that has waited long enough: its bytes are not coming.
++        while let Some(&(first, _, since)) = self.waiting.first() {
++            let late = at_ms > 0 && since > 0 && at_ms - since >= GAP_WAIT_MS;
++            if !late && self.waiting_bytes <= MAX_WAITING_BYTES {
++                break;
++            }
++            let next = self.next.unwrap_or(first);
++            let missing = distance(next, first).max(0) as u32;
++            out.push(Piece::Gap { missing });
++            self.next = Some(first);
++            self.drain(&mut out);
++        }
++        out
++    }
++
++    /// The part of `data` (at `seq`) past what the reader has had.
++    fn take(&mut self, seq: u32, data: &[u8], out: &mut Vec<Piece>) {
++        let next = self.next.expect("set before take");
++        let had = (-distance(next, seq)).max(0) as usize;
++        if had >= data.len() {
++            return; // all of it already read: a retransmission
++        }
++        out.push(Piece::Bytes(data[had..].to_vec()));
++        self.next = Some(seq.wrapping_add(data.len() as u32));
++    }
++
++    /// Every waiting segment the reader has now reached.
++    fn drain(&mut self, out: &mut Vec<Piece>) {
++        while let Some(&(seq, _, _)) = self.waiting.first() {
++            let next = self.next.expect("set before drain");
++            if distance(next, seq) > 0 {
++                break;
++            }
++            let (seq, data, _) = self.waiting.remove(0);
++            self.waiting_bytes -= data.len();
++            self.take(seq, &data, out);
++        }
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    fn bytes(pieces: &[Piece]) -> Vec<u8> {
++        pieces.iter().flat_map(|p| match p {
++            Piece::Bytes(b) => b.clone(),
++            Piece::Gap { .. } => Vec::new(),
++        }).collect()
++    }
++
++    #[test]
++    fn segments_in_order_pass_straight_through() {
++        let mut o = TcpOrder::default();
++        assert_eq!(o.push(1000, b"abc", 1), vec![Piece::Bytes(b"abc".to_vec())]);
++        assert_eq!(o.push(1003, b"de", 2), vec![Piece::Bytes(b"de".to_vec())]);
++    }
++
++    #[test]
++    fn a_late_segment_is_put_back_in_its_place() {
++        let mut o = TcpOrder::default();
++        o.push(1000, b"abc", 1);
++        assert!(o.push(1006, b"ghi", 2).is_empty(), "waits for def");
++        assert_eq!(bytes(&o.push(1003, b"def", 3)), b"defghi");
++    }
++
++    #[test]
++    fn a_retransmission_gives_only_what_was_not_had() {
++        let mut o = TcpOrder::default();
++        o.push(1000, b"abcdef", 1);
++        assert!(o.push(1000, b"abcdef", 2).is_empty(), "the same again");
++        assert!(o.push(1002, b"cd", 3).is_empty(), "a piece of it");
++        // Cut elsewhere, running on past what was had.
++        assert_eq!(bytes(&o.push(1004, b"efgh", 4)), b"gh");
++    }
++
++    #[test]
++    fn a_hole_that_never_fills_is_reported_then_read_past() {
++        let mut o = TcpOrder::default();
++        o.push(1000, b"abc", 1_000);
++        assert!(o.push(1010, b"klm", 1_010).is_empty());
++        // Still in time: nothing yet.
++        assert!(o.push(1013, b"no", 1_100).is_empty());
++        let out = o.push(1015, b"pq", 1_300);
++        assert_eq!(out[0], Piece::Gap { missing: 7 });
++        assert_eq!(bytes(&out), b"klmnopq");
++        // And on from there as usual.
++        assert_eq!(o.push(1017, b"r", 1_301), vec![Piece::Bytes(b"r".to_vec())]);
++    }
++
++    #[test]
++    fn sequence_numbers_wrap() {
++        let mut o = TcpOrder::default();
++        o.push(u32::MAX - 1, b"ab", 1);
++        assert!(o.push(2, b"ef", 2).is_empty());
++        assert_eq!(bytes(&o.push(0, b"cd", 3)), b"cdef");
++    }
++
++    #[test]
++    fn a_segment_far_off_starts_the_stream_again() {
++        let mut o = TcpOrder::default();
++        o.push(1000, b"abc", 1);
++        let out = o.push(900_000_000, b"xyz", 2);
++        assert_eq!(out, vec![Piece::Gap { missing: 0 }, Piece::Bytes(b"xyz".to_vec())]);
++    }
++}
+diff --git a/src-tauri/src/combat/capture_dispatcher.rs b/src-tauri/src/combat/capture_dispatcher.rs
+index 59d5b1a..57b51a8 100644
+--- a/src-tauri/src/combat/capture_dispatcher.rs
++++ b/src-tauri/src/combat/capture_dispatcher.rs
+@@ -4,11 +4,12 @@ use std::sync::Arc;
+ use std::time::{SystemTime, UNIX_EPOCH};
+ 
+ use tokio::sync::mpsc;
+-use tracing::info;
++use tracing::{info, warn};
+ 
+ use crate::capture::captured_payload::CapturedPayload;
+ use crate::capture::combat_port_detector::CombatPortDetector;
+ use crate::capture::stream_assembler::StreamAssembler;
++use crate::capture::tcp_order::{Piece, TcpOrder};
+ use crate::capture::stream_processor::StreamProcessor;
+ use crate::combat::data_storage::DataStorage;
+ use crate::combat::ping_tracker::PingTracker;
+@@ -227,7 +228,7 @@ impl CaptureDispatcher {
+ 
+     /// Run the dispatch loop, consuming packets from the channel.
+     pub async fn run(&self, mut receiver: mpsc::Receiver<CapturedPayload>) {
+-        let mut assemblers: HashMap<(u16, u16), (StreamAssembler, StreamProcessor)> = HashMap::new();
++        let mut assemblers: HashMap<(u16, u16), (StreamAssembler, StreamProcessor, TcpOrder)> = HashMap::new();
+         // Per-flow count of signature-bearing packets seen while still unlocked, used
+         // for the no-combat-needed signature lock (see SIGNATURE_LOCK_THRESHOLD).
+         // Per-flow signature-rate tracker: (count_in_window, last_hit_ms).
+@@ -440,21 +441,15 @@ impl CaptureDispatcher {
+                 continue;
+             }
+ 
+-            // Log raw packet if packet logging is enabled
+-            crate::logging::logger::log_packet(&cap);
+-            // And keep it in memory for a while, so a boss fight can be shared
+-            // without packet logging having been on. See `share::ring`.
+-            crate::share::ring::record(&cap);
+-
+             // Get or create assembler
+             let a = cap.src_port.min(cap.dst_port);
+             let b = cap.src_port.max(cap.dst_port);
+             let key = (a, b);
+ 
+-            let (assembler, processor) = assemblers.entry(key).or_insert_with(|| {
++            let (assembler, processor, order) = assemblers.entry(key).or_insert_with(|| {
+                 let mut proc = StreamProcessor::new(self.data_storage.clone(), self.skill_lookup.clone(), self.npc_lookup.clone());
+                 proc.set_dot_skill_ids(self.dot_skill_ids.clone());
+-                (StreamAssembler::new(), proc)
++                (StreamAssembler::new(), proc, TcpOrder::default())
+             });
+ 
+             if unlocked {
+@@ -494,8 +489,48 @@ impl CaptureDispatcher {
+                 }
+                 at + capture_clock_offset.unwrap_or(0)
+             });
++            // The server's bytes in its order (`tcp_order`): late segments put
++            // back, retransmitted bytes read once, a hole reported. A payload
++            // with no sequence number (0: a test's) is read as it comes.
++            let pieces = if cap.tcp_seq == 0 {
++                vec![Piece::Bytes(cap.data.clone())]
++            } else {
++                order.push(cap.tcp_seq, &cap.data, cap.captured_at_ms)
++            };
+             processor.set_override_timestamp(captured_at);
+-            let parsed = assembler.process_chunk(&cap.data, processor);
++            let mut parsed = false;
++            for piece in pieces {
++                match piece {
++                    Piece::Gap { missing } => {
++                        warn!(
++                            "{} bytes from port {} never reached the capture (on {}): reading on from the next whole packet",
++                            missing,
++                            cap.src_port,
++                            cap.device_name.as_deref().unwrap_or("?")
++                        );
++                        assembler.lose_bytes();
++                    }
++                    Piece::Bytes(data) => {
++                        let ordered = CapturedPayload {
++                            src_port: cap.src_port,
++                            dst_port: cap.dst_port,
++                            data,
++                            device_name: cap.device_name.clone(),
++                            captured_at_ms: cap.captured_at_ms,
++                            src_ip: cap.src_ip,
++                            dst_ip: cap.dst_ip,
++                            tcp_seq: cap.tcp_seq,
++                            tcp_ack: cap.tcp_ack,
++                        };
++                        // Log raw packet if packet logging is enabled
++                        crate::logging::logger::log_packet(&ordered);
++                        // And keep it in memory for a while, so a boss fight can be shared
++                        // without packet logging having been on. See `share::ring`.
++                        crate::share::ring::record(&ordered);
++                        parsed |= assembler.process_chunk(&ordered.data, processor);
++                    }
++                }
++            }
+             processor.set_override_timestamp(None);
+ 
+             let signature_locked =
+-- 
+2.43.0
+

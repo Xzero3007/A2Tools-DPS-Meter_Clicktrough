@@ -1,0 +1,36 @@
+From 0e079426c5cedf2f3c74d37fff9ba64db40909b8 Mon Sep 17 00:00:00 2001
+From: taengu <7606218+taengu@users.noreply.github.com>
+Date: Wed, 28 Oct 2026 11:52:08 +0800
+Subject: [PATCH] Plugins on Linux: scripts with Windows line endings run
+
+A plugin page's scripts are inlined and allowed by their SHA-256, but the
+page's parser turns CR LF into LF before hashing, so a script file with
+Windows line endings was refused and no plugin started (the SDK, built
+from a Windows checkout, 2026-10-28). The meter now hashes the text as
+the parser will see it.
+---
+ src-tauri/src/plugins/mod.rs | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
+index 05c1f52..54b40ba 100644
+--- a/src-tauri/src/plugins/mod.rs
++++ b/src-tauri/src/plugins/mod.rs
+@@ -2350,8 +2350,12 @@ fn inline_page(html: &str, root: &Path, page_dir: &Path) -> (String, Vec<String>
+         let lower = tag.to_ascii_lowercase();
+         if lower.starts_with("<script") && rest[end + 1..].to_ascii_lowercase().starts_with("</script>") {
+             if let Some(code) = attribute(tag, "src").and_then(|src| read(&src)) {
+-                // "</script" inside the code would end the element early.
+-                let code = code.replace("</script", "<\\/script");
++                // "</script" inside the code would end the element early;
++                // and the page's parser turns CR LF and CR into LF before the
++                // policy hashes a script, so a file with Windows line endings
++                // (a plugin developer's, or the SDK built from a Windows
++                // checkout) was refused, and no plugin ran (2026-10-28).
++                let code = code.replace("</script", "<\\/script").replace("\r\n", "\n").replace('\r', "\n");
+                 hashes.push(base64(&sha2::Sha256::digest(code.as_bytes())));
+                 out.push_str("<script>");
+                 out.push_str(&code);
+-- 
+2.43.0
+

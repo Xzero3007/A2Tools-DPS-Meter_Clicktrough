@@ -105,6 +105,20 @@ it. The release takes the plugins repo's `main` as it is.
 
 ## Start of a session
 
+**First, the Original watch's open issues** (the person's decision,
+2026-10-28): before any other work, and again before a release, look at
+them and tell the person what is new, with an assessment (what changed,
+what it would bring here, whether it sends or links anything, the effort,
+a recommendation). Don't wait to be asked.
+
+```bash
+gh api "repos/Xzero3007/A2Tools-DPS-Meter_Clicktrough/issues?state=open&labels=original-watch" -q '.[] | "#\(.number) \(.title)"'
+gh api "repos/Xzero3007/A2Tools-DPS-Meter_Clicktrough/issues?state=open&labels=plugin-watch" -q '.[] | "#\(.number) \(.title)"'
+```
+
+An issue whose content is all taken or decided against gets a comment
+saying so and is closed; one with something still open stays open.
+
 ```bash
 bash clicktrough/dev/setup-workspace.sh           # ../ct-src, the plugins repo, ../ct-plugins, ~10 s
 bash clicktrough/dev/setup-workspace.sh --build   # and a debug meter to run (minutes)

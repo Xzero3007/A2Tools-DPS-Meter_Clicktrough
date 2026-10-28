@@ -48,8 +48,19 @@ released in a version yet. They go before the patches. Once a new version of
 the original contains the commit (it is on the first line of each patch), the
 build leaves it out; the file can be deleted then.
 
-None at the moment: the stuck-tooltip fixes taken early (2026-10-24) are in
-the original's 2.0.79.
+Now (2026-10-28, from the original's 2.0.81 and 2.0.82; this build stays on
+2.0.80):
+
+| Backport | What it brings |
+|---|---|
+| 0001 | **Monster names right**: a monster spawned with an entity id another one had before gets its own name, not the old one's (Nearby, the Map). |
+| 0002 | **The game's data read in order**: the server's bytes are read as TCP orders them, and past a lost packet cleanly, so fewer hits and records are lost or garbled (the meter's numbers, the Map, Pet Finder, Roster). |
+| 0003 | The same: after a lost packet, each place tried three packets deep, not to the end. |
+| 0004 | **Security**: a Linux update's package is copied where only root can write and its SHA-256 checked there before it is installed (this build's releases give the checksum); an over-long Discord reply is refused; a plugin page's `%` before a non-ASCII character no longer crashes the page handler. |
+| 0005 | Plugins whose scripts have Windows line endings run on Linux. |
+
+The stuck-tooltip fixes taken early (2026-10-24) are in the original's
+2.0.79.
 
 ### Plugins
 
