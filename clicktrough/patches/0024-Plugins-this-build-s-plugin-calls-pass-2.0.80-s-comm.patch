@@ -1,7 +1,7 @@
-From c62718ba2a79d49468d849fa62973b9ccdbe9bd5 Mon Sep 17 00:00:00 2001
+From 612830757e700ce1775d5f9447d4966d9fff4c5f Mon Sep 17 00:00:00 2001
 From: Claude <noreply@anthropic.com>
 Date: Tue, 27 Oct 2026 00:11:33 +0000
-Subject: [PATCH 24/30] Plugins: this build's plugin calls pass 2.0.80's
+Subject: [PATCH 24/31] Plugins: this build's plugin calls pass 2.0.80's
  command filter
 
 Meter 2.0.80 lets plugin windows, the dock and widgets call only the app

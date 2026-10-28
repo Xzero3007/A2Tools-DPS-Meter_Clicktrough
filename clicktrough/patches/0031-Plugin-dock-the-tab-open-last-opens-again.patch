@@ -1,0 +1,107 @@
+From 2f768897b914d97b87a5934d57a322b49d41e29d Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Wed, 28 Oct 2026 02:47:45 +0000
+Subject: [PATCH 31/31] Plugin dock: the tab open last opens again
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Hidden by the plugins button or its ×, the dock hides every tab, and its
+page then took the first tab as the open one and kept that: shown again,
+it opened the first plugin, not the one open before. The chosen tab is
+now kept while it isn't shown, and opens again when it is.
+---
+ public/src/js/pluginDock.js  | 15 +++++++++++----
+ tests/dock-last-tab.test.mjs | 33 +++++++++++++++++++++++++++++++++
+ 2 files changed, 44 insertions(+), 4 deletions(-)
+ create mode 100644 tests/dock-last-tab.test.mjs
+
+diff --git a/public/src/js/pluginDock.js b/public/src/js/pluginDock.js
+index 6d42e4d..76990d5 100644
+--- a/public/src/js/pluginDock.js
++++ b/public/src/js/pluginDock.js
+@@ -62,6 +62,13 @@
+     return (ia < 0 ? 1e9 : ia) - (ib < 0 ? 1e9 : ib) || a.name.localeCompare(b.name);
+   });
+   const shownTabs = () => ordered().filter((d) => d.shown);
++  // Clicktrough: the tab open last stays the chosen one while it isn't
++  // shown (the dock hidden by the plugins button or its ×, which hides every
++  // tab): shown again, the dock opens it, not the first tab.
++  const currentTab = () => {
++    const shown = shownTabs();
++    return shown.some((d) => d.id === prefs.active) ? prefs.active : shown[0]?.id ?? null;
++  };
+ 
+   const setLabel = (btn, label) => {
+     btn.setAttribute("aria-label", label);
+@@ -70,8 +77,7 @@
+ 
+   // Which panels show: the open tab's, or every shown one stacked.
+   const render = () => {
+-    const shown = shownTabs();
+-    if (!shown.some((d) => d.id === prefs.active)) prefs.active = shown[0]?.id ?? null;
++    const current = currentTab();
+     const stacked = prefs.layout === "stack";
+     document.body.classList.toggle("dockStacked", stacked);
+     document.body.classList.toggle("dockFolded", prefs.folded);
+@@ -84,7 +90,7 @@
+       d.panel.style.order = String(index);
+     });
+     for (const d of ordered()) {
+-      const active = d.id === prefs.active;
++      const active = d.id === current;
+       d.panel.hidden = !d.shown || (!stacked && !active);
+       d.panel.classList.toggle("dockPanelAlert", !!d.alert);
+       d.panel.classList.toggle("dockPanelFirst", !d.panel.hidden && first);
+@@ -315,7 +321,8 @@
+   listen("dock-focus", (event) => {
+     const id = event.payload;
+     if (!docked.has(id)) return;
+-    if (prefs.active && prefs.active !== id && !backTo.has(id)) backTo.set(id, prefs.active);
++    const now = currentTab();
++    if (now && now !== id && !backTo.has(id)) backTo.set(id, now);
+     activate(id);
+   });
+   listen("dock-return", (event) => {
+diff --git a/tests/dock-last-tab.test.mjs b/tests/dock-last-tab.test.mjs
+new file mode 100644
+index 0000000..91efd20
+--- /dev/null
++++ b/tests/dock-last-tab.test.mjs
+@@ -0,0 +1,33 @@
++// Clicktrough: the plugin dock opens the tab open last when it is shown
++// again (pluginDock.js), not the first one: hidden by the plugins button or
++// its ×, every tab is hidden, and that once forgot which one was open.
++import assert from "node:assert/strict";
++import { readFileSync } from "node:fs";
++import test from "node:test";
++import vm from "node:vm";
++
++const source = readFileSync(new URL("../public/src/js/pluginDock.js", import.meta.url), "utf8");
++
++test("the dock's render never forgets the chosen tab", () => {
++  const render = source.slice(source.indexOf("const render = () => {"), source.indexOf("const activate = (id) => {"));
++  assert.ok(render.length > 100);
++  assert.doesNotMatch(render, /prefs\.active\s*=/);
++  assert.match(render, /const current = currentTab\(\);/);
++});
++
++test("the tab open: the one chosen last while shown, else the first shown", () => {
++  const start = source.indexOf("const currentTab = () => {");
++  const body = source.slice(start, source.indexOf("};", start) + 2);
++  const run = (prefs, tabs) => vm.runInNewContext(`${body}; currentTab()`, { prefs, shownTabs: () => tabs.filter((t) => t.shown) });
++  const tabs = [{ id: "pet-finder", shown: true }, { id: "map", shown: true }, { id: "market", shown: true }];
++  const prefs = { active: "map" };
++  assert.equal(run(prefs, tabs), "map");
++  // The dock hidden: no tab shown, the choice kept.
++  assert.equal(run(prefs, tabs.map((t) => ({ ...t, shown: false }))), null);
++  assert.equal(prefs.active, "map");
++  // Shown again: the Map, not Pet Finder.
++  assert.equal(run(prefs, tabs), "map");
++  // Its own tab hidden: the first shown, and it is back when its tab is.
++  assert.equal(run(prefs, tabs.map((t) => (t.id === "map" ? { ...t, shown: false } : t))), "pet-finder");
++  assert.equal(run(prefs, tabs), "map");
++});
+-- 
+2.43.0
+

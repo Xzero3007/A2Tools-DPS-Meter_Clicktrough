@@ -1,7 +1,7 @@
-From a4c56b1c49e9712825202cfd265601e86dc5cb63 Mon Sep 17 00:00:00 2001
+From 0387fb2fa5156e85177535b4d71b0870ffd08455 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Sat, 24 Oct 2026 20:12:56 +0000
-Subject: [PATCH 14/30] Meter: "Hide when AION2 isn't focused" only while AION2
+Subject: [PATCH 14/31] Meter: "Hide when AION2 isn't focused" only while AION2
  runs
 
 With the game closed, nothing that counts as the game or the meter could

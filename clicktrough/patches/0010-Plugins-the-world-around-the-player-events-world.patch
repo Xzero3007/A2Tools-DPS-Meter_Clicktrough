@@ -1,7 +1,7 @@
-From 60040d0d4fb079b6205d8455021f510939d7bec7 Mon Sep 17 00:00:00 2001
+From 7165bd5cda479617f9f35978775c01c841857979 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Sat, 24 Oct 2026 14:14:28 +0000
-Subject: [PATCH 10/30] Plugins: the world around the player (events:world)
+Subject: [PATCH 10/31] Plugins: the world around the player (events:world)
 
 A plugin with the permission "events:world" (a map, a pet tracker) hears
 a2.on("world") at most four times a second, and every two seconds while

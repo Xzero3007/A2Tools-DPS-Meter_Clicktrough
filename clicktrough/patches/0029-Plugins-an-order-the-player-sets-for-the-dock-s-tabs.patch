@@ -1,7 +1,7 @@
 From 8f8d6f78ee9a7096168d7f87f9d12cdc4f3a0977 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Tue, 27 Oct 2026 23:04:48 +0000
-Subject: [PATCH 29/30] Plugins: an order the player sets, for the dock's tabs
+Subject: [PATCH 29/31] Plugins: an order the player sets, for the dock's tabs
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
