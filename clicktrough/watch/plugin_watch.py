@@ -10,11 +10,14 @@ seen so far. Writes the new known.json there and, when a plugin came or went,
 first run (no known.json) lists every plugin there is, so the watch shows it
 works.
 
-Prints publish=true|false, report=true|false and build=true|false for
+Prints publish=true|false, report=true|false and build=false for
 $GITHUB_OUTPUT: publish when known.json changed, report when there is an
-issue to open, build when a plugin came to the original's repo (the release
-workflow then ships it). The catalog
-not answering is no change: its part of known.json stays as it was.
+issue to open. The build is frozen on what the plugins repo pins
+(Xzero3007/A2Tools-Clicktrough-Plugins, original/PIN and pins.txt): a new
+plugin or a new version of one is only reported, and taken when decided.
+A new version of a plugin is reported too (known.json keeps each version).
+The catalog not answering is no change: its part of known.json stays as it
+was.
 
     --catalog-file <file>   read the catalog from a file (testing)
 """
@@ -109,8 +112,8 @@ def describe(pid, repo, catalog):
         lines.append("- **In this repo's build:** not shipped while the author holds it back.")
     elif r:
         lines.append(
-            "- **In this repo's build:** the next Clicktrough release ships it (this watch starts that build now); "
-            "then Settings → Plugins → Available installs it, tagged Clicktrough, and its updates come with this repo's releases."
+            "- **In this repo's build:** not yet. The build is frozen on what the plugins repo pins; to take it, "
+            "add it to `original/pins.txt` there (or move `original/PIN`), after a look at what it does and reaches."
         )
     else:
         source = f" (source: {c['source']})" if c and c["source"] else ""
@@ -146,6 +149,7 @@ def main(argv):
     known = {} if first else json.loads(known_path.read_text(encoding="utf-8"))
     known_repo = set(known.get("repo") or [])
     known_catalog = set(known.get("catalog") or [])
+    known_versions = known.get("versions") or {}
 
     now = sorted(set(repo) | set(catalog or {}))
     # Known from the repo before and in the catalog only now: installable.
@@ -161,15 +165,23 @@ def main(argv):
         gone_catalog = (known_catalog - set(catalog)) if catalog is not None else set()
         gone = sorted(x for x in gone_repo | gone_catalog if x not in repo and (catalog is None or x not in catalog))
 
+    # A new version of a plugin seen before (versions known from this watch on).
+    updated = sorted(
+        x for x in repo
+        if x in known_repo and x in known_versions and repo[x]["version"] and repo[x]["version"] != known_versions[x]
+    ) if not first else []
+
     new_known = {
         "repo": sorted(repo),
+        "versions": {x: repo[x]["version"] for x in sorted(repo)},
         "catalog": sorted(catalog) if catalog is not None else sorted(known_catalog),
         "checked": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%MZ"),
     }
-    changed = first or new_known["repo"] != sorted(known_repo) or new_known["catalog"] != sorted(known_catalog)
+    changed = (first or new_known["repo"] != sorted(known_repo) or new_known["catalog"] != sorted(known_catalog)
+               or new_known["versions"] != known_versions)
     known_path.write_text(json.dumps(new_known, indent=1) + "\n", encoding="utf-8")
 
-    report = bool(came or gone or listed)
+    report = bool(came or gone or listed or updated)
     if report:
         owner = os.environ.get("GITHUB_REPOSITORY_OWNER", "")
         names = [((repo.get(x) or (catalog or {}).get(x))["name"]) for x in came]
@@ -186,6 +198,10 @@ def main(argv):
         elif listed:
             title = "Now in the catalog: " + ", ".join(repo[x]["name"] for x in listed)
             intro = ""
+        elif updated:
+            title = "Plugin updates in the original: " + ", ".join(
+                f"{repo[x]['name']} {known_versions[x]} → {repo[x]['version']}" for x in updated)
+            intro = ""
         else:
             title = "Plugins gone from the original: " + ", ".join(gone)
             intro = ""
@@ -195,6 +211,13 @@ def main(argv):
         if listed:
             body += ["### Now in the catalog", "Plugins of the original's repo that Settings → Plugins can install now:", ""]
             body += [f"- **{repo[x]['name']}** (`{x}`) {catalog[x]['version']}" for x in listed] + [""]
+        if updated:
+            body += ["### New versions", "Not in this repo's build until taken (the plugins repo's `original/pins.txt` or `original/PIN`):", ""]
+            body += [
+                f"- **{repo[x]['name']}** (`{x}`) {known_versions[x]} → {repo[x]['version']}: "
+                f"[history]({REPO_URL}/commits/main/plugins/{repo[x]['folder']})"
+                for x in updated
+            ] + [""]
         if gone:
             body += ["### Gone", "No longer in the original: " + ", ".join(f"`{x}`" for x in gone), ""]
         if owner:
@@ -202,9 +225,9 @@ def main(argv):
         (out_dir / "title.txt").write_text(title + "\n", encoding="utf-8")
         (out_dir / "issue.md").write_text("\n".join(body).strip() + "\n", encoding="utf-8")
 
-    new_in_repo = any(x in repo for x in came) and not first
     print(f"publish={'true' if changed else 'false'}")
-    print(f"build={'true' if new_in_repo else 'false'}")
+    # Frozen: nothing new is built in by itself.
+    print("build=false")
     print(f"report={'true' if report else 'false'}")
     return 0
 

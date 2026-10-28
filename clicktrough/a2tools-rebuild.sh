@@ -1,17 +1,18 @@
 #!/usr/bin/env bash
-# A2Tools DPS Meter: build and install the newest version with the
-# Clicktrough changes locally (Arch / CachyOS / EndeavourOS). Not normally
-# needed: this repo's releases build the same automatically.
+# A2Tools DPS Meter: build and install the Clicktrough build locally (Arch /
+# CachyOS / EndeavourOS). Not normally needed: this repo's releases build the
+# same automatically.
 #
-#   ./a2tools-rebuild.sh            newest release (v2.0.76, v2.0.77 ...)
-#   ./a2tools-rebuild.sh v2.0.77    a given version
+#   ./a2tools-rebuild.sh            the version this build is based on (BASE)
+#   ./a2tools-rebuild.sh v2.0.80    a given version of the original
 #
 # Next to this script (see README.md):
+#   BASE          the original's version this build is based on
 #   backports/    the original's fixes not in a version yet (skipped once the
 #                 version contains the commit)
 #   patches/      the meter's changes
-#   plugins/<id>  changes to plugins from taengu/A2Tools-Plugins
-#   own-plugins/  this repo's own plugins (Pet Finder)
+# The plugins come from the plugins repo (Xzero3007/A2Tools-Clicktrough-
+# Plugins, its build/assemble.sh), as in the releases.
 #
 # The source goes to ~/.cache/a2tools-build (elsewhere: A2T_SRC=...).
 set -euo pipefail
@@ -20,6 +21,7 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cache="${A2T_SRC:-$HOME/.cache/a2tools-build/A2Tools-DPS-Meter}"
 src="$cache"
 plugins_src="$(dirname "$cache")/A2Tools-Plugins"
+plugins_repo="$(dirname "$cache")/A2Tools-Clicktrough-Plugins"
 ref="${1:-}"
 who=(-c user.name="A2Tools patch" -c user.email="patch@localhost")
 
@@ -40,7 +42,7 @@ git fetch --tags --force origin
 git fetch -q origin main
 
 if [ -z "$ref" ]; then
-  ref="$(git tag -l 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1)"
+  ref="$(sed -n '1p' "$here/BASE")"
 fi
 echo "==> Building $ref with ${#patches[@]} patch(es)"
 
@@ -67,43 +69,20 @@ for p in "$here"/backports/*.patch; do
 done
 git "${who[@]}" am -q "${patches[@]}" || fail "A patch"
 
-# Plugins: the changed ones from A2Tools-Plugins, the others from there
-# (each runs where it is installed: patch 0020, installed-only.txt) and this
-# repo's own.
+# Plugins: as the plugins repo puts them together (its own, and the
+# original's as it pins and patches them).
+if [ ! -d "$plugins_repo/.git" ]; then
+  git clone https://github.com/Xzero3007/A2Tools-Clicktrough-Plugins.git "$plugins_repo"
+fi
+git -C "$plugins_repo" fetch -q origin
+git -C "$plugins_repo" reset -q --hard origin/HEAD
 if [ ! -d "$plugins_src/.git" ]; then
   git clone https://github.com/taengu/A2Tools-Plugins.git "$plugins_src"
 fi
-git -C "$plugins_src" am --abort >/dev/null 2>&1 || true
 git -C "$plugins_src" fetch -q origin
 git -C "$plugins_src" reset -q --hard
-git -C "$plugins_src" checkout -q --detach origin/HEAD
-mkdir -p src/data/ct-plugins
-: > src/data/ct-plugins/installed-only.txt
-sed '/^#/d;/^$/d' "$here/plugins-left-out.txt" > src/data/ct-plugins/left-out.txt
-for d in "$here"/plugins/*/; do
-  [ -d "$d" ] || continue
-  id=$(basename "$d")
-  git -C "$plugins_src" "${who[@]}" am -3 -q "$d"*.patch || fail "The plugin patch for $id"
-  cp -r "$plugins_src/plugins/$id" "src/data/ct-plugins/$id"
-  [ -e "$d/installed-only" ] && echo "$id" >> src/data/ct-plugins/installed-only.txt
-done
-for d in "$plugins_src"/plugins/*/; do
-  id=$(basename "$d")
-  [ -f "$d/manifest.json" ] || continue
-  [ -e "$d/.unpublished" ] && continue
-  grep -qx "$id" "$here/plugins-left-out.txt" && continue
-  [ -e "src/data/ct-plugins/$id" ] && continue
-  [ -e "$here/own-plugins/$id" ] && continue
-  cp -r "$d" "src/data/ct-plugins/$id"
-  echo "$id" >> src/data/ct-plugins/installed-only.txt
-done
-for d in "$here"/own-plugins/*/; do
-  [ -f "$d/manifest.json" ] || continue
-  id=$(basename "$d")
-  mkdir -p "src/data/ct-plugins/$id"
-  cp -r "$d/." "src/data/ct-plugins/$id/"
-  rm -rf "src/data/ct-plugins/$id/dev"
-done
+GIT_AUTHOR_NAME="A2Tools patch" GIT_AUTHOR_EMAIL=patch@localhost \
+  bash "$plugins_repo/build/assemble.sh" "$plugins_src" src/data/ct-plugins || fail "A plugin patch"
 
 cd packaging/arch
 rm -f ./*.pkg.tar.zst

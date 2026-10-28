@@ -2,12 +2,16 @@
 # Clicktrough: the working clones a Claude session (or anyone) needs to work
 # on this repo's patches, made fresh from what this repo holds:
 #
-#   <workspace>/ct-src      the original meter (taengu/A2Tools-DPS-Meter) at its
-#                           newest version, or --tag, with clicktrough/backports
-#                           and clicktrough/patches applied, on branch ct-<tag>
-#   <workspace>/ct-plugins  the original's plugins (taengu/A2Tools-Plugins) at
-#                           their newest commit with clicktrough/plugins/<id>
-#                           applied, on branch ct-patches
+#   <workspace>/ct-src      the original meter (taengu/A2Tools-DPS-Meter) at the
+#                           version this build is based on (clicktrough/BASE),
+#                           or --tag, with clicktrough/backports and
+#                           clicktrough/patches applied, on branch ct-<tag>
+#   <workspace>/a2tools-clicktrough-plugins
+#                           the plugins repo (Xzero3007/A2Tools-Clicktrough-
+#                           Plugins), or $PLUGINS_REPO
+#   <workspace>/ct-plugins  the original's plugins (taengu/A2Tools-Plugins) as
+#                           the plugins repo pins and patches them
+#                           (its build/assemble.sh), on branch ct-patches
 #
 # <workspace> is the folder this repo sits in (or $WORKSPACE_DIR). Nothing is
 # ever pushed from these clones: they belong to the original's author.
@@ -25,6 +29,7 @@ here="$(cd "$(dirname "$0")/../.." && pwd)"
 ws="${WORKSPACE_DIR:-$(dirname "$here")}"
 meter_url=https://github.com/taengu/A2Tools-DPS-Meter.git
 plugins_url=https://github.com/taengu/A2Tools-Plugins.git
+plugins_repo_url=https://github.com/Xzero3007/A2Tools-Clicktrough-Plugins.git
 tag="" deps=0 build=0 force=0
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -70,7 +75,9 @@ if [ ! -d "$src/.git" ]; then
 fi
 git -C "$src" fetch -q --tags origin
 if [ -z "$tag" ]; then
-  tag=$(git -C "$src" tag -l 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n1)
+  # The version this build is based on; the original's newer ones are taken
+  # only when decided (clicktrough/BASE).
+  tag=$(sed -n '1p' "$here/clicktrough/BASE")
 fi
 echo "==> Meter $tag, branch ct-$tag"
 git -C "$src" checkout -q -B "ct-$tag" "$tag"
@@ -90,21 +97,21 @@ fi
 echo "    $(git -C "$src" rev-list --count "$tag"..HEAD) commits on $tag"
 
 # ---- the plugins ----
+plugins_repo="${PLUGINS_REPO:-$ws/a2tools-clicktrough-plugins}"
+if [ ! -d "$plugins_repo/.git" ]; then
+  git clone -q "$plugins_repo_url" "$plugins_repo"
+fi
 plugins="$ws/ct-plugins"
 clean_or_stop "$plugins"
 if [ ! -d "$plugins/.git" ]; then
   git clone -q "$plugins_url" "$plugins"
 fi
 git -C "$plugins" fetch -q origin
-git -C "$plugins" checkout -q -B ct-patches origin/main
-for d in "$here"/clicktrough/plugins/*/; do
-  [ -d "$d" ] || continue
-  git -C "$plugins" "${who[@]}" am -3 -q "$d"*.patch || {
-    echo "The patches of $(basename "$d") don't apply to the original's newest plugins." >&2
-    exit 1
-  }
-done
-echo "==> Plugins: branch ct-patches, $(git -C "$plugins" rev-list --count origin/main..HEAD) commits on origin/main"
+assembled="$(mktemp -d)"
+trap 'rm -rf "$assembled"' EXIT
+echo "==> Plugins (from $plugins_repo)"
+GIT_AUTHOR_NAME=A2Tools-patch GIT_AUTHOR_EMAIL=patch@localhost \
+  bash "$plugins_repo/build/assemble.sh" "$plugins" "$assembled/ct-plugins" | sed 's/^/    /'
 
 # ---- system and npm packages ----
 if [ "$deps" = 1 ]; then
@@ -124,23 +131,8 @@ if [ "$build" = 1 ]; then
   # As the release is built (PKGBUILD): without `online`, with `net`.
   (cd "$src/src-tauri" && cargo build -q --no-default-features --features desktop,net)
   dest="$src/src-tauri/target/debug/_up_/src/data/ct-plugins"
-  rm -rf "$dest" && mkdir -p "$dest"
-  : > "$dest/installed-only.txt"
-  sed '/^#/d;/^$/d' "$here/clicktrough/plugins-left-out.txt" > "$dest/left-out.txt"
-  for d in "$here"/clicktrough/plugins/*/; do
-    [ -d "$d" ] && cp -r "$plugins/plugins/$(basename "$d")" "$dest/"
-    [ -e "$d/installed-only" ] && basename "$d" >> "$dest/installed-only.txt"
-  done
-  for d in "$plugins"/plugins/*/; do
-    id=$(basename "$d")
-    [ -f "$d/manifest.json" ] && [ ! -e "$d/.unpublished" ] && [ ! -e "$dest/$id" ] && [ ! -e "$here/clicktrough/own-plugins/$id" ] || continue
-    grep -qx "$id" "$here/clicktrough/plugins-left-out.txt" && continue
-    cp -r "$d" "$dest/$id" && echo "$id" >> "$dest/installed-only.txt"
-  done
-  for d in "$here"/clicktrough/own-plugins/*/; do
-    id=$(basename "$d")
-    cp -r "$d" "$dest/$id" && rm -rf "$dest/$id/dev"
-  done
+  rm -rf "$dest" && mkdir -p "$(dirname "$dest")"
+  cp -r "$assembled/ct-plugins" "$dest"
   echo "    $src/src-tauri/target/debug/a2tools-dps-meter (run it with clicktrough/dev/run-meter.sh)"
 fi
 echo "==> Done."

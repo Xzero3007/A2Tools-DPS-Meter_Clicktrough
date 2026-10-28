@@ -1,10 +1,13 @@
-# Clicktrough: a watch on the original's plugins. Every hour it reads
+# Clicktrough: a watch on the original. This build is frozen on the
+# original's meter at clicktrough/BASE and on its plugins as the plugins repo
+# pins them; nothing new comes in by itself. Every hour it reads
 # taengu/A2Tools-Plugins and the meter's plugin catalog and opens an issue
-# here (label plugin-watch) when a plugin came that wasn't there before, one
-# of the repo reached the catalog, or one is gone. What it has seen is kept on
-# the branch plugin-watch (known.json, one commit, replaced each time).
-# See clicktrough/watch/plugin_watch.py.
-name: Plugin watch
+# here (label plugin-watch) when a plugin came, got a new version, reached the
+# catalog or is gone; and one (label original-watch) when the original
+# released a meter version newer than clicktrough/BASE, with what changed.
+# What it has seen is kept on the branch plugin-watch (known.json, one
+# commit, replaced each time). See clicktrough/watch/plugin_watch.py.
+name: Original watch
 
 on:
   schedule:
@@ -16,12 +19,12 @@ on:
     paths:
       - ".github/workflows/plugin-watch.yml"
       - "clicktrough/watch/plugin_watch.py"
+      - "clicktrough/BASE"
   workflow_dispatch:
 
 permissions:
   contents: write
   issues: write
-  actions: write
 
 concurrency:
   group: plugin-watch
@@ -38,7 +41,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           path: src
-          sparse-checkout: clicktrough/watch
+          sparse-checkout: clicktrough
       - name: The original's plugins and what was seen so far
         run: |
           set -euo pipefail
@@ -57,9 +60,40 @@ jobs:
           gh label create plugin-watch -R "$GITHUB_REPOSITORY" --color 8250df \
             --description "New plugins in the original" 2>/dev/null || true
           gh issue create -R "$GITHUB_REPOSITORY" --title "$(cat out/title.txt)" --body-file out/issue.md --label plugin-watch
-      - name: Build the new plugins into a release now
-        if: steps.watch.outputs.build == 'true'
-        run: gh workflow run clicktrough-release.yml -R "$GITHUB_REPOSITORY" --ref main
+      - name: The original's meter
+        run: |
+          set -euo pipefail
+          meter=https://github.com/taengu/A2Tools-DPS-Meter.git
+          base=$(sed -n '1p' src/clicktrough/BASE)
+          newest=$(git ls-remote --tags --refs "$meter" 'v*' | sed 's#.*refs/tags/##' \
+            | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n1)
+          if [ -z "$newest" ] || [ "$newest" = "$base" ] \
+            || [ "$(printf '%s\n%s\n' "$base" "$newest" | sort -V | tail -n1)" != "$newest" ]; then
+            echo "The original's newest: ${newest:-unknown}; this build: $base"
+            exit 0
+          fi
+          gh label create original-watch -R "$GITHUB_REPOSITORY" --color 0e8a16 \
+            --description "New versions of the original meter" 2>/dev/null || true
+          seen=$(gh issue list -R "$GITHUB_REPOSITORY" --state all --label original-watch \
+            --search "in:title ${newest}" --json number --jq 'length')
+          if [ "$seen" != "0" ]; then
+            echo "Already reported: $newest"
+            exit 0
+          fi
+          git clone -q --filter=blob:none --no-checkout "$meter" meter-up
+          {
+            echo "The original released **${newest}**. This build stays on **${base}** (\`clicktrough/BASE\`) until we decide."
+            echo
+            echo "Options: take nothing; take single fixes (\`clicktrough/backports\`); or move to ${newest} (\`clicktrough/BASE\`, then port the patches)."
+            echo "Worth taking in any case: parser fixes after a game update, the skill/NPC/dungeon tables, security fixes."
+            echo
+            echo "**What changed** (${base}..${newest}):"
+            git -C meter-up log --no-merges --format='- %s' "${base}..${newest}" | head -n 200
+            echo
+            echo "Compare: https://github.com/taengu/A2Tools-DPS-Meter/compare/${base}...${newest}"
+          } > meter.md
+          gh issue create -R "$GITHUB_REPOSITORY" --title "The original released ${newest} (this build: ${base})" \
+            --label original-watch --body-file meter.md
       - name: Keep what was seen
         if: steps.watch.outputs.publish == 'true'
         run: |

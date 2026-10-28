@@ -5,9 +5,13 @@ fork because it is one.
 
 - **Built on the [A2Tools DPS Meter by taengu](https://github.com/taengu/A2Tools-DPS-Meter)**
   and its contributors: all credit for the meter goes to them. This repo
-  rebuilds every new version of the original automatically with a few changes
-  for Linux (KDE Plasma on Wayland above all) and publishes it as an Arch
-  package.
+  builds the original's version 2.0.80 with its own changes (for Linux, KDE
+  Plasma on Wayland above all) and publishes it as an Arch package. Newer
+  versions of the original are taken only when something fundamental changed
+  and it was decided.
+- **The plugins** (this build's own and its changes to the original's) live
+  in [A2Tools-Clicktrough-Plugins](https://github.com/Xzero3007/A2Tools-Clicktrough-Plugins)
+  and come with every package here.
 - **Pet Finder builds on [PetTracker by 0Fox2Give](https://github.com/0Fox2Give/PetTracker)**
   (its data and packet layouts) and on A2 Tools' Pet Soul Tracker (its pet
   list).
@@ -84,7 +88,7 @@ fork because it is one.
 - **Every plugin of the original, from this repo**: Settings → Plugins →
   Available installs any of them as this repo's build took them (tagged
   Clicktrough), test plugins too, such as Enhanced Boss Telegraph; a watch
-  opens an issue when the original has a new plugin and builds it in.
+  reports the original's new plugins, and they come in once chosen.
 - **Nothing is sent, no account**: no A2 Tools account or sign-in prompt, no
   uploads, leaderboards or reports, no links to websites in the meter or its
   plugins. The meter only downloads: its updates from this repo, the market
@@ -121,18 +125,18 @@ not in this build):
   the GPL-3.0 ([LICENSE](LICENSE)). That holds for this repo and every package
   built from it.
 - Only what lies in [`clicktrough/`](clicktrough/) is changed: the patches
-  (each dated in its header), fixes taken early from the original, the plugins
-  and the build. The source of every package is the original at its version
-  tag plus these patches; every change is described in
-  [clicktrough/README.md](clicktrough/README.md).
-- Pet Finder (`clicktrough/own-plugins/pet-finder`) takes its data and packet
+  (each dated in its header), fixes taken early from the original and the
+  build. The source of every package is the original at its version tag plus
+  these patches, and the plugins repo at the commit its release notes name;
+  every change is described in [clicktrough/README.md](clicktrough/README.md).
+- Pet Finder (`plugins/pet-finder` in the plugins repo) takes its data and packet
   layouts from [PetTracker](https://github.com/0Fox2Give/PetTracker) by
   0Fox2Give (GPL-3.0) and its
   Pets tab from A2 Tools' Pet Soul Tracker
   ([A2Tools-Plugins](https://github.com/taengu/A2Tools-Plugins), GPL-3.0, see
   `NOTICE-PetSoulTracker.txt` there); its own parts are licensed under the
   GPL-3.0-or-later, the whole under the GPL-3.0. The Map plugin
-  (`clicktrough/own-plugins/map`, GPL-3.0-or-later) and the meter's position
+  (`plugins/map` there, GPL-3.0-or-later) and the meter's position
   service (patch 0010) take their maps, map data, frame layouts and position
   estimate from SkeeveAN's
   [Aion-DPS-Meter](https://github.com/SkeeveAN/Aion-DPS-Meter) (MIT, see
