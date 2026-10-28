@@ -61,8 +61,11 @@ with its own CLAUDE.md: plugin work happens there.
 - Patch commits in the working clones: author `A2Tools-patch
   <patch@localhost>`, committer Claude (`setup-workspace.sh` sets this up).
 - Take data only where its licence allows it, and credit it (NOTICE files,
-  READMEs). Not allowed so far: Aion 2 Timers' spawn data and map pictures
-  (their permission is A2 Tools'), The Hidden Gaming Lair, allthings.how.
+  READMEs, as text). Game data taken from the client (spawn points, the
+  game's map pictures) is the game's, whoever extracted it: Aion 2 Timers'
+  spawn points and map pictures are used, as A2 Tools' Pet Soul Tracker has
+  them, credited (the person's decision, 2026-10-28). Not allowed so far:
+  The Hidden Gaming Lair, allthings.how (gathering spots players collected).
 - One project per repo: other projects of the person (e.g. the G502 mouse) have
   their own repo and their own sessions. Don't mix them into this one.
 
