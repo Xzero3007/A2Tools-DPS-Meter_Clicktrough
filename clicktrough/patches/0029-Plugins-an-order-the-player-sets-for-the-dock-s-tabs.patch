@@ -1,4 +1,4 @@
-From 788ec0df441731e6822130388f40f53820857acc Mon Sep 17 00:00:00 2001
+From 8f8d6f78ee9a7096168d7f87f9d12cdc4f3a0977 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Tue, 27 Oct 2026 23:04:48 +0000
 Subject: [PATCH 29/30] Plugins: an order the player sets, for the dock's tabs
@@ -19,13 +19,13 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_01RahWACwaxzLAcYgwc9jk8C
 ---
  public/src/js/pluginDock.css    |  8 ++++
- public/src/js/pluginDock.js     | 76 +++++++++++++++++++++++++--------
+ public/src/js/pluginDock.js     | 80 ++++++++++++++++++++++++++-------
  public/src/js/pluginSettings.js | 28 ++++++++++--
  src-tauri/src/app.rs            |  1 +
  src-tauri/src/plugins/dock.rs   |  6 ++-
- src-tauri/src/plugins/mod.rs    | 35 ++++++++++++++-
+ src-tauri/src/plugins/mod.rs    | 39 +++++++++++++++-
  src/styles.css                  |  3 ++
- 7 files changed, 135 insertions(+), 22 deletions(-)
+ 7 files changed, 143 insertions(+), 22 deletions(-)
 
 diff --git a/public/src/js/pluginDock.css b/public/src/js/pluginDock.css
 index 02d2bd3..429d857 100644
@@ -44,10 +44,10 @@ index 02d2bd3..429d857 100644
 +  box-shadow: inset 2px 0 0 #e2b54f;
 +}
 diff --git a/public/src/js/pluginDock.js b/public/src/js/pluginDock.js
-index 60f0bd1..ac79b24 100644
+index 60f0bd1..ba3078b 100644
 --- a/public/src/js/pluginDock.js
 +++ b/public/src/js/pluginDock.js
-@@ -120,14 +120,31 @@
+@@ -120,14 +120,35 @@
      render();
    };
  
@@ -61,9 +61,13 @@ index 60f0bd1..ac79b24 100644
 +  const tabUnder = (x, y) => document.elementFromPoint(x, y)?.closest?.(".dockTab") || null;
 +  const dropOn = (targetId) => {
 +    if (!dragging || !targetId || targetId === dragging) return;
-+    const ids = ordered().map((x) => x.id).filter((x) => x !== dragging);
++    // The whole order the meter keeps (plugins in a window of their own
++    // too, so they keep their place), then the tabs it doesn't name.
++    const ids = [...prefs.order, ...ordered().map((x) => x.id).filter((x) => !prefs.order.includes(x))]
++      .filter((x) => x !== dragging);
 +    ids.splice(ids.indexOf(targetId), 0, dragging);
 +    prefs.order = ids;
++    savePrefs();
 +    render();
 +    // Kept by the meter, for Settings' list and the next start.
 +    invoke("plugin_set_order", { order: ids }).catch(() => {});
@@ -81,7 +85,7 @@ index 60f0bd1..ac79b24 100644
      // The plugin's icon (or first letter) in its colour; the name is the
      // tooltip and what a screen reader says.
      const { glyph, hue, letter } = window.A2_PLUGIN_ICON(d.id, d.name);
-@@ -142,24 +159,43 @@
+@@ -142,24 +163,43 @@
      tab.style.setProperty("--mark-hue", String(hue));
      tab.setAttribute("aria-label", d.name);
      tab.title = `${d.name} ${d.version}`;
@@ -140,7 +144,7 @@ index 60f0bd1..ac79b24 100644
      return tab;
    };
  
-@@ -221,6 +257,12 @@
+@@ -221,6 +261,12 @@
    // ones, stopped for the ones gone, tabs shown or hidden.
    const applyLayout = (layout) => {
      const tabs = Array.isArray(layout?.tabs) ? layout.tabs : [];
@@ -243,7 +247,7 @@ index bfb9032..cfe7e9e 100644
          .build()
          .map_err(|e| e.to_string())?;
 diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
-index bb83c21..4aee1d5 100644
+index bb83c21..fe15e1d 100644
 --- a/src-tauri/src/plugins/mod.rs
 +++ b/src-tauri/src/plugins/mod.rs
 @@ -151,7 +151,7 @@ const PLUGIN_SURFACE_COMMANDS: &[&str] = &[
@@ -265,7 +269,7 @@ index bb83c21..4aee1d5 100644
  }
  
  fn view(app: &tauri::AppHandle, host: &PluginHost) -> PluginsView {
-@@ -312,9 +315,39 @@ fn view(app: &tauri::AppHandle, host: &PluginHost) -> PluginsView {
+@@ -312,9 +315,43 @@ fn view(app: &tauri::AppHandle, host: &PluginHost) -> PluginsView {
          hide_unfocused: listed(app, HIDE_UNFOCUSED_KEY),
          own_window: listed(app, dock::OWN_WINDOW_KEY),
          offered_bundled: offered_bundled(app, host),
@@ -283,9 +287,10 @@ index bb83c21..4aee1d5 100644
 +}
 +
 +/// Clicktrough: set the plugins' order (ids, each once); the dock's tabs
-+/// follow at once. Answers what Settings shows.
++/// follow at once, and Settings' list when the dock set it (a tab dragged).
++/// Answers what Settings shows.
 +#[tauri::command]
-+pub fn plugin_set_order(app: tauri::AppHandle, order: Vec<String>) -> Result<PluginsView, String> {
++pub fn plugin_set_order(app: tauri::AppHandle, window: tauri::WebviewWindow, order: Vec<String>) -> Result<PluginsView, String> {
 +    let mut ids: Vec<String> = Vec::new();
 +    for id in order {
 +        if valid_id(&id) && !ids.contains(&id) {
@@ -298,6 +303,9 @@ index bb83c21..4aee1d5 100644
 +    let state = app.try_state::<AppState>().ok_or("no app state")?;
 +    state.settings.set(ORDER_KEY, &serde_json::to_string(&ids).unwrap_or_default());
 +    dock::sync(&app, None);
++    if window.label() != "settings" {
++        let _ = app.emit_to("settings", "plugins-changed", ());
++    }
 +    let host = host(&app)?;
 +    Ok(view(&app, &host))
 +}

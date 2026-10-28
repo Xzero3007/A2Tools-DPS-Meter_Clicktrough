@@ -1,4 +1,4 @@
-From f9f1204ac03ae96dd0e6865b19caf47796f4507b Mon Sep 17 00:00:00 2001
+From 7154ace024ba7f36c7bc3c95e12525a1d85c68db Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Tue, 27 Oct 2026 23:06:32 +0000
 Subject: [PATCH 30/30] Plugin dock: full opacity at a press, and a lock of its
@@ -20,11 +20,11 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_01RahWACwaxzLAcYgwc9jk8C
 ---
  public/plugin-dock.html      |  8 +++++++
- public/src/js/pluginDock.css | 41 ++++++++++++++++++++++++++++++++
+ public/src/js/pluginDock.css | 43 ++++++++++++++++++++++++++++++++++
  public/src/js/pluginDock.js  | 37 +++++++++++++++++++++++++++--
  src-tauri/src/app.rs         | 45 ++++++++++++++++++++++++++++++++++++
  src-tauri/src/plugins/mod.rs |  1 +
- 5 files changed, 130 insertions(+), 2 deletions(-)
+ 5 files changed, 132 insertions(+), 2 deletions(-)
 
 diff --git a/public/plugin-dock.html b/public/plugin-dock.html
 index e28ac07..8e4a083 100644
@@ -46,13 +46,14 @@ index e28ac07..8e4a083 100644
          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3v18h18"/><path d="M7 16V11"/><path d="M12 16V7"/><path d="M17 16v-3"/></svg>
        </button>
 diff --git a/public/src/js/pluginDock.css b/public/src/js/pluginDock.css
-index 429d857..9bbd877 100644
+index 429d857..4c13b77 100644
 --- a/public/src/js/pluginDock.css
 +++ b/public/src/js/pluginDock.css
-@@ -226,4 +226,45 @@ body.dockFolded .dockStage {
- }
+@@ -227,3 +227,46 @@ body.dockFolded .dockStage {
  .dockTabTarget {
    box-shadow: inset 2px 0 0 #e2b54f;
+ }
++
 +/* Clicktrough: full opacity and this window's lock, beside the slider.
 +   Pressed in gold, as the meter's pressed buttons (no blue). */
 +.dockOpaque,
@@ -94,12 +95,12 @@ index 429d857..9bbd877 100644
 +}
 +.dockLock[aria-pressed="true"] .dockLockShut {
 +  display: inline;
- }
++}
 diff --git a/public/src/js/pluginDock.js b/public/src/js/pluginDock.js
-index ac79b24..e10b284 100644
+index ba3078b..6d42e4d 100644
 --- a/public/src/js/pluginDock.js
 +++ b/public/src/js/pluginDock.js
-@@ -369,16 +369,49 @@
+@@ -373,16 +373,49 @@
      invoke("open_settings_at", { section: "plugins" }).catch(() => {});
    });
  
@@ -229,7 +230,7 @@ index 4e88664..92b2715 100644
              crate::plugins::widgets::plugin_widget_resize,
              open_settings_at,
 diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
-index 4aee1d5..1fa7961 100644
+index fe15e1d..c3aac31 100644
 --- a/src-tauri/src/plugins/mod.rs
 +++ b/src-tauri/src/plugins/mod.rs
 @@ -152,6 +152,7 @@ const PLUGIN_SURFACE_COMMANDS: &[&str] = &[
