@@ -1,7 +1,7 @@
-From 878cff997b94512d567835faabbdd0c19b4a7b50 Mon Sep 17 00:00:00 2001
+From 925a5146472ecc10d238d1fa28f1aa361c5524ec Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Sat, 24 Oct 2026 22:44:44 +0000
-Subject: [PATCH 16/31] Plugins: JSON from a listed web service (a2.web.get,
+Subject: [PATCH 16/32] Plugins: JSON from a listed web service (a2.web.get,
  web:<host>)
 
 A plugin's page has no network at all, and some data plugins want is
@@ -69,7 +69,7 @@ index 7987f66..83faa6c 100644
          return t("settings.plugins.permDecoder", "Read your own game data: {name}", { name: permission.slice(8) });
        }
 diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
-index 8757640..08f324e 100644
+index 36eb937..3bff608 100644
 --- a/src-tauri/src/app.rs
 +++ b/src-tauri/src/app.rs
 @@ -4441,6 +4441,7 @@ pub fn run() {
@@ -106,7 +106,7 @@ index ca59ae0..da6693d 100644
      // Meter 2.0.72 on: the server's Abyss siege (artifact holders, cores).
      abyssSiege: (server) => call("abyssSiege", [Number(server)]),
 diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
-index 5f9c48c..a052e69 100644
+index 5d29519..0388ab6 100644
 --- a/src-tauri/src/plugins/mod.rs
 +++ b/src-tauri/src/plugins/mod.rs
 @@ -1277,9 +1277,10 @@ fn describe_permission(t: &PromptTexts, permission: &str) -> String {
@@ -305,7 +305,7 @@ index 5f9c48c..a052e69 100644
  #[tauri::command]
  pub fn plugin_storage_get(app: tauri::AppHandle, window: tauri::WebviewWindow, plugin: Option<String>, key: String) -> Result<Option<String>, String> {
      let id = window_plugin(&window, plugin.as_deref())?;
-@@ -2495,7 +2671,49 @@ mod tests {
+@@ -2509,7 +2685,49 @@ mod tests {
          }
      }
  

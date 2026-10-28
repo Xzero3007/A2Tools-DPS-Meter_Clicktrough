@@ -1,7 +1,7 @@
-From 6385d46d597355867ee2cdf273d88a195866a229 Mon Sep 17 00:00:00 2001
+From f19344fb517e302ab545653150bebf84996602f5 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Sat, 24 Oct 2026 14:16:36 +0000
-Subject: [PATCH 11/31] Plugins: a value shared with other plugins (share,
+Subject: [PATCH 11/32] Plugins: a value shared with other plugins (share,
  events:shared)
 
 A plugin with the permission "share" can hand other plugins a value:
@@ -77,7 +77,7 @@ index e31468f..7987f66 100644
          return t("settings.plugins.permDecoder", "Read your own game data: {name}", { name: permission.slice(8) });
        }
 diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
-index 76972e4..e62fed1 100644
+index cbc3ff0..d4bcc82 100644
 --- a/src-tauri/src/app.rs
 +++ b/src-tauri/src/app.rs
 @@ -4395,6 +4395,7 @@ pub fn run() {
@@ -113,7 +113,7 @@ index 2d5f5c0..2f638f4 100644
      // Meter 2.0.72 on: the server's Abyss siege (artifact holders, cores).
      abyssSiege: (server) => call("abyssSiege", [Number(server)]),
 diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
-index 25accef..5ce0b9d 100644
+index 9c6e1a4..93602a2 100644
 --- a/src-tauri/src/plugins/mod.rs
 +++ b/src-tauri/src/plugins/mod.rs
 @@ -408,6 +408,40 @@ pub struct PluginHost {

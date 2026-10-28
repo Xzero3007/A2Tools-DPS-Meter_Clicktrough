@@ -1,0 +1,343 @@
+From 4260510e91b3d4a44d70875bb805cc23b4d7da79 Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Wed, 28 Oct 2026 11:39:37 +0000
+Subject: [PATCH 32/32] Plugins: NC's character pages and the game's icons
+ (Armory)
+
+a2.web.get may read NC's character pages (aion2.plaync.com/api/character/:
+a character's profile, stats, gear, skills, Daevanion boards) and its
+character search (api-search.plaync.com/aion2global/search/), read only.
+The new a2.web.image hands a plugin a picture from the game's icon server
+(assets.playnccdn.com) or NC's character portraits (profileimg.plaync.com)
+as a data: URL, since a plugin's page loads nothing itself. Each host needs
+the permission web:<host>; net_guard lists the four places.
+---
+ public/src/js/pluginFrame.js |   7 ++
+ src-tauri/src/app.rs         |   1 +
+ src-tauri/src/net_guard.rs   |  17 +++-
+ src-tauri/src/plugins/a2.js  |  14 ++-
+ src-tauri/src/plugins/mod.rs | 159 +++++++++++++++++++++++++++++++++--
+ 5 files changed, 187 insertions(+), 11 deletions(-)
+
+diff --git a/public/src/js/pluginFrame.js b/public/src/js/pluginFrame.js
+index 682be24..b072afd 100644
+--- a/public/src/js/pluginFrame.js
++++ b/public/src/js/pluginFrame.js
+@@ -175,6 +175,13 @@
+         if (!allowed(`web:${host}`)) throw new Error(`the plugin lacks the "web:${host}" permission`);
+         return call("plugin_web_get", { url: String(url) });
+       },
++      // Clicktrough: a picture from a server the meter lists (plugins::IMAGE_HOSTS),
++      // as a data: URL, with the permission "web:<host>" (checked by the meter).
++      "web.image": ([url]) => {
++        const host = String(url).replace(/^https:\/\//, "").split(/[/?#]/)[0];
++        if (!allowed(`web:${host}`)) throw new Error(`the plugin lacks the "web:${host}" permission`);
++        return call("plugin_web_image", { url: String(url) });
++      },
+       // Clicktrough: share a value with plugins allowed to hear it.
+       share: ([value]) => {
+         if (!allowed("share")) throw new Error('the plugin lacks the "share" permission');
+diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
+index fffb15e..a3a14c5 100644
+--- a/src-tauri/src/app.rs
++++ b/src-tauri/src/app.rs
+@@ -4489,6 +4489,7 @@ pub fn run() {
+             crate::plugins::plugin_share,
+             crate::plugins::plugin_file,
+             crate::plugins::plugin_web_get,
++            crate::plugins::plugin_web_image,
+             crate::plugins::plugin_window_size,
+             crate::plugins::plugin_restore_bundled,
+             crate::plugins::plugin_set_order,
+diff --git a/src-tauri/src/net_guard.rs b/src-tauri/src/net_guard.rs
+index 4fd54f8..545084c 100644
+--- a/src-tauri/src/net_guard.rs
++++ b/src-tauri/src/net_guard.rs
+@@ -1,7 +1,8 @@
+ //! Clicktrough: the only places this build's network client reaches.
+ //!
+ //! The meter here downloads and sends nothing else: its own updates (this
+-//! fork's releases), the market prices plugins read (`a2.web.get`), and the
++//! fork's releases), the market prices and NC's character pages plugins read
++//! (`a2.web.get`), the game's icons they show (`a2.web.image`), and the
+ //! world boss and Abyss siege timers players share (a plain download of the
+ //! file; nothing is reported back). Every client is built through `builder`:
+ //! its name lookups answer only for the hosts below, and it follows a
+@@ -27,6 +28,13 @@ const ALLOWED: &[(&str, &str)] = &[
+     // The shared world boss and Abyss siege timers: the files, read only.
+     ("cdn.a2tools.app", "/feeds/boss-timers/"),
+     ("cdn.a2tools.app", "/feeds/abyss-artifacts/"),
++    // NC's character pages and character search, read only (the Armory
++    // plugin, a2.web.get), and the game's icons and character portraits
++    // (a2.web.image).
++    ("aion2.plaync.com", "/api/character/"),
++    ("api-search.plaync.com", "/aion2global/search/"),
++    ("assets.playnccdn.com", "/static-aion2-gamedata/resources/"),
++    ("profileimg.plaync.com", "/game_profile_images/"),
+ ];
+ 
+ /// Whether `url` is one of the places above: https, no port, user or
+@@ -123,6 +131,10 @@ mod tests {
+             "https://aion2.exchange/api/items?server=12305",
+             "https://cdn.a2tools.app/feeds/boss-timers/2001.json",
+             "https://cdn.a2tools.app/feeds/abyss-artifacts/2001.json",
++            "https://aion2.plaync.com/api/character/equipment?lang=en-US&region=eu&serverId=2305&characterId=Qh%3D",
++            "https://api-search.plaync.com/aion2global/search/v2/character?keyword=a&region=eu",
++            "https://assets.playnccdn.com/static-aion2-gamedata/resources/Icon_WP_BW_0041_T06.png",
++            "https://profileimg.plaync.com/game_profile_images/aion2global/images?gameServerKey=2305&charKey=1",
+         ] {
+             assert!(allowed(ok), "{ok}");
+         }
+@@ -140,6 +152,9 @@ mod tests {
+             "https://aion2.exchange:8443/api",
+             "https://aion2.exchange.evil.example/api",
+             "https://discord.gg/x",
++            "https://aion2.plaync.com/api/account/info",
++            "https://aion2.plaync.com/en-us/characters/index",
++            "https://assets.playnccdn.com/other/x.png",
+             "wss://a2tools.app/api/boss-timers/live?server=2001",
+         ] {
+             assert!(!allowed(bad), "{bad}");
+diff --git a/src-tauri/src/plugins/a2.js b/src-tauri/src/plugins/a2.js
+index 985c5c5..9f63739 100644
+--- a/src-tauri/src/plugins/a2.js
++++ b/src-tauri/src/plugins/a2.js
+@@ -68,7 +68,13 @@
+ //                                              service the meter lists (aion2.exchange; the fork's
+ //                                              price copy on raw.githubusercontent.com), with the
+ //                                              permission "web:<host>"; null for "not found"; one
+-//                                              address is read at most once a minute
++//                                              address is read at most once a minute; also NC's
++//                                              character pages (aion2.plaync.com/api/character/,
++//                                              api-search.plaync.com/aion2global/search/)
++//   await a2.web.image(url)                    Clicktrough: a picture from the game's icon server
++//                                              (assets.playnccdn.com) or NC's character portraits
++//                                              (profileimg.plaync.com) as a data: URL for an <img>,
++//                                              with the permission "web:<host>"
+ //
+ // Keep the page's background transparent: the window paints the panel at the
+ // opacity the user picks.
+@@ -231,7 +237,11 @@
+     // Clicktrough: a value for other plugins (permission "share").
+     share: (value) => call("share", [value ?? null]),
+     // Clicktrough: JSON from a web service the meter lists.
+-    web: Object.freeze({ get: (url) => call("web.get", [String(url)]) }),
++    web: Object.freeze({
++      get: (url) => call("web.get", [String(url)]),
++      // Clicktrough: a picture from a server the meter lists, as a data: URL.
++      image: (url) => call("web.image", [String(url)]),
++    }),
+     bossTimers: (server) => call("bossTimers", [Number(server)]),
+     // Meter 2.0.72 on: the server's Abyss siege (artifact holders, cores).
+     abyssSiege: (server) => call("abyssSiege", [Number(server)]),
+diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
+index 5200a0d..46a4824 100644
+--- a/src-tauri/src/plugins/mod.rs
++++ b/src-tauri/src/plugins/mod.rs
+@@ -149,9 +149,9 @@ const PLUGIN_SURFACE_COMMANDS: &[&str] = &[
+     "plugin_widget_hello", "plugin_widget_open", "plugin_widget_place", "plugin_widget_post",
+     "plugin_widget_send", "plugin_widget_where", "plugin_widgets_lock", "plugin_widgets_locked",
+     "plugin_window", "plugin_window_fit", "set_meter_shown", "start_tool_drag",
+-    // Clicktrough's plugin calls: a2.share, a2.file, a2.web.get, the window
+-    // sizes, a widget's files and corners, and locked windows' buttons.
+-    "plugin_share", "plugin_file", "plugin_web_get", "plugin_window_size", "plugin_set_order",
++    // Clicktrough's plugin calls: a2.share, a2.file, a2.web.get and .image,
++    // the window sizes, a widget's files and corners, and locked windows' buttons.
++    "plugin_share", "plugin_file", "plugin_web_get", "plugin_web_image", "plugin_window_size", "plugin_set_order",
+     "dock_lock_toggle", "dock_lock_state",
+     "plugin_widget_file", "plugin_widget_resize", "set_locked_buttons",
+ ];
+@@ -2442,11 +2442,30 @@ async fn feed_file(_app: &tauri::AppHandle, _feed: &'static str, _server: u32) -
+ ///                   only: its hourly copy of aion2.exchange's prices
+ ///                   (.github/workflows/market-prices.yml), which the
+ ///                   Market plugin reads first
++///   aion2.plaync.com  NC's character pages (the official AION 2 site's
++///                   character info): a character's profile, stats, gear,
++///                   skills and Daevanion boards, read only; the Armory plugin
++///   api-search.plaync.com  NC's character search by name (Global)
+ pub const WEB_HOSTS: &[(&str, &str)] = &[
+     ("aion2.exchange", "/"),
+     ("raw.githubusercontent.com", "/Xzero3007/A2Tools-DPS-Meter_Clicktrough/market-data/"),
++    ("aion2.plaync.com", "/api/character/"),
++    ("api-search.plaync.com", "/aion2global/search/"),
+ ];
+ 
++/// Clicktrough: the picture servers plugins may show images from
++/// (`a2.web.image`), behind the same permission "web:<host>":
++///   assets.playnccdn.com  the game's icons (items, skills, wings), the
++///                   server the meter's own skill icons come from
++///   profileimg.plaync.com  character portraits on NC's character pages
++pub const IMAGE_HOSTS: &[(&str, &str)] = &[
++    ("assets.playnccdn.com", "/static-aion2-gamedata/resources/"),
++    ("profileimg.plaync.com", "/game_profile_images/"),
++];
++
++/// Most bytes an image may have.
++const MAX_WEB_IMAGE: usize = 2 * 1024 * 1024;
++
+ /// Most bytes a web answer may have.
+ const MAX_WEB_ANSWER: usize = 8 * 1024 * 1024;
+ 
+@@ -2454,15 +2473,24 @@ const MAX_WEB_ANSWER: usize = 8 * 1024 * 1024;
+ /// its path, no port, user or password, no way out of the path ("..", or an
+ /// escaped character in it). The permission it needs, "web:<host>".
+ fn web_permission(url: &str) -> Result<String, String> {
+-    let rest = url.strip_prefix("https://").ok_or("only https:// addresses")?;
++    listed_permission(url, WEB_HOSTS).ok_or_else(|| format!("{url:?} is not a web service plugins may read"))
++}
++
++/// The same for a picture (`a2.web.image`): one of `IMAGE_HOSTS`.
++fn image_permission(url: &str) -> Result<String, String> {
++    listed_permission(url, IMAGE_HOSTS).ok_or_else(|| format!("{url:?} is not a picture server plugins may show"))
++}
++
++fn listed_permission(url: &str, hosts: &[(&str, &str)]) -> Option<String> {
++    let rest = url.strip_prefix("https://")?;
+     let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+     let path = rest[authority.len()..].split(['?', '#']).next().unwrap_or("");
+     let path = if path.is_empty() { "/" } else { path };
+-    let listed = WEB_HOSTS.iter().any(|(host, under)| *host == authority && path.starts_with(under));
++    let listed = hosts.iter().any(|(host, under)| *host == authority && path.starts_with(under));
+     if authority.contains(['@', ':']) || !listed || path.contains("..") || path.contains('%') || path.contains('\\') {
+-        return Err(format!("{url:?} is not a web service plugins may read"));
++        return None;
+     }
+-    Ok(format!("web:{authority}"))
++    Some(format!("web:{authority}"))
+ }
+ 
+ /// Clicktrough: `a2.web.get(url)`: a JSON answer from one of `WEB_HOSTS`
+@@ -2476,6 +2504,76 @@ pub async fn plugin_web_get(app: tauri::AppHandle, window: tauri::WebviewWindow,
+     web_get(&app, &url).await
+ }
+ 
++/// Clicktrough: `a2.web.image(url)`: a picture from one of `IMAGE_HOSTS`
++/// (permission "web:<host>") as a data: URL for an <img>, since a plugin's
++/// page loads nothing from the network itself. Pictures are kept for the
++/// meter's run (up to 800), and the meter fetches at most ten a second.
++#[tauri::command]
++pub async fn plugin_web_image(app: tauri::AppHandle, window: tauri::WebviewWindow, plugin: Option<String>, url: String) -> Result<String, String> {
++    let id = window_plugin(&window, plugin.as_deref())?;
++    require(&app, &id, &image_permission(&url)?)?;
++    web_image(&app, &url).await
++}
++
++/// The kind of picture a server's Content-Type names, among those a page
++/// shows; None for anything else.
++fn picture_kind(content_type: &str) -> Option<&'static str> {
++    let kind = content_type.split(';').next().unwrap_or("").trim().to_ascii_lowercase();
++    ["image/png", "image/webp", "image/jpeg", "image/gif"].into_iter().find(|k| *k == kind)
++}
++
++#[cfg(feature = "net")]
++async fn web_image(app: &tauri::AppHandle, url: &str) -> Result<String, String> {
++    static CACHE: std::sync::OnceLock<Mutex<HashMap<String, String>>> = std::sync::OnceLock::new();
++    static NEXT: std::sync::OnceLock<tokio::sync::Mutex<Instant>> = std::sync::OnceLock::new();
++    let cache = CACHE.get_or_init(Mutex::default);
++    if let Some(hit) = cache.lock().unwrap_or_else(|p| p.into_inner()).get(url) {
++        return Ok(hit.clone());
++    }
++    {
++        let mut next = NEXT.get_or_init(|| tokio::sync::Mutex::new(Instant::now())).lock().await;
++        let now = Instant::now();
++        if *next > now {
++            tokio::time::sleep(*next - now).await;
++        }
++        *next = Instant::now() + Duration::from_millis(100);
++    }
++    let state = app.try_state::<AppState>().ok_or("no app state")?;
++    crate::net_guard::check(url)?;
++    let client = if WEB_OVER_IPV4.load(Ordering::Relaxed) { ipv4_client() } else { &state.http };
++    let res = client.get(url)
++        .header("Accept", "image/webp,image/png,image/*")
++        .header("User-Agent", concat!("A2Tools-DPS-Meter/", env!("CARGO_PKG_VERSION"), " Clicktrough"))
++        .timeout(Duration::from_secs(20))
++        .send().await
++        .map_err(|e| web_error(&e))?;
++    match res.status() {
++        s if s == reqwest::StatusCode::NOT_FOUND => return Err("no such picture".into()),
++        s if !s.is_success() => return Err(format!("the server answered {s}")),
++        _ => {}
++    }
++    let kind = res.headers().get(reqwest::header::CONTENT_TYPE)
++        .and_then(|v| v.to_str().ok())
++        .and_then(picture_kind)
++        .ok_or("not a picture")?;
++    let bytes = res.bytes().await.map_err(|e| web_error(&e))?;
++    if bytes.len() > MAX_WEB_IMAGE {
++        return Err("the picture is too large".into());
++    }
++    let data = format!("data:{kind};base64,{}", base64(&bytes));
++    let mut cache = cache.lock().unwrap_or_else(|p| p.into_inner());
++    if cache.len() >= 800 {
++        cache.clear();
++    }
++    cache.insert(url.to_string(), data.clone());
++    Ok(data)
++}
++
++#[cfg(not(feature = "net"))]
++async fn web_image(_app: &tauri::AppHandle, _url: &str) -> Result<String, String> {
++    Err("this meter is built without network features".into())
++}
++
+ #[cfg(feature = "net")]
+ async fn web_get(app: &tauri::AppHandle, url: &str) -> Result<Value, String> {
+     static CACHE: std::sync::OnceLock<Mutex<HashMap<String, (Instant, Value)>>> = std::sync::OnceLock::new();
+@@ -2924,7 +3022,52 @@ mod tests {
+         }
+     }
+ 
+-    use super::{allowed_from, base64, content_policy, inline_page, inlined_policy, with_meter_fonts, prompt_texts, should_start, take_ready, web_permission};
++    use super::{allowed_from, base64, content_policy, image_permission, inline_page, inlined_policy, picture_kind, with_meter_fonts, prompt_texts, should_start, take_ready, web_permission};
++
++    #[test]
++    fn a_plugin_reads_ncs_character_pages_and_the_game_icons_only() {
++        let id = "QhPFlr9sgZ2je80XMs3YD-Uc796Rmqritz4YOAFu4rA%3D";
++        assert_eq!(
++            web_permission(&format!("https://aion2.plaync.com/api/character/info?lang=en-US&region=eu&serverId=2305&characterId={id}")).as_deref(),
++            Ok("web:aion2.plaync.com")
++        );
++        assert_eq!(
++            web_permission("https://api-search.plaync.com/aion2global/search/v2/character?keyword=Diabolia&region=eu").as_deref(),
++            Ok("web:api-search.plaync.com")
++        );
++        for bad in [
++            "https://aion2.plaync.com/",
++            "https://aion2.plaync.com/api/account/info",
++            "https://aion2.plaync.com/en-us/characters/x",
++            "https://aion2.plaync.com/api/character/../account",
++            "https://api-search.plaync.com/other/search",
++            "https://plaync.com/api/character/info",
++            "https://assets.playnccdn.com/static-aion2-gamedata/resources/Icon_WP_BW_0041_T06.png",
++        ] {
++            assert!(web_permission(bad).is_err(), "{bad}");
++        }
++        assert_eq!(
++            image_permission("https://assets.playnccdn.com/static-aion2-gamedata/resources/Icon_WP_BW_0041_T06.png").as_deref(),
++            Ok("web:assets.playnccdn.com")
++        );
++        assert_eq!(
++            image_permission("https://profileimg.plaync.com/game_profile_images/aion2global/images?gameServerKey=2305&charKey=1").as_deref(),
++            Ok("web:profileimg.plaync.com")
++        );
++        for bad in [
++            "https://assets.playnccdn.com/other/x.png",
++            "https://assets.playnccdn.com/static-aion2-gamedata/resources/../x.png",
++            "http://assets.playnccdn.com/static-aion2-gamedata/resources/x.png",
++            "https://aion2.plaync.com/api/character/info",
++            "https://aion2.exchange/x.png",
++        ] {
++            assert!(image_permission(bad).is_err(), "{bad}");
++        }
++        assert_eq!(picture_kind("image/PNG; charset=binary"), Some("image/png"));
++        assert_eq!(picture_kind("image/webp"), Some("image/webp"));
++        assert_eq!(picture_kind("image/svg+xml"), None);
++        assert_eq!(picture_kind("text/html"), None);
++    }
+ 
+     #[test]
+     fn a_plugin_reads_only_the_listed_web_services_over_https() {
+-- 
+2.43.0
+

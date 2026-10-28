@@ -1,7 +1,7 @@
-From 3b81415fa6c87a7e5db3c194f830dbd41e573edc Mon Sep 17 00:00:00 2001
+From 980c1d42e0926e4062f8e7e650e5f73f59a8cfac Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Tue, 27 Oct 2026 00:51:38 +0000
-Subject: [PATCH 25/31] Nothing sent, no account: the private build, with what
+Subject: [PATCH 25/32] Nothing sent, no account: the private build, with what
  it may download
 
 This build sends nothing to the original's services and asks for no
@@ -132,7 +132,7 @@ index 9fd99ae..b45f7b0 100644
      "dep:futures-util",
      "dep:urlencoding",
 diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
-index 3646027..f8b5d85 100644
+index d44798c..5e6e916 100644
 --- a/src-tauri/src/app.rs
 +++ b/src-tauri/src/app.rs
 @@ -74,7 +74,7 @@ pub struct AppState {
@@ -454,7 +454,7 @@ index 0000000..4fd54f8
 +    }
 +}
 diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
-index 48a6483..68f335b 100644
+index 13dadc8..e92bae4 100644
 --- a/src-tauri/src/plugins/mod.rs
 +++ b/src-tauri/src/plugins/mod.rs
 @@ -2324,18 +2324,21 @@ pub async fn plugin_abyss_siege(app: tauri::AppHandle, window: tauri::WebviewWin
@@ -561,7 +561,7 @@ index 48a6483..68f335b 100644
  async fn web_get(_app: &tauri::AppHandle, _url: &str) -> Result<Value, String> {
      Err("this meter is built without network features".into())
  }
-@@ -2890,7 +2892,7 @@ mod tests {
+@@ -2904,7 +2906,7 @@ mod tests {
  
      /// A failed request says why ("Connection refused"), not only reqwest's
      /// "error sending request for url (...)".

@@ -1,7 +1,7 @@
-From 8f8d6f78ee9a7096168d7f87f9d12cdc4f3a0977 Mon Sep 17 00:00:00 2001
+From 8d52b73b9efb840d0d63fe7c8bdc3d2757ec5f41 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Tue, 27 Oct 2026 23:04:48 +0000
-Subject: [PATCH 29/31] Plugins: an order the player sets, for the dock's tabs
+Subject: [PATCH 29/32] Plugins: an order the player sets, for the dock's tabs
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
@@ -211,7 +211,7 @@ index e96811c..cb211b6 100644
        window.lucide?.createIcons?.({ root: list });
        refreshBar();
 diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
-index 2ec9658..4e88664 100644
+index aedabe2..50b2864 100644
 --- a/src-tauri/src/app.rs
 +++ b/src-tauri/src/app.rs
 @@ -4448,6 +4448,7 @@ pub fn run() {
@@ -247,7 +247,7 @@ index bfb9032..cfe7e9e 100644
          .build()
          .map_err(|e| e.to_string())?;
 diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
-index bb83c21..fe15e1d 100644
+index 940d676..1740528 100644
 --- a/src-tauri/src/plugins/mod.rs
 +++ b/src-tauri/src/plugins/mod.rs
 @@ -151,7 +151,7 @@ const PLUGIN_SURFACE_COMMANDS: &[&str] = &[

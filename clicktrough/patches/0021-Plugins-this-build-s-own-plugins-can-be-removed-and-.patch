@@ -1,7 +1,7 @@
-From e38a520a3205e528f3d23161c63f3d2c30be41f6 Mon Sep 17 00:00:00 2001
+From bdd43e8ba0d9a99200b6b552c6653f8333ae0ad8 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Mon, 26 Oct 2026 00:41:58 +0000
-Subject: [PATCH 21/31] Plugins: this build's own plugins can be removed, and
+Subject: [PATCH 21/32] Plugins: this build's own plugins can be removed, and
  added again
 
 Settings' Remove did nothing for a plugin this build ships (data/ct-plugins:
@@ -110,7 +110,7 @@ index 83faa6c..49b6e2f 100644
            tag.title = t("settings.plugins.hint", "Plugins loaded here are not reviewed. Only load plugins you trust.");
            tags.push(tag);
 diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
-index a5493d1..3646027 100644
+index eaed11a..d44798c 100644
 --- a/src-tauri/src/app.rs
 +++ b/src-tauri/src/app.rs
 @@ -4443,6 +4443,7 @@ pub fn run() {
@@ -122,7 +122,7 @@ index a5493d1..3646027 100644
              crate::plugins::widgets::plugin_widget_resize,
              open_settings_at,
 diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
-index 604db98..71121ef 100644
+index 30027f1..0e08455 100644
 --- a/src-tauri/src/plugins/mod.rs
 +++ b/src-tauri/src/plugins/mod.rs
 @@ -67,6 +67,9 @@ pub const WINDOWS_KEY: &str = "dpsMeter.pluginWindows";
@@ -305,7 +305,7 @@ index 604db98..71121ef 100644
      let host = host(&app)?;
      host.reload(&app);
      dock::sync(&app, None);
-@@ -2865,6 +2946,7 @@ mod tests {
+@@ -2879,6 +2960,7 @@ mod tests {
              path: String::new(),
              permissions: Vec::new(),
              reviewed: true,

@@ -1,7 +1,7 @@
-From 4c73403282bc455fb991ae781ca05b811f855690 Mon Sep 17 00:00:00 2001
+From d58c6231c30ab722df0f5c0a14aee7cad29ea1ac Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Mon, 26 Oct 2026 06:55:17 +0000
-Subject: [PATCH 22/31] Plugins: every plugin this build ships installs from
+Subject: [PATCH 22/32] Plugins: every plugin this build ships installs from
  Available
 
 The original's plugins the build ships to run where installed could only
@@ -47,7 +47,7 @@ index 49b6e2f..e96811c 100644
            pluginRow({
              id: p.id,
 diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
-index 71121ef..d127f6e 100644
+index 0e08455..cf31262 100644
 --- a/src-tauri/src/plugins/mod.rs
 +++ b/src-tauri/src/plugins/mod.rs
 @@ -70,6 +70,11 @@ pub const DISABLED_KEY: &str = "dpsMeter.pluginsDisabled";

@@ -1,7 +1,7 @@
-From e66669a461e52ce5a9385eece89ff6d7c865bc64 Mon Sep 17 00:00:00 2001
+From 90dadf9e26d06cb13b29c434c326e34e6c2d8860 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Sat, 24 Oct 2026 11:53:44 +0000
-Subject: [PATCH 08/31] Meter: a button that shows or hides the plugin window
+Subject: [PATCH 08/32] Meter: a button that shows or hides the plugin window
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
@@ -105,7 +105,7 @@ index 0000000..9327a0d
 +  else start();
 +})();
 diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
-index d255919..76972e4 100644
+index 479e4f8..cbc3ff0 100644
 --- a/src-tauri/src/app.rs
 +++ b/src-tauri/src/app.rs
 @@ -4399,6 +4399,8 @@ pub fn run() {

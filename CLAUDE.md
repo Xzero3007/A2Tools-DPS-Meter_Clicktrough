@@ -32,8 +32,11 @@ with its own CLAUDE.md: plugin work happens there.
   pop-up asking to sign in or share, no link to a website in any page.
   Downloads allowed (`net_guard.rs`, patch 0025): this repo's releases, the
   market prices (`WEB_HOSTS`), the shared world boss and Abyss siege timer
-  files (cdn.a2tools.app/feeds/, read only), and the game's skill icon server
-  (assets.playnccdn.com, page CSP). The release is the original's private
+  files (cdn.a2tools.app/feeds/, read only), the game's skill icon server
+  (assets.playnccdn.com, page CSP, and `a2.web.image` for plugins), and NC's
+  character pages and search, read only (aion2.plaync.com/api/character/,
+  api-search.plaync.com, profileimg.plaync.com portraits: the Armory plugin,
+  patch 0032; the person's decision, 2026-10-28). The release is the original's private
   build (`--no-default-features --features desktop,net`). Anything else needs
   the person's yes first.
 - **This repo is public. No network analysis goes in here**: no write-ups of

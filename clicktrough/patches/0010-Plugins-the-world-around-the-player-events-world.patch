@@ -1,7 +1,7 @@
-From 7165bd5cda479617f9f35978775c01c841857979 Mon Sep 17 00:00:00 2001
+From aa5539adfb02374f3138809ab75c26c8f25a9c3a Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Sat, 24 Oct 2026 14:14:28 +0000
-Subject: [PATCH 10/31] Plugins: the world around the player (events:world)
+Subject: [PATCH 10/32] Plugins: the world around the player (events:world)
 
 A plugin with the permission "events:world" (a map, a pet tracker) hears
 a2.on("world") at most four times a second, and every two seconds while
@@ -78,7 +78,7 @@ index d5631b6..2d5f5c0 100644
  // Keep the page's background transparent: the window paints the panel at the
  // opacity the user picks.
 diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
-index 6d8f549..25accef 100644
+index 48f219d..9c6e1a4 100644
 --- a/src-tauri/src/plugins/mod.rs
 +++ b/src-tauri/src/plugins/mod.rs
 @@ -17,6 +17,8 @@ pub mod decoder;

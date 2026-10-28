@@ -1,7 +1,7 @@
-From a0393eda50ef2256b497dc77ce00fceb790d06a2 Mon Sep 17 00:00:00 2001
+From 3b33237a87cf2aad40f13c8ab80ff86857b3e8c7 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Sun, 25 Oct 2026 00:35:48 +0000
-Subject: [PATCH 17/31] Plugins: window sizes to switch between, set by the
+Subject: [PATCH 17/32] Plugins: window sizes to switch between, set by the
  player
 
 A plugin's window or the plugin dock could only be resized from its
@@ -318,7 +318,7 @@ index 0000000..398bec2
 +  window.A2_WINDOW_SIZES.refresh = () => groups.forEach(show);
 +})();
 diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
-index 08f324e..a5493d1 100644
+index 3bff608..eaed11a 100644
 --- a/src-tauri/src/app.rs
 +++ b/src-tauri/src/app.rs
 @@ -4442,6 +4442,7 @@ pub fn run() {
@@ -330,7 +330,7 @@ index 08f324e..a5493d1 100644
              crate::plugins::widgets::plugin_widget_resize,
              open_settings_at,
 diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
-index a052e69..1ddfb92 100644
+index 0388ab6..386df81 100644
 --- a/src-tauri/src/plugins/mod.rs
 +++ b/src-tauri/src/plugins/mod.rs
 @@ -1698,6 +1698,25 @@ fn saved_size(app: &tauri::AppHandle, id: &str) -> Option<(f64, f64)> {
@@ -359,7 +359,7 @@ index a052e69..1ddfb92 100644
  /// A plugin window was resized: remember its size, once it has settled, as
  /// `note_moved` does its place. Not while it is being shown, nor a minimized
  /// or hidden window's.
-@@ -2701,6 +2720,19 @@ mod tests {
+@@ -2715,6 +2734,19 @@ mod tests {
          }
      }
  

@@ -1,7 +1,7 @@
-From 7154ace024ba7f36c7bc3c95e12525a1d85c68db Mon Sep 17 00:00:00 2001
+From 39542cee1dc7ac3a89d277c3bbcc29ca5bacb452 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Tue, 27 Oct 2026 23:06:32 +0000
-Subject: [PATCH 30/31] Plugin dock: full opacity at a press, and a lock of its
+Subject: [PATCH 30/32] Plugin dock: full opacity at a press, and a lock of its
  own
 
 Beside the dock's opacity slider, a button makes the dock fully opaque,
@@ -153,7 +153,7 @@ index ba3078b..6d42e4d 100644
      await loadText(hello.language || "en");
      applyTheme(hello.theme);
 diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
-index 4e88664..92b2715 100644
+index 50b2864..fffb15e 100644
 --- a/src-tauri/src/app.rs
 +++ b/src-tauri/src/app.rs
 @@ -435,6 +435,40 @@ fn other_window_ignores(label: &str, screenshot: bool, all_locked: bool) -> Opti
@@ -230,7 +230,7 @@ index 4e88664..92b2715 100644
              crate::plugins::widgets::plugin_widget_resize,
              open_settings_at,
 diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
-index fe15e1d..c3aac31 100644
+index 1740528..5200a0d 100644
 --- a/src-tauri/src/plugins/mod.rs
 +++ b/src-tauri/src/plugins/mod.rs
 @@ -152,6 +152,7 @@ const PLUGIN_SURFACE_COMMANDS: &[&str] = &[

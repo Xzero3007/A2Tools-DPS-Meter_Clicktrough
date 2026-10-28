@@ -1,7 +1,7 @@
-From a067645b5801616f4f9a1707878a77d7d74b1889 Mon Sep 17 00:00:00 2001
+From 15528539ad08bab146e204b1951c4eb535d830a6 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Tue, 27 Oct 2026 22:44:15 +0000
-Subject: [PATCH 27/31] Odyle energy: never another character's shown as live
+Subject: [PATCH 27/32] Odyle energy: never another character's shown as live
 
 After switching to a twink the meter's title showed the last character's
 Odyle energy (390 (+50)) as live while the game said 0. The window kept the
@@ -54,7 +54,7 @@ index 5fa5ddb..43889f2 100644
      if (!this.showOdyle || !isEnergy(shown)) {
        el.classList.remove("isVisible");
 diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
-index f8b5d85..2ec9658 100644
+index 5e6e916..aedabe2 100644
 --- a/src-tauri/src/app.rs
 +++ b/src-tauri/src/app.rs
 @@ -4120,6 +4120,11 @@ pub fn run() {
@@ -70,7 +70,7 @@ index f8b5d85..2ec9658 100644
  
                          // --- Hide while AION2 is closed, or while solo (every 2 s) ---
 diff --git a/src-tauri/src/capture/stream_processor.rs b/src-tauri/src/capture/stream_processor.rs
-index 33e1ec1..f50f65d 100644
+index 7d40dba..1b9d6a7 100644
 --- a/src-tauri/src/capture/stream_processor.rs
 +++ b/src-tauri/src/capture/stream_processor.rs
 @@ -376,6 +376,15 @@ impl StreamProcessor {
@@ -89,7 +89,7 @@ index 33e1ec1..f50f65d 100644
          // A whole list that doesn't read still says a character logged in:
          // the last one's counts go, with nothing in their place.
          if entries.is_some() || whole_list {
-@@ -2345,7 +2354,8 @@ fn odyle_energy_in(entries: &[ContentEntry]) -> Option<(u32, u32)> {
+@@ -2334,7 +2343,8 @@ fn odyle_energy_in(entries: &[ContentEntry]) -> Option<(u32, u32)> {
  fn odyle_energy_in_list(body: &[u8]) -> Option<(u32, u32)> {
      let id = ODYLE_ID.to_le_bytes();
      (0..body.len())
@@ -99,7 +99,7 @@ index 33e1ec1..f50f65d 100644
          .find_map(|i| match content_entry_at(body, i)?.0 {
              Entry::Count(entry) => odyle_energy_in(&[entry]),
              Entry::Time(..) => None,
-@@ -4710,6 +4720,24 @@ mod tests {
+@@ -4738,6 +4748,24 @@ mod tests {
          assert_eq!(storage.odyle_energy(), Some((0, 1995)));
      }
  

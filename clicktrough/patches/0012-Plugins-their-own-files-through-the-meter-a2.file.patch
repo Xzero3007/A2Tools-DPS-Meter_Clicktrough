@@ -1,7 +1,7 @@
-From a23bf8ad99919a29eba450c246275eac32a3c812 Mon Sep 17 00:00:00 2001
+From 731b5c20548dc5d2c215f281ac07afbf29dbeb07 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Sat, 24 Oct 2026 17:16:33 +0000
-Subject: [PATCH 12/31] Plugins: their own files through the meter (a2.file)
+Subject: [PATCH 12/32] Plugins: their own files through the meter (a2.file)
 
 WebKitGTK 2.54 refuses every file a sandboxed plugin frame asks for from
 the plugin scheme; the meter inlines what a page names at the start, but
@@ -50,7 +50,7 @@ index ebc858a..a6f8d8e 100644
  
    window.addEventListener("message", async (event) => {
 diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
-index e62fed1..1f43339 100644
+index d4bcc82..a17fa48 100644
 --- a/src-tauri/src/app.rs
 +++ b/src-tauri/src/app.rs
 @@ -4396,6 +4396,8 @@ pub fn run() {
@@ -86,7 +86,7 @@ index 2f638f4..5cd33f1 100644
      share: (value) => call("share", [value ?? null]),
      bossTimers: (server) => call("bossTimers", [Number(server)]),
 diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
-index 5ce0b9d..973c3b3 100644
+index 93602a2..c7bd077 100644
 --- a/src-tauri/src/plugins/mod.rs
 +++ b/src-tauri/src/plugins/mod.rs
 @@ -442,6 +442,51 @@ pub fn plugin_share(app: tauri::AppHandle, window: tauri::WebviewWindow, plugin:
@@ -141,7 +141,7 @@ index 5ce0b9d..973c3b3 100644
  fn with_world<T>(f: impl FnOnce(&mut world::World) -> T) -> T {
      let mut slot = WORLD.lock().unwrap_or_else(|p| p.into_inner());
      f(slot.get_or_insert_with(world::World::default))
-@@ -2450,7 +2495,7 @@ mod tests {
+@@ -2464,7 +2509,7 @@ mod tests {
      }
  
      use super::{allowed_from, base64, content_policy, inline_page, inlined_policy, with_meter_fonts, prompt_texts, should_start, take_ready};
@@ -150,7 +150,7 @@ index 5ce0b9d..973c3b3 100644
      use std::collections::{HashMap, HashSet};
      use std::time::{Duration, Instant};
  
-@@ -2602,6 +2647,24 @@ mod tests {
+@@ -2616,6 +2661,24 @@ mod tests {
          let _ = std::fs::remove_dir_all(&dir);
      }
  

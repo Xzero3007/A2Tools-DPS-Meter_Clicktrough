@@ -1,7 +1,7 @@
-From 2f768897b914d97b87a5934d57a322b49d41e29d Mon Sep 17 00:00:00 2001
+From 580943e0776bb967bc90d0765dfe94954563bbf9 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Wed, 28 Oct 2026 02:47:45 +0000
-Subject: [PATCH 31/31] Plugin dock: the tab open last opens again
+Subject: [PATCH 31/32] Plugin dock: the tab open last opens again
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
