@@ -1,7 +1,7 @@
-From 3b33237a87cf2aad40f13c8ab80ff86857b3e8c7 Mon Sep 17 00:00:00 2001
+From 278f393013aeed1bd82bac73c9616af5e4977190 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Sun, 25 Oct 2026 00:35:48 +0000
-Subject: [PATCH 17/32] Plugins: window sizes to switch between, set by the
+Subject: [PATCH 17/33] Plugins: window sizes to switch between, set by the
  player
 
 A plugin's window or the plugin dock could only be resized from its
@@ -85,7 +85,7 @@ index 8f52a31..2cd040a 100644
      <script src="/src/js/lockedButtons.js"></script>
    </body>
 diff --git a/public/src/js/pluginDock.js b/public/src/js/pluginDock.js
-index 48c3d10..60f0bd1 100644
+index 71fe6df..2564ecd 100644
 --- a/public/src/js/pluginDock.js
 +++ b/public/src/js/pluginDock.js
 @@ -194,6 +194,16 @@
@@ -105,7 +105,7 @@ index 48c3d10..60f0bd1 100644
      const popOut = panel.querySelector(".dockPanelPopOut");
      setLabel(popOut, t("popOut", "Open in its own window"));
      popOut.addEventListener("click", () => {
-@@ -334,6 +344,7 @@
+@@ -339,6 +349,7 @@
      setLabel(document.querySelector(".pluginSettings"), t("pluginSettings", "Plugin settings"));
      setLabel(document.querySelector(".pluginClose"), t("close", "Hide the dock (the plugins keep running)"));
      applyLayout(hello);
@@ -169,7 +169,7 @@ index c5f8b1d..18d8e7c 100644
    position: fixed;
    left: 12px;
 diff --git a/public/src/js/pluginHost.js b/public/src/js/pluginHost.js
-index 395cd85..3feffce 100644
+index 407de0a..c00d854 100644
 --- a/public/src/js/pluginHost.js
 +++ b/public/src/js/pluginHost.js
 @@ -94,6 +94,14 @@
@@ -330,10 +330,10 @@ index 3bff608..eaed11a 100644
              crate::plugins::widgets::plugin_widget_resize,
              open_settings_at,
 diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
-index 0388ab6..386df81 100644
+index 7172808..8d05d12 100644
 --- a/src-tauri/src/plugins/mod.rs
 +++ b/src-tauri/src/plugins/mod.rs
-@@ -1698,6 +1698,25 @@ fn saved_size(app: &tauri::AppHandle, id: &str) -> Option<(f64, f64)> {
+@@ -1728,6 +1728,25 @@ fn saved_size(app: &tauri::AppHandle, id: &str) -> Option<(f64, f64)> {
      (w.is_finite() && h.is_finite() && w >= 120.0 && h >= 120.0).then_some((w.min(2000.0), h.min(1600.0)))
  }
  
@@ -359,7 +359,7 @@ index 0388ab6..386df81 100644
  /// A plugin window was resized: remember its size, once it has settled, as
  /// `note_moved` does its place. Not while it is being shown, nor a minimized
  /// or hidden window's.
-@@ -2715,6 +2734,19 @@ mod tests {
+@@ -2760,6 +2779,19 @@ mod tests {
          }
      }
  

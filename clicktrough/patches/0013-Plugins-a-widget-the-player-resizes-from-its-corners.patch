@@ -1,7 +1,7 @@
-From 903b4f646ca5f812c9f2494a7c6ebea33191ecee Mon Sep 17 00:00:00 2001
+From ecb23fc25ab2ae877153139148373a85f946a2a5 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Sat, 24 Oct 2026 18:35:33 +0000
-Subject: [PATCH 13/32] Plugins: a widget the player resizes from its corners
+Subject: [PATCH 13/33] Plugins: a widget the player resizes from its corners
  (a2.widget.resize)
 
 A widget could only be resized by its plugin opening it again at a new

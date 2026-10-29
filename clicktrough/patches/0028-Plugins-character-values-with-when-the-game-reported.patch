@@ -1,7 +1,7 @@
-From f8dfa4b987b0a49ffb3afa6caf1cd40fd8376277 Mon Sep 17 00:00:00 2001
+From 5d4663724019f70d28c0052a7dc611f6b03dd2bf Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Tue, 27 Oct 2026 23:02:23 +0000
-Subject: [PATCH 28/32] Plugins: character values with when the game reported
+Subject: [PATCH 28/33] Plugins: character values with when the game reported
  them; shops per character
 
 The character event now says when the game last reported each value
@@ -343,10 +343,10 @@ index d658ee2..985c5c5 100644
  //                                              a2.bossTimers gives them (permission
  //                                              "feed:boss-timers", meter 2.0.65 on)
 diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
-index 490340c..940d676 100644
+index d26036d..694db86 100644
 --- a/src-tauri/src/plugins/mod.rs
 +++ b/src-tauri/src/plugins/mod.rs
-@@ -713,6 +713,20 @@ fn character(app: &tauri::AppHandle) -> Option<Value> {
+@@ -721,6 +721,20 @@ fn character(app: &tauri::AppHandle) -> Option<Value> {
              // is as the game last sent it: it counts down only while in use,
              // and the game sends the change. Theirs the same way.
              "contentTimes": Some(list.times).filter(|t| theirs && !t.is_empty()),

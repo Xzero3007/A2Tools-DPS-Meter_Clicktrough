@@ -1,7 +1,7 @@
-From 28b3c6db8bb29e732fde38d1b95b25e38d19a2bd Mon Sep 17 00:00:00 2001
+From e1829e4a8b4a9e289cf5834cbeb16a96379d80b8 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Fri, 23 Oct 2026 11:35:59 +0000
-Subject: [PATCH 03/32] Updates from the Clicktrough fork
+Subject: [PATCH 03/33] Updates from the Clicktrough fork
 
 This build's update check reads the fork's manifest, which its release
 workflow writes for each release of the meter rebuilt with the fork's

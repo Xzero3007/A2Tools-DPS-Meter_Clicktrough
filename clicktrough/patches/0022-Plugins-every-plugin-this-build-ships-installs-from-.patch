@@ -1,7 +1,7 @@
-From d58c6231c30ab722df0f5c0a14aee7cad29ea1ac Mon Sep 17 00:00:00 2001
+From d858c4adbe0bea0c294c7b0114ffb88bf9fdd3d4 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Mon, 26 Oct 2026 06:55:17 +0000
-Subject: [PATCH 22/32] Plugins: every plugin this build ships installs from
+Subject: [PATCH 22/33] Plugins: every plugin this build ships installs from
  Available
 
 The original's plugins the build ships to run where installed could only
@@ -47,7 +47,7 @@ index 49b6e2f..e96811c 100644
            pluginRow({
              id: p.id,
 diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
-index 0e08455..cf31262 100644
+index c4d82c9..ab60f23 100644
 --- a/src-tauri/src/plugins/mod.rs
 +++ b/src-tauri/src/plugins/mod.rs
 @@ -70,6 +70,11 @@ pub const DISABLED_KEY: &str = "dpsMeter.pluginsDisabled";
@@ -62,7 +62,7 @@ index 0e08455..cf31262 100644
  /// Plugins whose windows and widgets hide while AION2 is closed, a JSON
  /// array of ids (Settings → Plugins).
  pub const HIDE_CLOSED_KEY: &str = "dpsMeter.pluginsHideClosed";
-@@ -285,8 +290,9 @@ pub struct PluginsView {
+@@ -291,8 +296,9 @@ pub struct PluginsView {
      pub hide_unfocused: Vec<String>,
      /// Ids of the plugins in a window of their own, not the dock.
      pub own_window: Vec<String>,
@@ -74,7 +74,7 @@ index 0e08455..cf31262 100644
  }
  
  fn view(app: &tauri::AppHandle, host: &PluginHost) -> PluginsView {
-@@ -301,7 +307,7 @@ fn view(app: &tauri::AppHandle, host: &PluginHost) -> PluginsView {
+@@ -307,7 +313,7 @@ fn view(app: &tauri::AppHandle, host: &PluginHost) -> PluginsView {
          hide_closed: hide_closed(app),
          hide_unfocused: listed(app, HIDE_UNFOCUSED_KEY),
          own_window: listed(app, dock::OWN_WINDOW_KEY),
@@ -83,7 +83,7 @@ index 0e08455..cf31262 100644
      }
  }
  
-@@ -311,13 +317,26 @@ fn bundled_removed(app: &tauri::AppHandle) -> Vec<String> {
+@@ -317,13 +323,26 @@ fn bundled_removed(app: &tauri::AppHandle) -> Vec<String> {
  }
  
  fn set_bundled_removed(app: &tauri::AppHandle, id: &str, removed: bool) {
@@ -113,7 +113,7 @@ index 0e08455..cf31262 100644
  }
  
  /// This build's copy of a plugin (data/ct-plugins/<id>), if it has one.
-@@ -337,13 +356,18 @@ fn installed_only(app: &tauri::AppHandle) -> Vec<String> {
+@@ -343,13 +362,18 @@ fn installed_only(app: &tauri::AppHandle) -> Vec<String> {
          .unwrap_or_default()
  }
  
@@ -133,7 +133,7 @@ index 0e08455..cf31262 100644
      let host = host(&app)?;
      host.reload(&app);
      refresh_windows(&app, &host);
-@@ -352,10 +376,23 @@ pub fn plugin_restore_bundled(app: tauri::AppHandle, id: String) -> Result<Plugi
+@@ -358,10 +382,23 @@ pub fn plugin_restore_bundled(app: tauri::AppHandle, id: String) -> Result<Plugi
      Ok(view(&app, &host))
  }
  
@@ -161,7 +161,7 @@ index 0e08455..cf31262 100644
          .filter_map(|id| load_folder(&bundled_dir(app, id)?).ok())
          .map(|l| PluginInfo { reviewed: true, bundled: true, ..info(&l) })
          .collect()
-@@ -774,6 +811,7 @@ impl PluginHost {
+@@ -782,6 +819,7 @@ impl PluginHost {
              .unwrap_or_default();
          let installed_root = plugins_dir(app).ok();
          let removed = bundled_removed(app);
@@ -169,7 +169,7 @@ index 0e08455..cf31262 100644
          let bundled = bundled_root
              .and_then(|dir| std::fs::read_dir(dir).ok())
              .into_iter()
-@@ -784,7 +822,10 @@ impl PluginHost {
+@@ -792,7 +830,10 @@ impl PluginHost {
          for dir in bundled {
              let name = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
              let only_installed = installed_only.iter().any(|id| id == &name);
@@ -181,7 +181,7 @@ index 0e08455..cf31262 100644
                  continue;
              }
              // Removed in Settings: not until added again.
-@@ -1644,8 +1685,12 @@ pub fn plugin_uninstall(app: tauri::AppHandle, id: String) -> Result<PluginsView
+@@ -1674,8 +1715,12 @@ pub fn plugin_uninstall(app: tauri::AppHandle, id: String) -> Result<PluginsView
      }
      // Clicktrough: this build's own copy stays away too, until added again
      // (one that runs only where installed is gone with the installed copy).

@@ -1,7 +1,7 @@
-From aa5539adfb02374f3138809ab75c26c8f25a9c3a Mon Sep 17 00:00:00 2001
+From 525472ced7f4df0763970668af6fd0fba52ddd81 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Sat, 24 Oct 2026 14:14:28 +0000
-Subject: [PATCH 10/32] Plugins: the world around the player (events:world)
+Subject: [PATCH 10/33] Plugins: the world around the player (events:world)
 
 A plugin with the permission "events:world" (a map, a pet tracker) hears
 a2.on("world") at most four times a second, and every two seconds while
@@ -78,7 +78,7 @@ index d5631b6..2d5f5c0 100644
  // Keep the page's background transparent: the window paints the panel at the
  // opacity the user picks.
 diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
-index 48f219d..9c6e1a4 100644
+index 2b2e4dd..8382c31 100644
 --- a/src-tauri/src/plugins/mod.rs
 +++ b/src-tauri/src/plugins/mod.rs
 @@ -17,6 +17,8 @@ pub mod decoder;
@@ -90,7 +90,7 @@ index 48f219d..9c6e1a4 100644
  #[cfg(feature = "online")]
  pub mod boss_live;
  /// Without the network there is nothing to follow.
-@@ -401,6 +403,16 @@ pub struct PluginHost {
+@@ -409,6 +411,16 @@ pub struct PluginHost {
      closed: Mutex<HashSet<String>>,
  }
  
@@ -107,7 +107,7 @@ index 48f219d..9c6e1a4 100644
  impl Default for PluginHost {
      fn default() -> Self {
          let run = std::time::SystemTime::now()
-@@ -640,6 +652,8 @@ impl PluginHost {
+@@ -648,6 +660,8 @@ impl PluginHost {
              }
          }
          let any_decoders = loaded.iter().any(|l| !l.decoders.is_empty());
@@ -116,7 +116,7 @@ index 48f219d..9c6e1a4 100644
          tracing::info!("Plugins: {} loaded (developer mode {})", loaded.len(), if dev { "on" } else { "off" });
          *self.loaded.write().unwrap_or_else(|p| p.into_inner()) = loaded;
          *self.errors.write().unwrap_or_else(|p| p.into_inner()) = errors;
-@@ -673,6 +687,18 @@ impl PluginHost {
+@@ -692,6 +706,18 @@ impl PluginHost {
                          ready
                      };
                      host.flush(&app, ready);
@@ -135,7 +135,7 @@ index 48f219d..9c6e1a4 100644
                      // The character as the meter learns it (a login, a switch,
                      // or the meter starting mid-game): open plugins hear it then,
                      // not only when their window opens.
-@@ -734,8 +760,9 @@ impl PluginHost {
+@@ -753,8 +779,9 @@ impl PluginHost {
                  .ok();
          }
  
@@ -147,7 +147,7 @@ index 48f219d..9c6e1a4 100644
              let host = Arc::clone(self);
              let app = app.clone();
              crate::capture::frame_tap::set(Some(Arc::new(move |packet: &[u8]| host.on_frame(&app, packet))));
-@@ -752,6 +779,16 @@ impl PluginHost {
+@@ -771,6 +798,16 @@ impl PluginHost {
          let at = len as usize;
          let Some(opcode) = packet.get(at..at + 2) else { return };
          let body = &packet[at + 2..];
@@ -164,7 +164,7 @@ index 48f219d..9c6e1a4 100644
          let loaded = self.loaded.read().unwrap_or_else(|p| p.into_inner());
          for plugin in loaded.iter() {
              for d in plugin.decoders.iter().filter(|d| d.opcode == opcode) {
-@@ -1153,6 +1190,7 @@ fn describe_permission(t: &PromptTexts, permission: &str) -> String {
+@@ -1183,6 +1220,7 @@ fn describe_permission(t: &PromptTexts, permission: &str) -> String {
          "widgets" => t.perm_widgets.clone(),
          "events:character" => t.perm_character.clone(),
          "fps" => t.perm_fps.clone(),

@@ -1,7 +1,7 @@
-From 4260510e91b3d4a44d70875bb805cc23b4d7da79 Mon Sep 17 00:00:00 2001
+From 95020c0a6136c330d75c7af1364624d426d6a39b Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Wed, 28 Oct 2026 11:39:37 +0000
-Subject: [PATCH 32/32] Plugins: NC's character pages and the game's icons
+Subject: [PATCH 32/33] Plugins: NC's character pages and the game's icons
  (Armory)
 
 a2.web.get may read NC's character pages (aion2.plaync.com/api/character/:
@@ -131,7 +131,7 @@ index 985c5c5..9f63739 100644
      // Meter 2.0.72 on: the server's Abyss siege (artifact holders, cores).
      abyssSiege: (server) => call("abyssSiege", [Number(server)]),
 diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
-index 5200a0d..46a4824 100644
+index 90d1670..f1ef3b0 100644
 --- a/src-tauri/src/plugins/mod.rs
 +++ b/src-tauri/src/plugins/mod.rs
 @@ -149,9 +149,9 @@ const PLUGIN_SURFACE_COMMANDS: &[&str] = &[
@@ -147,7 +147,7 @@ index 5200a0d..46a4824 100644
      "dock_lock_toggle", "dock_lock_state",
      "plugin_widget_file", "plugin_widget_resize", "set_locked_buttons",
  ];
-@@ -2442,11 +2442,30 @@ async fn feed_file(_app: &tauri::AppHandle, _feed: &'static str, _server: u32) -
+@@ -2487,11 +2487,30 @@ async fn feed_file(_app: &tauri::AppHandle, _feed: &'static str, _server: u32) -
  ///                   only: its hourly copy of aion2.exchange's prices
  ///                   (.github/workflows/market-prices.yml), which the
  ///                   Market plugin reads first
@@ -178,7 +178,7 @@ index 5200a0d..46a4824 100644
  /// Most bytes a web answer may have.
  const MAX_WEB_ANSWER: usize = 8 * 1024 * 1024;
  
-@@ -2454,15 +2473,24 @@ const MAX_WEB_ANSWER: usize = 8 * 1024 * 1024;
+@@ -2499,15 +2518,24 @@ const MAX_WEB_ANSWER: usize = 8 * 1024 * 1024;
  /// its path, no port, user or password, no way out of the path ("..", or an
  /// escaped character in it). The permission it needs, "web:<host>".
  fn web_permission(url: &str) -> Result<String, String> {
@@ -207,7 +207,7 @@ index 5200a0d..46a4824 100644
  }
  
  /// Clicktrough: `a2.web.get(url)`: a JSON answer from one of `WEB_HOSTS`
-@@ -2476,6 +2504,76 @@ pub async fn plugin_web_get(app: tauri::AppHandle, window: tauri::WebviewWindow,
+@@ -2521,6 +2549,76 @@ pub async fn plugin_web_get(app: tauri::AppHandle, window: tauri::WebviewWindow,
      web_get(&app, &url).await
  }
  
@@ -284,7 +284,7 @@ index 5200a0d..46a4824 100644
  #[cfg(feature = "net")]
  async fn web_get(app: &tauri::AppHandle, url: &str) -> Result<Value, String> {
      static CACHE: std::sync::OnceLock<Mutex<HashMap<String, (Instant, Value)>>> = std::sync::OnceLock::new();
-@@ -2924,7 +3022,52 @@ mod tests {
+@@ -2969,7 +3067,52 @@ mod tests {
          }
      }
  

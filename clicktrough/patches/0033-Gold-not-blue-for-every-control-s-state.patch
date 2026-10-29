@@ -1,0 +1,516 @@
+From 3a49561a658db5c8a520330bda44a3ee7861e52d Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Thu, 29 Oct 2026 14:51:14 +0000
+Subject: [PATCH 33/33] Gold, not blue, for every control's state
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The Settings colours get a new choice, Gold, and it is the default: the
+window as it always was, with a gold accent for its switches, ticks,
+sliders, buttons and selected section. Plugins take that accent (the
+kept plugin theme moves to a new key, so a blue one from before is not
+used). In the meter's windows the Details switches, the History tabs and
+links, a skill's active spec, focus rings and the scrollbar are gold, and
+the update window's Notes button is grey. Meter Theme stays a choice.
+
+The plugins' marks (dock tabs, Settings → Plugins) leave the blues out:
+Mantra Watch's turns pink, this build's own plugins get icons of their
+own, and a colour made from a plugin's id skips the blue range.
+---
+ public/src/js/core.js         |  7 ++--
+ public/src/js/pluginDock.css  | 10 +++---
+ public/src/js/pluginHost.css  |  2 +-
+ public/src/js/pluginIcons.js  | 13 ++++++--
+ src-tauri/src/plugins/a2.js   |  4 +--
+ src-tauri/src/plugins/mod.rs  |  8 +++--
+ src/data/i18n/ui/de.json      |  1 +
+ src/data/i18n/ui/en.json      |  1 +
+ src/data/i18n/ui/es.json      |  1 +
+ src/data/i18n/ui/fr.json      |  1 +
+ src/data/i18n/ui/ja.json      |  1 +
+ src/data/i18n/ui/ko.json      |  1 +
+ src/data/i18n/ui/pt.json      |  1 +
+ src/data/i18n/ui/ru.json      |  1 +
+ src/data/i18n/ui/zh-Hans.json |  1 +
+ src/data/i18n/ui/zh-Hant.json |  1 +
+ src/styles.css                | 62 +++++++++++++++++++++--------------
+ 17 files changed, 76 insertions(+), 40 deletions(-)
+
+diff --git a/public/src/js/core.js b/public/src/js/core.js
+index 43889f2..dfec46b 100644
+--- a/public/src/js/core.js
++++ b/public/src/js/core.js
+@@ -14,8 +14,9 @@ const SETTING_CHOICES = {
+   discordStat: { allowed: ["combatPower", "gearScore", "off"], fallback: "off" },
+   // A pattern over the meter's bars: a supporter's perk (applyBarTexture).
+   // The Settings window's own colours (styles.css, data-settings-theme):
++  // "gold" is Clicktrough's own and the default (no blue in its UI);
+   // "meter" keeps the meter theme's accent.
+-  settingsTheme: { allowed: ["meter", "midnight", "graphite", "violet", "forest", "crimson", "ocean", "sapphire", "indigo", "rose", "sunset", "amber", "copper", "lime", "ice", "slate", "onyx"], fallback: "meter" },
++  settingsTheme: { allowed: ["gold", "meter", "midnight", "graphite", "violet", "forest", "crimson", "ocean", "sapphire", "indigo", "rose", "sunset", "amber", "copper", "lime", "ice", "slate", "onyx"], fallback: "gold" },
+   // The meter's font (styles.css, data-font): "meter" is its own (#98).
+   font: { allowed: ["meter", "system", "inter", "exo2", "oxanium", "jetbrains", "atkinson", "lexend", "andika"], fallback: "meter" },
+   barTexture: { allowed: ["none", "flames", "crystal", "glacier", "feathers", "wing", "storm", "nebula", "galaxy", "aura"], fallback: "none" },
+@@ -2883,7 +2884,7 @@ class DpsApp {
+     this.settingsSelections = {
+       language: "en",
+       theme: this.theme,
+-      settingsTheme: "meter",
++      settingsTheme: "gold",
+       font: "meter",
+       defaultMeterMode: "bossTargets",
+       allTargetsWindowMs: "120000",
+@@ -5644,7 +5645,7 @@ class DpsApp {
+       const theme = {
+         bg,
+         panel: read("--settings-nav-bg") || bg,
+-        accent: read("--settings-accent") || read("--isUser-fill") || "#8fc2ff",
++        accent: read("--settings-accent") || read("--isUser-fill") || "#e0a526",
+       };
+       window.__TAURI__?.core?.invoke?.("set_plugin_theme", { theme })?.catch?.(() => {});
+     }, 0);
+diff --git a/public/src/js/pluginDock.css b/public/src/js/pluginDock.css
+index 4c13b77..87662cb 100644
+--- a/public/src/js/pluginDock.css
++++ b/public/src/js/pluginDock.css
+@@ -34,7 +34,7 @@
+   border-bottom: 2px solid transparent;
+   border-radius: 6px 6px 0 0;
+   background: none;
+-  color: hsl(var(--mark-hue, 210) 60% 62% / 0.55);
++  color: hsl(var(--mark-hue, 45) 60% 62% / 0.55);
+   font: 600 13px/1 inherit;
+   cursor: pointer;
+   transition: color 120ms ease, background-color 120ms ease;
+@@ -45,17 +45,17 @@
+ }
+ .dockTab:hover,
+ .dockTab:focus-visible {
+-  color: hsl(var(--mark-hue, 210) 75% 68%);
++  color: hsl(var(--mark-hue, 45) 75% 68%);
+   background: rgba(255, 255, 255, 0.05);
+ }
+ .dockTab:focus-visible {
+-  outline: 2px solid var(--theme-accent, #8fc2ff);
++  outline: 2px solid var(--theme-accent, #e0a526);
+   outline-offset: -2px;
+ }
+ .dockTabActive {
+-  color: hsl(var(--mark-hue, 210) 80% 70%);
++  color: hsl(var(--mark-hue, 45) 80% 70%);
+   background: rgba(255, 255, 255, 0.06);
+-  border-bottom-color: var(--theme-accent, #8fc2ff);
++  border-bottom-color: var(--theme-accent, #e0a526);
+ }
+ /* A plugin showing an alert (it asked for its window to fit one). */
+ .dockTabAlert::after {
+diff --git a/public/src/js/pluginHost.css b/public/src/js/pluginHost.css
+index 18d8e7c..a477793 100644
+--- a/public/src/js/pluginHost.css
++++ b/public/src/js/pluginHost.css
+@@ -95,7 +95,7 @@ body {
+   width: 64px;
+   height: 14px;
+   margin: 0;
+-  accent-color: var(--theme-accent, #8fc2ff);
++  accent-color: var(--theme-accent, #e0a526);
+   opacity: 0.6;
+   cursor: pointer;
+ }
+diff --git a/public/src/js/pluginIcons.js b/public/src/js/pluginIcons.js
+index 1cf7761..d33ef70 100644
+--- a/public/src/js/pluginIcons.js
++++ b/public/src/js/pluginIcons.js
+@@ -8,10 +8,16 @@ window.A2_PLUGIN_ICONS = Object.freeze({
+   cooldowns: ["hourglass", 265],
+   checklist: ["list-checks", 185],
+   "heal-alert": ["heart-pulse", 350],
+-  "mantra-watch": ["orbit", 215],
++  // Clicktrough: no blue (it was 215).
++  "mantra-watch": ["orbit", 320],
+   "hidden-cubes": ["box", 300],
+   // Calls a boss's mechanics out loud; yellow, as its callout text.
+   "boss-telegraph": ["megaphone", 75],
++  // Clicktrough's own plugins.
++  "pet-finder": ["paw-print", 25],
++  market: ["coins", 105],
++  map: ["map", 155],
++  armory: ["shield", 290],
+ });
+ 
+ // A plugin's glyph (a Lucide name) or null, and its hue.
+@@ -19,5 +25,8 @@ window.A2_PLUGIN_ICON = (id, name) => {
+   let hash = 0;
+   for (const ch of String(id)) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+   const [glyph, hue] = window.A2_PLUGIN_ICONS[id] || [];
+-  return { glyph: glyph || null, hue: hue ?? hash % 360, letter: (String(name || id).trim()[0] || "?").toUpperCase() };
++  // Clicktrough: a colour from the id skips the blues (190 to 254).
++  let fromId = hash % 360;
++  if (fromId >= 190 && fromId < 255) fromId += 70;
++  return { glyph: glyph || null, hue: hue ?? fromId, letter: (String(name || id).trim()[0] || "?").toUpperCase() };
+ };
+diff --git a/src-tauri/src/plugins/a2.js b/src-tauri/src/plugins/a2.js
+index 9f63739..50301c2 100644
+--- a/src-tauri/src/plugins/a2.js
++++ b/src-tauri/src/plugins/a2.js
+@@ -151,7 +151,7 @@
+        and the window's opacity slider did nothing. */
+     :where(select, input, textarea, progress) { color-scheme: dark; }
+     :where(input[type="checkbox"], input[type="radio"], input[type="range"], progress) {
+-      accent-color: var(--a2-accent, #8fc2ff);
++      accent-color: var(--a2-accent, #e0a526);
+     }
+     :where(select) {
+       appearance: none;
+@@ -168,7 +168,7 @@
+       transition: border-color 120ms ease, background-color 120ms ease;
+     }
+     :where(select):hover { border-color: rgba(255, 255, 255, 0.3); background-color: rgba(255, 255, 255, 0.09); }
+-    :where(select):focus-visible { outline: 2px solid var(--a2-accent, #8fc2ff); outline-offset: 1px; }
++    :where(select):focus-visible { outline: 2px solid var(--a2-accent, #e0a526); outline-offset: 1px; }
+     :where(select):disabled { opacity: 0.5; cursor: default; }
+     :where(select option, select optgroup) { background: var(--a2-panel, #0e1420); color: #fff; }
+     /* A quiet scrollbar: thin, no track, brighter only while in use. Before
+diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
+index f1ef3b0..2ac8a99 100644
+--- a/src-tauri/src/plugins/mod.rs
++++ b/src-tauri/src/plugins/mod.rs
+@@ -2331,8 +2331,10 @@ fn window_shown(app: &tauri::AppHandle, id: &str) -> bool {
+     windows.get(id).and_then(Value::as_str) != Some("hidden")
+ }
+ 
+-/// Where the Settings colours plugin windows take are kept.
+-const THEME_KEY: &str = "dpsMeter.pluginTheme";
++/// Where the Settings colours plugin windows take are kept. Clicktrough: a
++/// new key with the gold default, so a blue one kept from before is not used
++/// (until Settings opens and says again, plugins have the gold).
++const THEME_KEY: &str = "dpsMeter.pluginTheme.ct";
+ 
+ /// The Settings colours for plugin windows, `{bg, panel, accent}` as
+ /// `#rrggbb` (the Settings window reads them, `sharePluginTheme`), or the
+@@ -2342,7 +2344,7 @@ fn plugin_theme(app: &tauri::AppHandle) -> Value {
+         .and_then(|s| s.settings.get(THEME_KEY))
+         .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+         .and_then(|t| clean_theme(&t))
+-        .unwrap_or_else(|| serde_json::json!({ "bg": "#0a0e16", "panel": "#0a0e16", "accent": "#8fc2ff" }))
++        .unwrap_or_else(|| serde_json::json!({ "bg": "#0a0e16", "panel": "#0a0e16", "accent": "#e0a526" }))
+ }
+ 
+ /// A theme with exactly its three colours, each `#rrggbb`; None otherwise.
+diff --git a/src/data/i18n/ui/de.json b/src/data/i18n/ui/de.json
+index 6dbae53..5960b04 100644
+--- a/src/data/i18n/ui/de.json
++++ b/src/data/i18n/ui/de.json
+@@ -385,6 +385,7 @@
+       "label": "Farben der Einstellungen",
+       "tip": "Die Farben dieses Einstellungsfensters. Das Meter behält sein eigenes Farbschema.",
+       "options": {
++        "gold": "Gold",
+         "meter": "Meter-Farbschema",
+         "midnight": "Mitternacht",
+         "graphite": "Graphit",
+diff --git a/src/data/i18n/ui/en.json b/src/data/i18n/ui/en.json
+index e219355..0b7b1eb 100644
+--- a/src/data/i18n/ui/en.json
++++ b/src/data/i18n/ui/en.json
+@@ -395,6 +395,7 @@
+       "label": "Settings colours",
+       "tip": "The colours of this Settings window. The meter keeps its own theme.",
+       "options": {
++        "gold": "Gold",
+         "meter": "Meter theme",
+         "midnight": "Midnight",
+         "graphite": "Graphite",
+diff --git a/src/data/i18n/ui/es.json b/src/data/i18n/ui/es.json
+index 3ec2727..01bd5cc 100644
+--- a/src/data/i18n/ui/es.json
++++ b/src/data/i18n/ui/es.json
+@@ -385,6 +385,7 @@
+       "label": "Colores de los ajustes",
+       "tip": "Los colores de esta ventana de ajustes. El medidor conserva su propio tema.",
+       "options": {
++        "gold": "Oro",
+         "meter": "Tema del medidor",
+         "midnight": "Medianoche",
+         "graphite": "Grafito",
+diff --git a/src/data/i18n/ui/fr.json b/src/data/i18n/ui/fr.json
+index 3c9de3b..e75e1bf 100644
+--- a/src/data/i18n/ui/fr.json
++++ b/src/data/i18n/ui/fr.json
+@@ -385,6 +385,7 @@
+       "label": "Couleurs des paramètres",
+       "tip": "Les couleurs de cette fenêtre de paramètres. Le compteur garde son propre thème.",
+       "options": {
++        "gold": "Or",
+         "meter": "Thème du compteur",
+         "midnight": "Minuit",
+         "graphite": "Graphite",
+diff --git a/src/data/i18n/ui/ja.json b/src/data/i18n/ui/ja.json
+index b939734..ca013e9 100644
+--- a/src/data/i18n/ui/ja.json
++++ b/src/data/i18n/ui/ja.json
+@@ -385,6 +385,7 @@
+       "label": "設定画面の色",
+       "tip": "この設定ウィンドウの色です。メーターは自身のテーマのままです。",
+       "options": {
++        "gold": "ゴールド",
+         "meter": "メーターのテーマ",
+         "midnight": "ミッドナイト",
+         "graphite": "グラファイト",
+diff --git a/src/data/i18n/ui/ko.json b/src/data/i18n/ui/ko.json
+index efdac92..5bdeb11 100644
+--- a/src/data/i18n/ui/ko.json
++++ b/src/data/i18n/ui/ko.json
+@@ -390,6 +390,7 @@
+       "label": "설정 창 색상",
+       "tip": "이 설정 창의 색상입니다. 미터는 자체 테마를 유지합니다.",
+       "options": {
++        "gold": "골드",
+         "meter": "미터 테마",
+         "midnight": "미드나이트",
+         "graphite": "그래파이트",
+diff --git a/src/data/i18n/ui/pt.json b/src/data/i18n/ui/pt.json
+index ea8fff7..f57d3ec 100644
+--- a/src/data/i18n/ui/pt.json
++++ b/src/data/i18n/ui/pt.json
+@@ -385,6 +385,7 @@
+       "label": "Cores das configurações",
+       "tip": "As cores desta janela de configurações. O medidor mantém o próprio tema.",
+       "options": {
++        "gold": "Ouro",
+         "meter": "Tema do medidor",
+         "midnight": "Meia-noite",
+         "graphite": "Grafite",
+diff --git a/src/data/i18n/ui/ru.json b/src/data/i18n/ui/ru.json
+index 991bde7..0878073 100644
+--- a/src/data/i18n/ui/ru.json
++++ b/src/data/i18n/ui/ru.json
+@@ -390,6 +390,7 @@
+       "label": "Цвета настроек",
+       "tip": "Цвета этого окна настроек. Метр сохраняет свою тему.",
+       "options": {
++        "gold": "Золото",
+         "meter": "Тема метра",
+         "midnight": "Полночь",
+         "graphite": "Графит",
+diff --git a/src/data/i18n/ui/zh-Hans.json b/src/data/i18n/ui/zh-Hans.json
+index 9a58b96..25eeaa1 100644
+--- a/src/data/i18n/ui/zh-Hans.json
++++ b/src/data/i18n/ui/zh-Hans.json
+@@ -390,6 +390,7 @@
+       "label": "设置窗口颜色",
+       "tip": "此设置窗口的颜色。计量器保留自己的主题。",
+       "options": {
++        "gold": "金色",
+         "meter": "计量器主题",
+         "midnight": "午夜",
+         "graphite": "石墨",
+diff --git a/src/data/i18n/ui/zh-Hant.json b/src/data/i18n/ui/zh-Hant.json
+index 5793026..de8ac52 100644
+--- a/src/data/i18n/ui/zh-Hant.json
++++ b/src/data/i18n/ui/zh-Hant.json
+@@ -390,6 +390,7 @@
+       "label": "設定視窗顏色",
+       "tip": "此設定視窗的顏色。計量器保留自己的主題。",
+       "options": {
++        "gold": "金色",
+         "meter": "計量器主題",
+         "midnight": "午夜",
+         "graphite": "石墨",
+diff --git a/src/styles.css b/src/styles.css
+index e1a9502..ff768fc 100644
+--- a/src/styles.css
++++ b/src/styles.css
+@@ -11,6 +11,11 @@
+ }
+ 
+ :root {
++  /* Clicktrough: the gold of a control's state (a switch on, the selected
++     tab, a link, a focus ring) in every window of the meter: no blue. */
++  --ct-accent: #e0a526;
++  --ct-accent-light: #f2c46b;
++
+   /* Bars */
+   --row-fill: #5fbf87;
+   --isUser-fill: #6aa6ff;
+@@ -1257,7 +1262,7 @@ body.mainPlayerDpsBold :is(.meter, .barPreviewPanel) .item .content .dps > p {
+   border-color: rgba(255, 255, 255, 0.2);
+ }
+ .footerBtns .footerBtn:focus-visible {
+-  outline: 2px solid var(--isUser-fill);
++  outline: 2px solid var(--ct-accent);
+   outline-offset: 1px;
+ }
+ .footerBtns .collapseBtn {
+@@ -2949,11 +2954,11 @@ body.mainPlayerNamesBold .settingsPanel .themeDropdownMenu .settingsDropdownItem
+   }
+ 
+   .historyNoteLink {
+-    color: #8fc8ff;
++    color: var(--ct-accent-light);
+     text-decoration: underline;
+     cursor: pointer;
+   }
+-  .historyNoteLink:hover { color: #b8dcff; }
++  .historyNoteLink:hover { color: #ffe2a6; }
+ }
+ 
+ .historyDeleteBtn {
+@@ -2999,8 +3004,8 @@ body.mainPlayerNamesBold .settingsPanel .themeDropdownMenu .settingsDropdownItem
+   }
+ 
+   &.active {
+-    color: var(--accent, #7ecfff);
+-    background: rgba(126, 207, 255, 0.1);
++    color: var(--ct-accent-light);
++    background: rgba(224, 165, 38, 0.12);
+   }
+ }
+ 
+@@ -3056,8 +3061,8 @@ body.mainPlayerNamesBold .settingsPanel .themeDropdownMenu .settingsDropdownItem
+   color: rgba(255, 255, 255, 0.85);
+ }
+ .historyViewBtn.active {
+-  color: var(--accent, #7ecfff);
+-  background: rgba(126, 207, 255, 0.14);
++  color: var(--ct-accent-light);
++  background: rgba(224, 165, 38, 0.16);
+ }
+ 
+ /* Grouped-by-boss sections */
+@@ -3669,7 +3674,7 @@ body.mainPlayerNamesBold .settingsPanel .themeDropdownMenu .settingsDropdownItem
+       background: #4caf50;
+     }
+     .updateModalBtn.updateNotesBtn {
+-      background: #2196f3;
++      background: #4a515c;
+     }
+     .updateModalBtn.updateManualBtn {
+       background: #78909c;
+@@ -4016,8 +4021,8 @@ body.mainPlayerNamesBold .settingsPanel .themeDropdownMenu .settingsDropdownItem
+ }
+ .detailsPanel .detailsSettings .detailsSettingsToggleControl input[type="checkbox"]:checked
+ + .detailsSettingsToggleTrack {
+-  background: var(--isUser-fill);
+-  border-color: var(--isUser-fill);
++  background: var(--ct-accent);
++  border-color: var(--ct-accent);
+ }
+ .detailsPanel .detailsSettings .detailsSettingsToggleControl input[type="checkbox"]:checked
+ + .detailsSettingsToggleTrack::after {
+@@ -4025,7 +4030,7 @@ body.mainPlayerNamesBold .settingsPanel .themeDropdownMenu .settingsDropdownItem
+ }
+ .detailsPanel .detailsSettings .detailsSettingsToggleControl input[type="checkbox"]:focus-visible
+ + .detailsSettingsToggleTrack {
+-  outline: 2px solid var(--isUser-fill);
++  outline: 2px solid var(--ct-accent);
+   outline-offset: 2px;
+ }
+ .detailsPanel .detailsSettings .detailsSettingsFolder {
+@@ -4393,7 +4398,7 @@ body.mainPlayerNamesBold .settingsPanel .themeDropdownMenu .settingsDropdownItem
+   background: rgba(255, 255, 255, 0.15);
+ }
+ .detailsPanel .detailsSkills .cell.name .skillSpecIndicator .specDot.isActive {
+-  background: #6af;
++  background: var(--ct-accent);
+ }
+ .detailsPanel .detailsSkills .cell.center {
+   justify-content: center;
+@@ -4694,7 +4699,7 @@ body.mainPlayerNamesBold .settingsPanel .themeDropdownMenu .settingsDropdownItem
+   background: #4caf50;
+ }
+ .updateModal .updateModalCard .updateModalBtn.updateNotesBtn {
+-  background: #2196f3;
++  background: #4a515c;
+ }
+ .updateModal .updateModalCard .updateModalBtn.updateManualBtn {
+   background: #78909c;
+@@ -4888,11 +4893,11 @@ body.mainPlayerNamesBold .settingsPanel .themeDropdownMenu .settingsDropdownItem
+   background: none;
+   padding: 0;
+   font: inherit;
+-  color: #9fc4ff;
++  color: var(--ct-accent-light);
+   text-decoration: underline;
+   cursor: pointer;
+ }
+-.linkButton:hover { color: #c4dbff; }
++.linkButton:hover { color: #ffe2a6; }
+ .linkButton:disabled { opacity: 0.6; cursor: default; }
+ .sharingPrompt .sharingSignIn .accountPromoSignIn,
+ .sharingPrompt .sharingSignIn .accountPromoSignIn:hover { background: none; }
+@@ -5479,7 +5484,7 @@ body.mainPlayerNamesBold .settingsPanel .themeDropdownMenu .settingsDropdownItem
+ .historyPanel .historyDeleteToggle:focus-visible,
+ .detailsPanel .detailsHeader button:focus-visible,
+ .detailsPanel .detailsSkills .skillHeader .cell:focus-visible {
+-  outline: 2px solid var(--isUser-fill);
++  outline: 2px solid var(--ct-accent);
+   outline-offset: 1px;
+ }
+ .historyPanel .historyViewBtn svg,
+@@ -5523,12 +5528,12 @@ body.isHistoryWindow .historyPanel .historyHeader .closeX {
+   padding-bottom: 2px;
+ }
+ 
+-/* "On" is the theme accent, and only ever the theme accent. */
++/* "On" is the build's gold (Clicktrough; it was the theme accent). */
+ .historyPanel .historyViewBtn.active,
+ .historyPanel .historyTrainToggle.active {
+   color: #fff;
+-  background: color-mix(in srgb, var(--isUser-fill) 26%, transparent);
+-  border-color: color-mix(in srgb, var(--isUser-fill) 60%, transparent);
++  background: color-mix(in srgb, var(--ct-accent) 26%, transparent);
++  border-color: color-mix(in srgb, var(--ct-accent) 60%, transparent);
+ }
+ /* Delete is destructive, so it reports as a status rather than a choice. */
+ .historyPanel .historyDeleteToggle:hover,
+@@ -7006,10 +7011,19 @@ html.detailsWindow .detailsMonitorBadge.isVisible {
+    background, the section list's, and the accent of its switches, buttons
+    and selected section (--settings-accent, used in place of the meter
+    theme's --isUser-fill, which the Appearance preview keeps). "meter" is the
+-   window as it always was, its accent the meter theme's own. All of them dark: the panel's text is white. */
++   window as it always was, its accent the meter theme's own. All of them dark: the panel's text is white.
++   Clicktrough: "gold", the default, is that window with the build's gold
++   accent (no blue in its UI), and is also what shows until the choice is read. */
+ html.settingsWindow {
+   --settings-bg: #0a0e16;
+   --settings-nav-bg: transparent;
++  --settings-accent: var(--ct-accent);
++}
++html.settingsWindow[data-settings-theme="meter"] {
++  --settings-accent: var(--isUser-fill);
++}
++.settingsThemeSwatch[data-settings-theme="gold"] {
++  --settings-accent: var(--ct-accent);
+ }
+ html.settingsWindow[data-settings-theme="midnight"],
+ .settingsThemeSwatch[data-settings-theme="midnight"] {
+@@ -8458,11 +8472,11 @@ html.a2-offline .historyUploadBtn {
+ }
+ ::-webkit-scrollbar-thumb:hover {
+   border-width: 1px;
+-  background-color: rgb(120, 170, 245);
++  background-color: rgb(224, 165, 38);
+ }
+ ::-webkit-scrollbar-thumb:active {
+   border-width: 1px;
+-  background-color: rgb(150, 192, 255);
++  background-color: rgb(242, 196, 107);
+ }
+ ::-webkit-scrollbar-button {
+   display: none;
+@@ -8790,8 +8804,8 @@ html.a2-offline .historyUploadBtn {
+   width: 28px;
+   height: 28px;
+   border-radius: 6px;
+-  background: hsl(var(--mark-hue, 210) 45% 32%);
+-  color: hsl(var(--mark-hue, 210) 80% 88%);
++  background: hsl(var(--mark-hue, 45) 45% 32%);
++  color: hsl(var(--mark-hue, 45) 80% 88%);
+   font-weight: 700;
+   font-size: 14px;
+ }
+-- 
+2.43.0
+

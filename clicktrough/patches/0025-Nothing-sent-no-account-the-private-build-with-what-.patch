@@ -1,7 +1,7 @@
-From 980c1d42e0926e4062f8e7e650e5f73f59a8cfac Mon Sep 17 00:00:00 2001
+From 9965a4656b4ce92f465379f451c122f0b275b278 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Tue, 27 Oct 2026 00:51:38 +0000
-Subject: [PATCH 25/32] Nothing sent, no account: the private build, with what
+Subject: [PATCH 25/33] Nothing sent, no account: the private build, with what
  it may download
 
 This build sends nothing to the original's services and asks for no
@@ -454,10 +454,10 @@ index 0000000..4fd54f8
 +    }
 +}
 diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
-index 13dadc8..e92bae4 100644
+index a0793f2..56a89b8 100644
 --- a/src-tauri/src/plugins/mod.rs
 +++ b/src-tauri/src/plugins/mod.rs
-@@ -2324,18 +2324,21 @@ pub async fn plugin_abyss_siege(app: tauri::AppHandle, window: tauri::WebviewWin
+@@ -2369,18 +2369,21 @@ pub async fn plugin_abyss_siege(app: tauri::AppHandle, window: tauri::WebviewWin
      feed_file(&app, "abyss-artifacts", server).await
  }
  
@@ -482,7 +482,7 @@ index 13dadc8..e92bae4 100644
  async fn feed_file(app: &tauri::AppHandle, feed: &'static str, server: u32) -> Result<Option<Value>, String> {
      static CACHE: std::sync::OnceLock<Mutex<HashMap<(&'static str, u32), (Instant, Option<Value>)>>> = std::sync::OnceLock::new();
      let cache = CACHE.get_or_init(Mutex::default);
-@@ -2350,6 +2353,7 @@ async fn feed_file(app: &tauri::AppHandle, feed: &'static str, server: u32) -> R
+@@ -2395,6 +2398,7 @@ async fn feed_file(app: &tauri::AppHandle, feed: &'static str, server: u32) -> R
      }
      let state = app.try_state::<AppState>().ok_or("no app state")?;
      let url = format!("https://cdn.a2tools.app/feeds/{feed}/{server}.json");
@@ -490,7 +490,7 @@ index 13dadc8..e92bae4 100644
      let res = state.http.get(&url).timeout(Duration::from_secs(15)).send().await.map_err(|e| e.to_string())?;
      let value = match res.status() {
          s if s == reqwest::StatusCode::NOT_FOUND => None,
-@@ -2360,7 +2364,7 @@ async fn feed_file(app: &tauri::AppHandle, feed: &'static str, server: u32) -> R
+@@ -2405,7 +2409,7 @@ async fn feed_file(app: &tauri::AppHandle, feed: &'static str, server: u32) -> R
      Ok(value)
  }
  
@@ -499,7 +499,7 @@ index 13dadc8..e92bae4 100644
  async fn feed_file(_app: &tauri::AppHandle, _feed: &'static str, _server: u32) -> Result<Option<Value>, String> {
      Err("this meter is built without network features".into())
  }
-@@ -2409,7 +2413,7 @@ pub async fn plugin_web_get(app: tauri::AppHandle, window: tauri::WebviewWindow,
+@@ -2454,7 +2458,7 @@ pub async fn plugin_web_get(app: tauri::AppHandle, window: tauri::WebviewWindow,
      web_get(&app, &url).await
  }
  
@@ -508,7 +508,7 @@ index 13dadc8..e92bae4 100644
  async fn web_get(app: &tauri::AppHandle, url: &str) -> Result<Value, String> {
      static CACHE: std::sync::OnceLock<Mutex<HashMap<String, (Instant, Value)>>> = std::sync::OnceLock::new();
      static NEXT: std::sync::OnceLock<tokio::sync::Mutex<Instant>> = std::sync::OnceLock::new();
-@@ -2439,6 +2443,7 @@ async fn web_get(app: &tauri::AppHandle, url: &str) -> Result<Value, String> {
+@@ -2484,6 +2488,7 @@ async fn web_get(app: &tauri::AppHandle, url: &str) -> Result<Value, String> {
      let mut first_error: Option<String> = None;
      let res = loop {
          let client = if ipv4 { ipv4_client() } else { &state.http };
@@ -516,7 +516,7 @@ index 13dadc8..e92bae4 100644
          let sent = client.get(url)
              .header("Accept", "application/json")
              .header("User-Agent", concat!("A2Tools-DPS-Meter/", env!("CARGO_PKG_VERSION"),
-@@ -2490,28 +2495,25 @@ async fn web_get(app: &tauri::AppHandle, url: &str) -> Result<Value, String> {
+@@ -2535,28 +2540,25 @@ async fn web_get(app: &tauri::AppHandle, url: &str) -> Result<Value, String> {
  
  /// Plugins' web requests go over IPv4 alone: set once IPv4 worked where the
  /// usual connection (IPv6 first, where there is IPv6) failed.
@@ -552,7 +552,7 @@ index 13dadc8..e92bae4 100644
  fn web_error(e: &reqwest::Error) -> String {
      let mut out = String::from(if e.is_timeout() {
          "no answer in time"
-@@ -2535,7 +2537,7 @@ fn web_error(e: &reqwest::Error) -> String {
+@@ -2580,7 +2582,7 @@ fn web_error(e: &reqwest::Error) -> String {
      out
  }
  
@@ -561,7 +561,7 @@ index 13dadc8..e92bae4 100644
  async fn web_get(_app: &tauri::AppHandle, _url: &str) -> Result<Value, String> {
      Err("this meter is built without network features".into())
  }
-@@ -2904,7 +2906,7 @@ mod tests {
+@@ -2949,7 +2951,7 @@ mod tests {
  
      /// A failed request says why ("Connection refused"), not only reqwest's
      /// "error sending request for url (...)".

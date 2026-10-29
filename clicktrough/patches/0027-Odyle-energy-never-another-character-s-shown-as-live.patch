@@ -1,7 +1,7 @@
-From 15528539ad08bab146e204b1951c4eb535d830a6 Mon Sep 17 00:00:00 2001
+From 2943c74651d562fea0bdcb7948a1b8917767215a Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Tue, 27 Oct 2026 22:44:15 +0000
-Subject: [PATCH 27/32] Odyle energy: never another character's shown as live
+Subject: [PATCH 27/33] Odyle energy: never another character's shown as live
 
 After switching to a twink the meter's title showed the last character's
 Odyle energy (390 (+50)) as live while the game said 0. The window kept the

@@ -1,7 +1,7 @@
-From 580943e0776bb967bc90d0765dfe94954563bbf9 Mon Sep 17 00:00:00 2001
+From afed8e200c5727f0de7aa3042d4c82461b7bc376 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Wed, 28 Oct 2026 02:47:45 +0000
-Subject: [PATCH 31/32] Plugin dock: the tab open last opens again
+Subject: [PATCH 31/33] Plugin dock: the tab open last opens again
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
@@ -17,7 +17,7 @@ now kept while it isn't shown, and opens again when it is.
  create mode 100644 tests/dock-last-tab.test.mjs
 
 diff --git a/public/src/js/pluginDock.js b/public/src/js/pluginDock.js
-index 6d42e4d..76990d5 100644
+index 46466b5..a5702be 100644
 --- a/public/src/js/pluginDock.js
 +++ b/public/src/js/pluginDock.js
 @@ -62,6 +62,13 @@

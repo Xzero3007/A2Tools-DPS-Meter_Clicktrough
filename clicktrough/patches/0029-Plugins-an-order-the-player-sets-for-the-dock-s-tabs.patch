@@ -1,7 +1,7 @@
-From 8d52b73b9efb840d0d63fe7c8bdc3d2757ec5f41 Mon Sep 17 00:00:00 2001
+From 6c8b18d28ca332fa8e411fef8b7af28c8f7f8264 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Tue, 27 Oct 2026 23:04:48 +0000
-Subject: [PATCH 29/32] Plugins: an order the player sets, for the dock's tabs
+Subject: [PATCH 29/33] Plugins: an order the player sets, for the dock's tabs
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
@@ -44,7 +44,7 @@ index 02d2bd3..429d857 100644
 +  box-shadow: inset 2px 0 0 #e2b54f;
 +}
 diff --git a/public/src/js/pluginDock.js b/public/src/js/pluginDock.js
-index 60f0bd1..ba3078b 100644
+index 2564ecd..7cc1a52 100644
 --- a/public/src/js/pluginDock.js
 +++ b/public/src/js/pluginDock.js
 @@ -120,14 +120,35 @@
@@ -247,7 +247,7 @@ index bfb9032..cfe7e9e 100644
          .build()
          .map_err(|e| e.to_string())?;
 diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
-index 940d676..1740528 100644
+index 694db86..20fddf9 100644
 --- a/src-tauri/src/plugins/mod.rs
 +++ b/src-tauri/src/plugins/mod.rs
 @@ -151,7 +151,7 @@ const PLUGIN_SURFACE_COMMANDS: &[&str] = &[
@@ -259,7 +259,7 @@ index 940d676..1740528 100644
      "plugin_widget_file", "plugin_widget_resize", "set_locked_buttons",
  ];
  
-@@ -297,6 +297,9 @@ pub struct PluginsView {
+@@ -303,6 +303,9 @@ pub struct PluginsView {
      /// Clicktrough: this build's plugins that don't run (removed, or not
      /// installed yet), for Available to install.
      pub offered_bundled: Vec<PluginInfo>,
@@ -269,7 +269,7 @@ index 940d676..1740528 100644
  }
  
  fn view(app: &tauri::AppHandle, host: &PluginHost) -> PluginsView {
-@@ -312,9 +315,43 @@ fn view(app: &tauri::AppHandle, host: &PluginHost) -> PluginsView {
+@@ -318,9 +321,43 @@ fn view(app: &tauri::AppHandle, host: &PluginHost) -> PluginsView {
          hide_unfocused: listed(app, HIDE_UNFOCUSED_KEY),
          own_window: listed(app, dock::OWN_WINDOW_KEY),
          offered_bundled: offered_bundled(app, host),

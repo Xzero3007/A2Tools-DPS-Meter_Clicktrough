@@ -16,7 +16,11 @@ with its own CLAUDE.md: plugin work happens there.
   fallback). Sends screenshots from the game.
 - **No blue in any UI** (buttons, highlights, links): neutral whites and greys,
   gold, red, purple are fine. Data colours that match an existing plugin are fine
-  (Pet Finder's genus colours).
+  (Pet Finder's genus colours). The build's accent is gold (meter patch 0033:
+  Settings colours "Gold", the default; `--ct-accent` #e0a526 in the meter):
+  a plugin gets it as `var(--a2-accent)`, so a control's state uses that,
+  never a fixed blue. Values coloured as the game does (combat power's cyan)
+  stay.
 - Wants results and a short, plain explanation of what changed and what to do,
   not a log of the work.
 

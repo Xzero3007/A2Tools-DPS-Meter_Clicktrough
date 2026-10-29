@@ -1,7 +1,7 @@
-From 25809eccf7700d7b0407830ce7e8dc4484fe0fab Mon Sep 17 00:00:00 2001
+From ba8b331364dacef43027175ecc7f838f5c6a1f17 Mon Sep 17 00:00:00 2001
 From: Claude <noreply@anthropic.com>
 Date: Tue, 27 Oct 2026 00:11:33 +0000
-Subject: [PATCH 24/32] Plugins: this build's plugin calls pass 2.0.80's
+Subject: [PATCH 24/33] Plugins: this build's plugin calls pass 2.0.80's
  command filter
 
 Meter 2.0.80 lets plugin windows, the dock and widgets call only the app
@@ -16,7 +16,7 @@ Claude-Session: https://claude.ai/code/session_01RahWACwaxzLAcYgwc9jk8C
  1 file changed, 4 insertions(+)
 
 diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
-index cf31262..13dadc8 100644
+index ab60f23..a0793f2 100644
 --- a/src-tauri/src/plugins/mod.rs
 +++ b/src-tauri/src/plugins/mod.rs
 @@ -149,6 +149,10 @@ const PLUGIN_SURFACE_COMMANDS: &[&str] = &[

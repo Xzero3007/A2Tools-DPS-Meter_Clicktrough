@@ -1,7 +1,7 @@
-From 81a14299fad96fdc658865769b9ec50a5843a343 Mon Sep 17 00:00:00 2001
+From b4b1e1830be9a5ed8957bc043fb5e98f6a3a402b Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Fri, 23 Oct 2026 13:03:59 +0000
-Subject: [PATCH 04/32] Plugins this build ships: data/ct-plugins
+Subject: [PATCH 04/33] Plugins this build ships: data/ct-plugins
 
 The Clicktrough fork ships patched copies of reviewed plugins (Event
 Timers: the bosses due soon in its folded view) in data/ct-plugins/<id>.
@@ -16,10 +16,10 @@ Claude-Session: https://claude.ai/code/session_01TUNxq4V2zBL7bJg3yPJ3oC
  1 file changed, 24 insertions(+)
 
 diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
-index 4b5538b..48f219d 100644
+index 3dfaa21..2b2e4dd 100644
 --- a/src-tauri/src/plugins/mod.rs
 +++ b/src-tauri/src/plugins/mod.rs
-@@ -598,6 +598,30 @@ impl PluginHost {
+@@ -606,6 +606,30 @@ impl PluginHost {
                  }),
              }
          }

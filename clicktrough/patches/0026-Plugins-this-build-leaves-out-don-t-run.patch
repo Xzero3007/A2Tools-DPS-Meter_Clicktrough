@@ -1,7 +1,7 @@
-From 1c405690c43c89d5651e1e9dd691cf80bf3ca063 Mon Sep 17 00:00:00 2001
+From 32a33fff0cad9c7708f306da44387baf7684d8f2 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Tue, 27 Oct 2026 02:04:24 +0000
-Subject: [PATCH 26/32] Plugins this build leaves out don't run
+Subject: [PATCH 26/33] Plugins this build leaves out don't run
 
 The original's plugins this build leaves out (data/ct-plugins/
 left-out.txt, an id a line: Pet Soul Tracker, whose list is Pet Finder's)
@@ -15,10 +15,10 @@ Claude-Session: https://claude.ai/code/session_01RahWACwaxzLAcYgwc9jk8C
  1 file changed, 11 insertions(+)
 
 diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
-index e92bae4..490340c 100644
+index 56a89b8..d26036d 100644
 --- a/src-tauri/src/plugins/mod.rs
 +++ b/src-tauri/src/plugins/mod.rs
-@@ -813,6 +813,14 @@ impl PluginHost {
+@@ -821,6 +821,14 @@ impl PluginHost {
              .and_then(|root| std::fs::read_to_string(root.join("installed-only.txt")).ok())
              .map(|text| text.lines().map(str::trim).filter(|l| !l.is_empty()).map(String::from).collect())
              .unwrap_or_default();
@@ -33,7 +33,7 @@ index e92bae4..490340c 100644
          let installed_root = plugins_dir(app).ok();
          let removed = bundled_removed(app);
          let added = bundled_added(app);
-@@ -857,6 +865,9 @@ impl PluginHost {
+@@ -865,6 +873,9 @@ impl PluginHost {
              .filter(|path| path.is_dir() && path.file_name().is_some_and(|n| !n.to_string_lossy().starts_with('.')));
          for dir in installed {
              match load_folder(&dir) {

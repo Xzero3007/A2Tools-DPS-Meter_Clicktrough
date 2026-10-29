@@ -1,7 +1,7 @@
-From a24856f37a9b0cd87e5f5b0eabb5c2e9bf97b1d5 Mon Sep 17 00:00:00 2001
+From 28e4067f47ee18243d1f41eefdfe33490c566787 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Sat, 24 Oct 2026 20:13:41 +0000
-Subject: [PATCH 15/32] Meter: the plugins button turns the plugins' widgets
+Subject: [PATCH 15/33] Meter: the plugins button turns the plugins' widgets
  off too
 
 The puzzle button in the meter's header hid only the plugin window; a
@@ -84,7 +84,7 @@ index 8f19792..bfb9032 100644
      status(&app)
  }
 diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
-index c7bd077..5d29519 100644
+index 67cdbcf..3f70f0e 100644
 --- a/src-tauri/src/plugins/mod.rs
 +++ b/src-tauri/src/plugins/mod.rs
 @@ -194,8 +194,9 @@ pub fn sync_game_hiding(app: &tauri::AppHandle) {

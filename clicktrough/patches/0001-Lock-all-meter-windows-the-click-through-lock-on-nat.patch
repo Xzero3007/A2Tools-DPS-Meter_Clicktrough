@@ -1,7 +1,7 @@
-From 203223ae9842a40b10f58f816effd4cd7d8f65c0 Mon Sep 17 00:00:00 2001
+From 372ee54009753f018b8a2499c4edf1b1f98afb57 Mon Sep 17 00:00:00 2001
 From: A2Tools patch <patch@localhost>
 Date: Tue, 20 Oct 2026 10:26:21 +0000
-Subject: [PATCH 01/32] Lock all meter windows; the click-through lock on
+Subject: [PATCH 01/33] Lock all meter windows; the click-through lock on
  native Wayland
 
 ---
@@ -419,10 +419,10 @@ index 54ecbc5..7868bc1 100644
      let target = window.clone();
      super::dialog::on_gtk_thread(move || {
 diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
-index 4645bd9..4b5538b 100644
+index 6834f89..3dfaa21 100644
 --- a/src-tauri/src/plugins/mod.rs
 +++ b/src-tauri/src/plugins/mod.rs
-@@ -1869,6 +1869,8 @@ pub fn plugin_hello(app: tauri::AppHandle, window: tauri::WebviewWindow, plugin:
+@@ -1904,6 +1904,8 @@ pub fn plugin_hello(app: tauri::AppHandle, window: tauri::WebviewWindow, plugin:
          if manifest.permissions.iter().any(|p| p == "events:character") { character(&app) } else { None };
      let reviewed = host.with(&id, |l| l.reviewed).unwrap_or(false);
      let language = app.try_state::<AppState>().and_then(|s| s.settings.get("dpsMeter.language")).unwrap_or_else(|| "en".into());

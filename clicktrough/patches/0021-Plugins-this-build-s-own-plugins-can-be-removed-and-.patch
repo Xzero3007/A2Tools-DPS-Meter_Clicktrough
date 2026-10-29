@@ -1,7 +1,7 @@
-From bdd43e8ba0d9a99200b6b552c6653f8333ae0ad8 Mon Sep 17 00:00:00 2001
+From 1840ead23d498f67e3d0a3fdd789a8c29c8ba208 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Mon, 26 Oct 2026 00:41:58 +0000
-Subject: [PATCH 21/32] Plugins: this build's own plugins can be removed, and
+Subject: [PATCH 21/33] Plugins: this build's own plugins can be removed, and
  added again
 
 Settings' Remove did nothing for a plugin this build ships (data/ct-plugins:
@@ -122,7 +122,7 @@ index eaed11a..d44798c 100644
              crate::plugins::widgets::plugin_widget_resize,
              open_settings_at,
 diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
-index 30027f1..0e08455 100644
+index 3ee3e41..c4d82c9 100644
 --- a/src-tauri/src/plugins/mod.rs
 +++ b/src-tauri/src/plugins/mod.rs
 @@ -67,6 +67,9 @@ pub const WINDOWS_KEY: &str = "dpsMeter.pluginWindows";
@@ -135,7 +135,7 @@ index 30027f1..0e08455 100644
  /// Plugins whose windows and widgets hide while AION2 is closed, a JSON
  /// array of ids (Settings → Plugins).
  pub const HIDE_CLOSED_KEY: &str = "dpsMeter.pluginsHideClosed";
-@@ -243,6 +246,8 @@ struct Loaded {
+@@ -249,6 +252,8 @@ struct Loaded {
      decoders: Vec<Decoder>,
      /// Installed from the signed catalog, not a developer folder.
      reviewed: bool,
@@ -144,7 +144,7 @@ index 30027f1..0e08455 100644
  }
  
  /// What Settings lists.
-@@ -257,6 +262,9 @@ pub struct PluginInfo {
+@@ -263,6 +268,9 @@ pub struct PluginInfo {
      pub permissions: Vec<String>,
      /// Installed from the signed catalog (otherwise a developer folder).
      pub reviewed: bool,
@@ -154,7 +154,7 @@ index 30027f1..0e08455 100644
      /// Set when the folder could not be loaded.
      pub error: Option<String>,
  }
-@@ -277,6 +285,8 @@ pub struct PluginsView {
+@@ -283,6 +291,8 @@ pub struct PluginsView {
      pub hide_unfocused: Vec<String>,
      /// Ids of the plugins in a window of their own, not the dock.
      pub own_window: Vec<String>,
@@ -163,7 +163,7 @@ index 30027f1..0e08455 100644
  }
  
  fn view(app: &tauri::AppHandle, host: &PluginHost) -> PluginsView {
-@@ -291,9 +301,66 @@ fn view(app: &tauri::AppHandle, host: &PluginHost) -> PluginsView {
+@@ -297,9 +307,66 @@ fn view(app: &tauri::AppHandle, host: &PluginHost) -> PluginsView {
          hide_closed: hide_closed(app),
          hide_unfocused: listed(app, HIDE_UNFOCUSED_KEY),
          own_window: listed(app, dock::OWN_WINDOW_KEY),
@@ -230,7 +230,7 @@ index 30027f1..0e08455 100644
  /// The plugins turned off.
  fn disabled(app: &tauri::AppHandle) -> Vec<String> {
      app.try_state::<AppState>()
-@@ -654,7 +721,7 @@ fn load_folder(dir: &Path) -> Result<Loaded, String> {
+@@ -662,7 +729,7 @@ fn load_folder(dir: &Path) -> Result<Loaded, String> {
          }
          decoders.push(decoder);
      }
@@ -239,7 +239,7 @@ index 30027f1..0e08455 100644
  }
  
  impl PluginHost {
-@@ -686,6 +753,7 @@ impl PluginHost {
+@@ -694,6 +761,7 @@ impl PluginHost {
                      path: folder,
                      permissions: Vec::new(),
                      reviewed: false,
@@ -247,7 +247,7 @@ index 30027f1..0e08455 100644
                      error: Some(e),
                  }),
              }
-@@ -705,6 +773,7 @@ impl PluginHost {
+@@ -713,6 +781,7 @@ impl PluginHost {
              .map(|text| text.lines().map(str::trim).filter(|l| !l.is_empty()).map(String::from).collect())
              .unwrap_or_default();
          let installed_root = plugins_dir(app).ok();
@@ -255,7 +255,7 @@ index 30027f1..0e08455 100644
          let bundled = bundled_root
              .and_then(|dir| std::fs::read_dir(dir).ok())
              .into_iter()
-@@ -718,13 +787,17 @@ impl PluginHost {
+@@ -726,13 +795,17 @@ impl PluginHost {
              if only_installed && !installed_root.as_ref().is_some_and(|root| root.join(&name).is_dir()) {
                  continue;
              }
@@ -276,7 +276,7 @@ index 30027f1..0e08455 100644
                  }
                  Err(e) => tracing::warn!("Plugins: this build's {} does not load: {e}", dir.display()),
              }
-@@ -1021,6 +1094,7 @@ fn info(l: &Loaded) -> PluginInfo {
+@@ -1051,6 +1124,7 @@ fn info(l: &Loaded) -> PluginInfo {
          path: l.dir.to_string_lossy().into_owned(),
          permissions: l.manifest.permissions.clone(),
          reviewed: l.reviewed,
@@ -284,7 +284,7 @@ index 30027f1..0e08455 100644
          error: None,
      }
  }
-@@ -1541,6 +1615,8 @@ pub async fn plugin_install(app: tauri::AppHandle, id: String) -> Result<Plugins
+@@ -1571,6 +1645,8 @@ pub async fn plugin_install(app: tauri::AppHandle, id: String) -> Result<Plugins
          let catalog = catalog::fetch(&http).await?;
          let id = id.trim().to_lowercase();
          let entry = catalog.plugins.iter().find(|e| e.id == id).ok_or("No plugin by that id in the catalog or the test catalog.")?;
@@ -293,7 +293,7 @@ index 30027f1..0e08455 100644
          install_entry(&app, &host, entry).await?;
          Ok(view(&app, &host))
      }
-@@ -1566,6 +1642,11 @@ pub fn plugin_uninstall(app: tauri::AppHandle, id: String) -> Result<PluginsView
+@@ -1596,6 +1672,11 @@ pub fn plugin_uninstall(app: tauri::AppHandle, id: String) -> Result<PluginsView
      if dir.is_dir() {
          std::fs::remove_dir_all(&dir).map_err(|e| e.to_string())?;
      }
@@ -305,7 +305,7 @@ index 30027f1..0e08455 100644
      let host = host(&app)?;
      host.reload(&app);
      dock::sync(&app, None);
-@@ -2879,6 +2960,7 @@ mod tests {
+@@ -2924,6 +3005,7 @@ mod tests {
              path: String::new(),
              permissions: Vec::new(),
              reviewed: true,
