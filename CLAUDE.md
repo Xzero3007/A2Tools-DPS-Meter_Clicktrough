@@ -93,7 +93,7 @@ the same way (label `plugin-watch`) and taken in the plugins repo once chosen.
 | `clicktrough/BASE` | The original's version this build is based on. |
 | `clicktrough/README.md` | Every patch, in the person's terms. Keep it current. |
 | `clicktrough/patches/NNNN-*.patch` | The meter patches (`git format-patch`), applied in order on BASE. |
-| `clicktrough/backports/` | Fixes of the original taken before its release (none at the moment). |
+| `clicktrough/backports/` | Fixes of the original taken early (now 7, from 2.0.81 to 2.0.84), applied on BASE before the patches. |
 | `clicktrough/watch/plugin_watch.py` | The plugin part of the Original watch. |
 | `clicktrough/dev/` | `setup-workspace.sh` (the working clones), `run-meter.sh` (the meter on a virtual screen). |
 | `clicktrough/a2tools-rebuild.sh` | The same build on the person's own PC, without GitHub. |

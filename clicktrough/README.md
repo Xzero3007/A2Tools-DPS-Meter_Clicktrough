@@ -49,8 +49,8 @@ released in a version yet. They go before the patches. Once a new version of
 the original contains the commit (it is on the first line of each patch), the
 build leaves it out; the file can be deleted then.
 
-Now (2026-10-28, from the original's 2.0.81 and 2.0.82; this build stays on
-2.0.80):
+Now (2026-10-28 and 2026-10-29, from the original's 2.0.81, 2.0.82 and
+2.0.84; this build stays on 2.0.80):
 
 | Backport | What it brings |
 |---|---|
@@ -59,6 +59,8 @@ Now (2026-10-28, from the original's 2.0.81 and 2.0.82; this build stays on
 | 0003 | The same: after a lost packet, each place tried three packets deep, not to the end. |
 | 0004 | **Security**: a Linux update's package is copied where only root can write and its SHA-256 checked there before it is installed (this build's releases give the checksum); an over-long Discord reply is refused; a plugin page's `%` before a non-ASCII character no longer crashes the page handler. |
 | 0005 | Plugins whose scripts have Windows line endings run on Linux. |
+| 0006 | **Less memory on Linux**: the meter gives the memory it no longer needs back to the system, and the log of events kept per plugin (replayed when its window opens) stays small. |
+| 0007 | **Plugin events in batches**: what a zone's loading sends in a burst (thousands of events) goes to each plugin window as one message every 40 ms instead of one by one; the plugin process stays far smaller (the Map, Pet Finder, Roster). |
 
 The stuck-tooltip fixes taken early (2026-10-24) are in the original's
 2.0.79.

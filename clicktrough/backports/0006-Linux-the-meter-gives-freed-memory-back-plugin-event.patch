@@ -1,0 +1,121 @@
+From 0f5ce8f7912776d41f8c4bdfae0e0f9024dbdde9 Mon Sep 17 00:00:00 2001
+From: taengu <7606218+taengu@users.noreply.github.com>
+Date: Thu, 29 Oct 2026 04:19:22 +0800
+Subject: [PATCH 6/7] Linux: the meter gives freed memory back; plugin event
+ log kept small
+
+Measured in the KDE VM with all plugins and an hour of a player's real
+traffic (replayed at 3x):
+- glibc kept what the meter freed: 60-125 MB in use, 650-790 MB more held
+  and never returned (bursts on loading a zone, a fight's end, a pool per
+  busy thread), so the process sat at 823 MB and players saw it climb past
+  1 GB. Now two allocator pools and freed memory handed back every 30 s
+  (mallopt M_ARENA_MAX, malloc_trim): the same run settles under 100 MB.
+- Each plugin's numbered events, replayed when its window opens, were kept
+  as JSON trees, up to 20,000 a plugin: tens of MB each for plugins reading
+  every hit or spawn. Now as their JSON text, and at most 2 MB a plugin.
+---
+ src-tauri/src/platform/linux/process.rs | 22 +++++++++++++++++++
+ src-tauri/src/plugins/mod.rs            | 28 ++++++++++++++++++-------
+ 2 files changed, 43 insertions(+), 7 deletions(-)
+
+diff --git a/src-tauri/src/platform/linux/process.rs b/src-tauri/src/platform/linux/process.rs
+index fe0ee1a..6596371 100644
+--- a/src-tauri/src/platform/linux/process.rs
++++ b/src-tauri/src/platform/linux/process.rs
+@@ -49,9 +49,31 @@ pub fn prepare() -> Option<String> {
+         unsafe { std::env::set_var(FORCE_SHM, "1") };
+         notes.push(format!("{FORCE_SHM}=1 (set by the meter; set {FORCE_SHM}=0 to hand frames over as GPU buffers)"));
+     }
++    notes.push(keep_allocator_lean());
+     (!notes.is_empty()).then(|| notes.join("; "))
+ }
+ 
++/// How often freed memory goes back to the system.
++const TRIM_EVERY: std::time::Duration = std::time::Duration::from_secs(30);
++
++/// glibc's allocator keeps what the meter frees for itself, and with a pool
++/// per busy thread it seldom reuses it: a meter using 60-125 MB held 650-790
++/// MB more, freed but never returned, after an hour of real play (packet
++/// bursts on loading a zone, the work at a fight's end), so it climbed past
++/// 1 GB and on for players. Two pools, and what is free handed back every
++/// TRIM_EVERY. Windows' heap returns freed memory by itself.
++fn keep_allocator_lean() -> String {
++    // SAFETY: prepare runs before any other thread starts; mallopt and
++    // malloc_trim are thread-safe glibc calls with no Rust-side invariants.
++    unsafe { libc::mallopt(libc::M_ARENA_MAX, 2) };
++    let _ = std::thread::Builder::new().name("malloc-trim".into()).spawn(|| loop {
++        std::thread::sleep(TRIM_EVERY);
++        // SAFETY: as above.
++        unsafe { libc::malloc_trim(0) };
++    });
++    "allocator: 2 arenas, freed memory returned every 30 s".to_string()
++}
++
+ #[cfg(test)]
+ mod tests {
+     use super::{desktop_is_gnome, prefer_xwayland};
+diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
+index 54b40ba..661d470 100644
+--- a/src-tauri/src/plugins/mod.rs
++++ b/src-tauri/src/plugins/mod.rs
+@@ -214,6 +214,10 @@ const MAX_STORED: usize = 1024 * 1024;
+ const SETTLE: Duration = Duration::from_millis(500);
+ /// Events kept per plugin for the run, replayed to its window when it opens.
+ const MAX_LOGGED: usize = 20_000;
++/// And at most this much of them. Kept as full JSON trees, 20,000 events of
++/// a plugin reading every hit or spawn held tens of MB each, all run long,
++/// part of what made a Linux meter climb past 1 GB (2026-10-29).
++const MAX_LOGGED_BYTES: usize = 2 * 1024 * 1024;
+ 
+ #[derive(Debug, Clone, Serialize, Deserialize)]
+ #[serde(rename_all = "camelCase")]
+@@ -396,7 +400,9 @@ pub struct PluginHost {
+     pending: Mutex<Vec<Pending>>,
+     /// Wakes the flusher when an event is queued.
+     queued: Condvar,
+-    log: Mutex<HashMap<String, VecDeque<Value>>>,
++    /// Each plugin's numbered events, as their JSON text (a `Value` tree took
++    /// several times the memory), and the bytes held.
++    log: Mutex<HashMap<String, (VecDeque<String>, usize)>>,
+     seq: Mutex<u64>,
+     run: String,
+     flusher: AtomicBool,
+@@ -800,11 +806,14 @@ impl PluginHost {
+                 "character": if allowed { who.clone() } else { None },
+             });
+             {
++                let text = event.to_string();
+                 let mut log = self.log.lock().unwrap_or_else(|p| p.into_inner());
+-                let list = log.entry(item.plugin.clone()).or_default();
+-                list.push_back(event.clone());
+-                while list.len() > MAX_LOGGED {
+-                    list.pop_front();
++                let (list, bytes) = log.entry(item.plugin.clone()).or_default();
++                *bytes += text.len();
++                list.push_back(text);
++                while list.len() > MAX_LOGGED || *bytes > MAX_LOGGED_BYTES {
++                    let Some(gone) = list.pop_front() else { break };
++                    *bytes -= gone.len();
+                 }
+             }
+             emit_plugin(app, &item.plugin, event);
+@@ -1986,8 +1995,13 @@ pub fn plugin_hello(app: tauri::AppHandle, window: tauri::WebviewWindow, plugin:
+     }
+     let host = host(&app)?;
+     let manifest = host.with(&id, |l| l.manifest.clone()).ok_or("plugin not loaded")?;
+-    let replay: Vec<Value> =
+-        host.log.lock().unwrap_or_else(|p| p.into_inner()).get(&id).map(|l| l.iter().cloned().collect()).unwrap_or_default();
++    let replay: Vec<Value> = host
++        .log
++        .lock()
++        .unwrap_or_else(|p| p.into_inner())
++        .get(&id)
++        .map(|(l, _)| l.iter().filter_map(|t| serde_json::from_str(t).ok()).collect())
++        .unwrap_or_default();
+     let character =
+         if manifest.permissions.iter().any(|p| p == "events:character") { character(&app) } else { None };
+     let reviewed = host.with(&id, |l| l.reviewed).unwrap_or(false);
+-- 
+2.43.0
+

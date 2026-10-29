@@ -1,0 +1,152 @@
+From 3cd20fb7b2925ed28d936ece2bc4bfc9a6285c2a Mon Sep 17 00:00:00 2001
+From: taengu <7606218+taengu@users.noreply.github.com>
+Date: Thu, 29 Oct 2026 04:28:03 +0800
+Subject: [PATCH 7/7] Plugins: events go to their pages in batches
+
+Each plugin event was its own emit, a script the page runs with the event
+in its source, to every listening page. Loading into a zone sends
+thousands: replaying a player's traffic in the KDE VM, the plugin
+process went from 230 MB to 1.36 GB for those minutes. The flusher now
+gathers a burst for 40 ms and sends each window one "plugin-events"
+array, which the dock and plugin windows hand on one by one: the same
+replay peaked at 376 MB.
+---
+ public/src/js/pluginDock.js  |  9 +++++++--
+ public/src/js/pluginHost.js  | 10 ++++++++--
+ src-tauri/src/plugins/mod.rs | 37 +++++++++++++++++++++++++++++++++---
+ 3 files changed, 49 insertions(+), 7 deletions(-)
+
+diff --git a/public/src/js/pluginDock.js b/public/src/js/pluginDock.js
+index 34f4439..3b048ee 100644
+--- a/public/src/js/pluginDock.js
++++ b/public/src/js/pluginDock.js
+@@ -256,8 +256,8 @@
+   // Plugin events, each to its plugin's frame; one without a plugin to all.
+   // `listen` hears events sent to any window, plugins' own windows too: the
+   // ones for plugins not docked here are left alone.
+-  listen("plugin-event", (event) => {
+-    const payload = event.payload || {};
++  const onEvent = (payload) => {
++    payload ||= {};
+     if (typeof payload.event !== "string") return;
+     if (payload.plugin === undefined) {
+       if (payload.event === "theme") applyTheme(payload.data);
+@@ -265,6 +265,11 @@
+       return;
+     }
+     docked.get(payload.plugin)?.plugin.receive(payload);
++  };
++  listen("plugin-event", (event) => onEvent(event.payload));
++  // The meter's numbered events, several at once (pluginHost.js).
++  listen("plugin-events", (event) => {
++    if (Array.isArray(event.payload)) for (const e of event.payload) onEvent(e);
+   });
+ 
+   // The bar: it moves the window, and its buttons.
+diff --git a/public/src/js/pluginHost.js b/public/src/js/pluginHost.js
+index 935f466..c6ab5fa 100644
+--- a/public/src/js/pluginHost.js
++++ b/public/src/js/pluginHost.js
+@@ -101,8 +101,8 @@
+     plugin.setCompact(panel.compact);
+   });
+ 
+-  listen("plugin-event", (event) => {
+-    const payload = event.payload || {};
++  const onEvent = (payload) => {
++    payload ||= {};
+     if (typeof payload.event !== "string") return;
+     // `listen` hears the event whichever window it was sent to, so each plugin
+     // window heard every plugin's, and another plugin's decoder of the same
+@@ -111,6 +111,12 @@
+     if (payload.plugin !== undefined && payload.plugin !== id) return;
+     if (payload.event === "theme") applyTheme(payload.data);
+     plugin.receive(payload);
++  };
++  listen("plugin-event", (event) => onEvent(event.payload));
++  // The meter's numbered events, several at once (a burst sent one by one
++  // took the page past 1 GB): each as a "plugin-event".
++  listen("plugin-events", (event) => {
++    if (Array.isArray(event.payload)) for (const e of event.payload) onEvent(e);
+   });
+ 
+   plugin.start().then((hello) => {
+diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
+index 661d470..a234093 100644
+--- a/src-tauri/src/plugins/mod.rs
++++ b/src-tauri/src/plugins/mod.rs
+@@ -212,6 +212,8 @@ const MAX_STORED: usize = 1024 * 1024;
+ /// plugins that are told the character (`events:character`) wait, and not
+ /// for decoders marked `immediate`; the others get each event as it is read.
+ const SETTLE: Duration = Duration::from_millis(500);
++/// How long the flusher gathers a burst of events into one message per window.
++const BATCH_WAIT: Duration = Duration::from_millis(40);
+ /// Events kept per plugin for the run, replayed to its window when it opens.
+ const MAX_LOGGED: usize = 20_000;
+ /// And at most this much of them. Kept as full JSON trees, 20,000 events of
+@@ -659,6 +661,17 @@ impl PluginHost {
+                         }
+                         ready
+                     };
++                    // Woken by the first of a burst (a zone loading sends
++                    // thousands): what follows within BATCH_WAIT goes with it.
++                    let ready = if ready.is_empty() {
++                        ready
++                    } else {
++                        std::thread::sleep(BATCH_WAIT);
++                        let mut more = take_ready(&mut host.pending.lock().unwrap_or_else(|p| p.into_inner()), Instant::now());
++                        let mut ready = ready;
++                        ready.append(&mut more);
++                        ready
++                    };
+                     host.flush(&app, ready);
+                     // The character as the meter learns it (a login, a switch,
+                     // or the meter starting mid-game): open plugins hear it then,
+@@ -786,6 +799,11 @@ impl PluginHost {
+             return;
+         }
+         let who = character(app);
++        // One message to each window per flush (`emit_plugins`): each emit is
++        // a script the page runs, with the event in its source, and a zone's
++        // load sent thousands, one by one, to every listening page: the
++        // plugin process went past 1.3 GB for those minutes (2026-10-29).
++        let mut batches: HashMap<String, Vec<Value>> = HashMap::new();
+         for item in ready {
+             let allowed = self
+                 .with(&item.plugin, |l| l.manifest.permissions.iter().any(|p| p == "events:character"))
+@@ -816,7 +834,10 @@ impl PluginHost {
+                     *bytes -= gone.len();
+                 }
+             }
+-            emit_plugin(app, &item.plugin, event);
++            batches.entry(item.plugin.clone()).or_default().push(event);
++        }
++        for (plugin, events) in batches {
++            emit_plugins(app, &plugin, events);
+         }
+     }
+ 
+@@ -2087,8 +2108,18 @@ pub fn set_plugin_theme(app: tauri::AppHandle, theme: Value) -> Result<(), Strin
+ /// events sent to any window, and each keeps only its own plugins'
+ /// (pluginHost.js, pluginDock.js).
+ pub(crate) fn emit_plugin(app: &tauri::AppHandle, id: &str, event: Value) {
+-    let target = if dock::docks(app, id) { dock::LABEL.to_string() } else { format!("plugin-{id}") };
+-    let _ = app.emit_to(target, "plugin-event", event);
++    let _ = app.emit_to(plugin_target(app, id), "plugin-event", event);
++}
++
++/// Several numbered events of one plugin as one message ("plugin-events",
++/// an array the page hands on one by one, as "plugin-event"s).
++fn emit_plugins(app: &tauri::AppHandle, id: &str, events: Vec<Value>) {
++    let _ = app.emit_to(plugin_target(app, id), "plugin-events", events);
++}
++
++/// The window a plugin's page runs in: the dock, or its own.
++fn plugin_target(app: &tauri::AppHandle, id: &str) -> String {
++    if dock::docks(app, id) { dock::LABEL.to_string() } else { format!("plugin-{id}") }
+ }
+ 
+ /// Tell every open plugin window something every plugin may know, such as the
+-- 
+2.43.0
+
