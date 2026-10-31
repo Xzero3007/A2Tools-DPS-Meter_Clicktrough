@@ -51,8 +51,8 @@ released in a version yet. They go before the patches. Once a new version of
 the original contains the commit (it is on the first line of each patch), the
 build leaves it out; the file can be deleted then.
 
-Now (2026-10-28 and 2026-10-29, from the original's 2.0.81, 2.0.82 and
-2.0.84; this build stays on 2.0.80):
+Now (2026-10-28 to 2026-10-31, from the original's 2.0.81, 2.0.82, 2.0.84
+and 2.0.87; this build stays on 2.0.80):
 
 | Backport | What it brings |
 |---|---|
@@ -63,6 +63,7 @@ Now (2026-10-28 and 2026-10-29, from the original's 2.0.81, 2.0.82 and
 | 0005 | Plugins whose scripts have Windows line endings run on Linux. |
 | 0006 | **Less memory on Linux**: the meter gives the memory it no longer needs back to the system, and the log of events kept per plugin (replayed when its window opens) stays small. |
 | 0007 | **Plugin events in batches**: what a zone's loading sends in a burst (thousands of events) goes to each plugin window as one message every 40 ms instead of one by one; the plugin process stays far smaller (the Map, Pet Finder, Roster). |
+| 0008 | **The login list reads again** (2.0.87, #135): since the game's update of 2026-10-29 one entry of it (the Lower Abyss's hours) comes in a new form, and the meter dropped the whole list: no Odyle energy and no keys or entry counts at login (Roster, Inventory's limits). |
 
 The stuck-tooltip fixes taken early (2026-10-24) are in the original's
 2.0.79.
