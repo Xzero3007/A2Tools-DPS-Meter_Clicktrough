@@ -1,7 +1,7 @@
-From b4b1e1830be9a5ed8957bc043fb5e98f6a3a402b Mon Sep 17 00:00:00 2001
+From 37f182ed23863101f30c99a7386776ac3da936f3 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Fri, 23 Oct 2026 13:03:59 +0000
-Subject: [PATCH 04/33] Plugins this build ships: data/ct-plugins
+Subject: [PATCH 04/34] Plugins this build ships: data/ct-plugins
 
 The Clicktrough fork ships patched copies of reviewed plugins (Event
 Timers: the bosses due soon in its folded view) in data/ct-plugins/<id>.

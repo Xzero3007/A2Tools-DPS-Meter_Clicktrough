@@ -1,7 +1,7 @@
-From 5cfd8adbdfac522d356b22f3fb0a02a2b69b7938 Mon Sep 17 00:00:00 2001
+From 173b850f38372dff5fb9d77d512ca47d504cf91b Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Sun, 25 Oct 2026 01:56:56 +0000
-Subject: [PATCH 18/33] Plugins: a link whose click the plugin took doesn't
+Subject: [PATCH 18/34] Plugins: a link whose click the plugin took doesn't
  open the browser
 
 The page's own link handling (a2.js) opened every https link clicked in

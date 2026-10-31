@@ -1,7 +1,7 @@
-From 3a49561a658db5c8a520330bda44a3ee7861e52d Mon Sep 17 00:00:00 2001
+From b4084a8f84bd06ad9dccc029d0a64e9e53674b0d Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Thu, 29 Oct 2026 14:51:14 +0000
-Subject: [PATCH 33/33] Gold, not blue, for every control's state
+Subject: [PATCH 33/34] Gold, not blue, for every control's state
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
@@ -18,24 +18,24 @@ The plugins' marks (dock tabs, Settings → Plugins) leave the blues out:
 Mantra Watch's turns pink, this build's own plugins get icons of their
 own, and a colour made from a plugin's id skips the blue range.
 ---
- public/src/js/core.js         |  7 ++--
- public/src/js/pluginDock.css  | 10 +++---
- public/src/js/pluginHost.css  |  2 +-
- public/src/js/pluginIcons.js  | 13 ++++++--
- src-tauri/src/plugins/a2.js   |  4 +--
- src-tauri/src/plugins/mod.rs  |  8 +++--
- src/data/i18n/ui/de.json      |  1 +
- src/data/i18n/ui/en.json      |  1 +
- src/data/i18n/ui/es.json      |  1 +
- src/data/i18n/ui/fr.json      |  1 +
- src/data/i18n/ui/ja.json      |  1 +
- src/data/i18n/ui/ko.json      |  1 +
- src/data/i18n/ui/pt.json      |  1 +
- src/data/i18n/ui/ru.json      |  1 +
- src/data/i18n/ui/zh-Hans.json |  1 +
- src/data/i18n/ui/zh-Hant.json |  1 +
- src/styles.css                | 62 +++++++++++++++++++++--------------
- 17 files changed, 76 insertions(+), 40 deletions(-)
+ public/src/js/core.js         |   7 +-
+ public/src/js/pluginDock.css  |  10 +--
+ public/src/js/pluginHost.css  |   2 +-
+ public/src/js/pluginIcons.js  |  14 +++-
+ src-tauri/src/plugins/a2.js   |   4 +-
+ src-tauri/src/plugins/mod.rs  |   8 ++-
+ src/data/i18n/ui/de.json      |   1 +
+ src/data/i18n/ui/en.json      |   1 +
+ src/data/i18n/ui/es.json      |   1 +
+ src/data/i18n/ui/fr.json      |   1 +
+ src/data/i18n/ui/ja.json      |   1 +
+ src/data/i18n/ui/ko.json      |   1 +
+ src/data/i18n/ui/pt.json      |   1 +
+ src/data/i18n/ui/ru.json      |   1 +
+ src/data/i18n/ui/zh-Hans.json |   1 +
+ src/data/i18n/ui/zh-Hant.json |   1 +
+ src/styles.css                | 118 +++++++++++++++++++---------------
+ 17 files changed, 105 insertions(+), 68 deletions(-)
 
 diff --git a/public/src/js/core.js b/public/src/js/core.js
 index 43889f2..dfec46b 100644
@@ -119,10 +119,10 @@ index 18d8e7c..a477793 100644
    cursor: pointer;
  }
 diff --git a/public/src/js/pluginIcons.js b/public/src/js/pluginIcons.js
-index 1cf7761..d33ef70 100644
+index 1cf7761..5dba33a 100644
 --- a/public/src/js/pluginIcons.js
 +++ b/public/src/js/pluginIcons.js
-@@ -8,10 +8,16 @@ window.A2_PLUGIN_ICONS = Object.freeze({
+@@ -8,10 +8,17 @@ window.A2_PLUGIN_ICONS = Object.freeze({
    cooldowns: ["hourglass", 265],
    checklist: ["list-checks", 185],
    "heal-alert": ["heart-pulse", 350],
@@ -137,10 +137,11 @@ index 1cf7761..d33ef70 100644
 +  market: ["coins", 105],
 +  map: ["map", 155],
 +  armory: ["shield", 290],
++  inventory: ["backpack", 15],
  });
  
  // A plugin's glyph (a Lucide name) or null, and its hue.
-@@ -19,5 +25,8 @@ window.A2_PLUGIN_ICON = (id, name) => {
+@@ -19,5 +26,8 @@ window.A2_PLUGIN_ICON = (id, name) => {
    let hash = 0;
    for (const ch of String(id)) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
    const [glyph, hue] = window.A2_PLUGIN_ICONS[id] || [];
@@ -319,7 +320,7 @@ index 5793026..de8ac52 100644
          "midnight": "午夜",
          "graphite": "石墨",
 diff --git a/src/styles.css b/src/styles.css
-index e1a9502..ff768fc 100644
+index e1a9502..dd26f22 100644
 --- a/src/styles.css
 +++ b/src/styles.css
 @@ -11,6 +11,11 @@
@@ -465,6 +466,75 @@ index e1a9502..ff768fc 100644
  }
  /* Delete is destructive, so it reports as a status rather than a choice. */
  .historyPanel .historyDeleteToggle:hover,
+@@ -5617,7 +5622,7 @@ body.isHistoryWindow .historyPanel .historyHeader .closeX {
+   color: #fff;
+ }
+ .historyPanel .historyClassOption.selected {
+-  background: color-mix(in srgb, var(--isUser-fill) 22%, transparent);
++  background: color-mix(in srgb, var(--ct-accent) 22%, transparent);
+   color: #fff;
+ }
+ .historyPanel .historyClassDropdownIcon {
+@@ -5933,8 +5938,8 @@ body.isHistoryWindow .historyPanel .historyHeader .closeX {
+ }
+ .detailsPanel .detailsHeader .detailsModeBtn[data-mode="dmg"].isActive {
+   color: #fff;
+-  background: color-mix(in srgb, var(--isUser-fill) 30%, transparent);
+-  border-color: color-mix(in srgb, var(--isUser-fill) 62%, transparent);
++  background: color-mix(in srgb, var(--ct-accent) 30%, transparent);
++  border-color: color-mix(in srgb, var(--ct-accent) 62%, transparent);
+ }
+ .detailsPanel .detailsHeader .detailsModeBtn[data-mode="heal"].isActive {
+   color: #fff;
+@@ -5984,7 +5989,7 @@ body.isHistoryWindow .historyPanel .historyHeader .closeX {
+   background: rgba(255, 255, 255, 0.08);
+ }
+ .detailsPanel .detailsHeader .detailsDropdownItem.isActive {
+-  background: color-mix(in srgb, var(--isUser-fill) 22%, transparent);
++  background: color-mix(in srgb, var(--ct-accent) 22%, transparent);
+   color: #fff;
+ }
+ .detailsPanel .detailsHeader .detailsSortBtn {
+@@ -6003,8 +6008,8 @@ body.isHistoryWindow .historyPanel .historyHeader .closeX {
+ }
+ .detailsPanel .detailsHeader .detailsSortBtn.isActive {
+   color: #fff;
+-  background: color-mix(in srgb, var(--isUser-fill) 28%, transparent);
+-  border-color: color-mix(in srgb, var(--isUser-fill) 60%, transparent);
++  background: color-mix(in srgb, var(--ct-accent) 28%, transparent);
++  border-color: color-mix(in srgb, var(--ct-accent) 60%, transparent);
+ }
+ 
+ /* ---------- details: the settings menu ---------- */
+@@ -6101,7 +6106,7 @@ body.isHistoryWindow .historyPanel .historyHeader .closeX {
+   border-radius: 2px;
+   background: linear-gradient(
+     to right,
+-    var(--isUser-fill) 0 var(--range-pct, 50%),
++    var(--ct-accent) 0 var(--range-pct, 50%),
+     rgba(255, 255, 255, 0.14) var(--range-pct, 50%) 100%
+   );
+ }
+@@ -6181,8 +6186,8 @@ body.isHistoryWindow .historyPanel .historyHeader .closeX {
+   bottom: 0;
+   width: 2px;
+   z-index: 2;
+-  background: var(--isUser-fill);
+-  box-shadow: 0 0 8px 1px color-mix(in srgb, var(--isUser-fill) 70%, transparent);
++  background: var(--ct-accent);
++  box-shadow: 0 0 8px 1px color-mix(in srgb, var(--ct-accent) 70%, transparent);
+ }
+ /* Tint, not slab: the same gradient the meter rows use. */
+ .detailsPanel .detailsPartyBarFill {
+@@ -6437,7 +6442,7 @@ body.isHistoryWindow .historyPanel .historyHeader .closeX {
+   color: var(--hud-sub);
+ }
+ .detailsPanel .detailsSkills .cell.name .skillSpecIndicator .specDot.isActive {
+-  background: var(--isUser-fill);
++  background: var(--ct-accent);
+ }
+ 
+ .detailsPanel .detailsSkills .detailsFootnote {
 @@ -7006,10 +7011,19 @@ html.detailsWindow .detailsMonitorBadge.isVisible {
     background, the section list's, and the accent of its switches, buttons
     and selected section (--settings-accent, used in place of the meter
@@ -486,6 +556,106 @@ index e1a9502..ff768fc 100644
  }
  html.settingsWindow[data-settings-theme="midnight"],
  .settingsThemeSwatch[data-settings-theme="midnight"] {
+@@ -7620,7 +7634,7 @@ html.a2-offline .historyUploadBtn {
+ .detailsPanel .detailsSplitter:hover::after,
+ .detailsPanel .detailsSplitter.isDragging::after,
+ .detailsPanel .detailsSplitter:focus-visible::after {
+-  background: var(--isUser-fill);
++  background: var(--ct-accent);
+ }
+ .detailsPanel .detailsSplitter:focus-visible {
+   outline: none;
+@@ -7656,7 +7670,7 @@ html.a2-offline .historyUploadBtn {
+ .detailsPanel .detailsSideSplitter.isDragging::after,
+ .detailsPanel .detailsSideSplitter:focus-visible::after {
+   opacity: 1;
+-  background: var(--isUser-fill);
++  background: var(--ct-accent);
+ }
+ .detailsPanel .detailsSideSplitter:focus-visible {
+   outline: none;
+@@ -7874,7 +7888,7 @@ html.a2-offline .historyUploadBtn {
+ .detailsPanel .fightReplayBtn:focus-visible,
+ .detailsPanel .fightReplaySpeed:focus-visible,
+ .detailsPanel .fightReplayScrub:focus-visible {
+-  outline: 2px solid var(--isUser-fill);
++  outline: 2px solid var(--ct-accent);
+   outline-offset: 2px;
+ }
+ .detailsPanel .fightReplayBtn:disabled {
+@@ -7898,10 +7912,10 @@ html.a2-offline .historyUploadBtn {
+   padding: 0 14px 0 11px;
+   border-radius: 999px;
+   color: #fff;
+-  border: 1px solid color-mix(in srgb, var(--isUser-fill) 70%, transparent);
++  border: 1px solid color-mix(in srgb, var(--ct-accent) 70%, transparent);
+   background: linear-gradient(180deg,
+-    color-mix(in srgb, var(--isUser-fill) 40%, transparent),
+-    color-mix(in srgb, var(--isUser-fill) 20%, transparent));
++    color-mix(in srgb, var(--ct-accent) 40%, transparent),
++    color-mix(in srgb, var(--ct-accent) 20%, transparent));
+   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 2px 8px rgba(0, 0, 0, 0.35);
+   font-family: var(--hud-tech);
+   font-variation-settings: "wght" 650, "wdth" 87.5;
+@@ -7911,10 +7925,10 @@ html.a2-offline .historyUploadBtn {
+ }
+ .detailsPanel .fightReplayPlay:hover {
+   color: #fff;
+-  border-color: var(--isUser-fill);
++  border-color: var(--ct-accent);
+   background: linear-gradient(180deg,
+-    color-mix(in srgb, var(--isUser-fill) 55%, transparent),
+-    color-mix(in srgb, var(--isUser-fill) 30%, transparent));
++    color-mix(in srgb, var(--ct-accent) 55%, transparent),
++    color-mix(in srgb, var(--ct-accent) 30%, transparent));
+ }
+ .detailsPanel .fightReplayPlay:active {
+   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 1px 3px rgba(0, 0, 0, 0.35);
+@@ -7989,7 +8003,7 @@ html.a2-offline .historyUploadBtn {
+   font-weight: 600;
+ }
+ .detailsPanel .fightReplaySpeed option:checked {
+-  background: var(--isUser-fill);
++  background: var(--ct-accent);
+   color: #fff;
+ }
+ .detailsPanel .fightReplayScrubWrap {
+@@ -8033,7 +8047,7 @@ html.a2-offline .historyUploadBtn {
+   top: 5px;
+   height: 3px;
+   border-radius: 2px;
+-  background: var(--isUser-fill);
++  background: var(--ct-accent);
+   transform-origin: left center;
+   transform: scaleX(0);
+ }
+@@ -8073,7 +8087,7 @@ html.a2-offline .historyUploadBtn {
+   border-radius: 2px;
+   background: linear-gradient(
+     to right,
+-    var(--isUser-fill) 0 var(--range-pct, 100%),
++    var(--ct-accent) 0 var(--range-pct, 100%),
+     rgba(255, 255, 255, 0.14) var(--range-pct, 100%) 100%
+   );
+ }
+@@ -8115,7 +8129,7 @@ html.a2-offline .historyUploadBtn {
+   left: 0;
+   top: 0;
+   width: 0;
+-  border-left: 2px solid var(--isUser-fill);
++  border-left: 2px solid var(--ct-accent);
+   pointer-events: none;
+   z-index: 29;
+   /* Moved every frame of a replay: its own layer, so nothing repaints. */
+@@ -8189,7 +8203,7 @@ html.a2-offline .historyUploadBtn {
+   transform: translateX(-50%);
+   padding: 1px 6px;
+   border-radius: 3px;
+-  background: var(--isUser-fill);
++  background: var(--ct-accent);
+   color: #fff;
+   font-family: var(--hud-tech);
+   font-variation-settings: "wght" 650, "wdth" 87.5;
 @@ -8458,11 +8472,11 @@ html.a2-offline .historyUploadBtn {
  }
  ::-webkit-scrollbar-thumb:hover {
@@ -500,6 +670,37 @@ index e1a9502..ff768fc 100644
  }
  ::-webkit-scrollbar-button {
    display: none;
+@@ -8675,10 +8689,10 @@ html.a2-offline .historyUploadBtn {
+ .settingsPanel .pluginTab:hover { color: rgba(255, 255, 255, 0.85); }
+ .settingsPanel .pluginTab.isActive {
+   color: #fff;
+-  border-bottom-color: var(--isUser-fill);
++  border-bottom-color: var(--settings-accent, var(--isUser-fill));
+ }
+ .settingsPanel .pluginTab:focus-visible {
+-  outline: 2px solid var(--isUser-fill);
++  outline: 2px solid var(--settings-accent, var(--isUser-fill));
+   outline-offset: -2px;
+ }
+ .settingsPanel .pluginTabCount {
+@@ -8735,7 +8749,7 @@ html.a2-offline .historyUploadBtn {
+   border-color: var(--set-field-border);
+ }
+ .settingsPanel .pluginIconBtn:focus-visible {
+-  outline: 2px solid var(--isUser-fill);
++  outline: 2px solid var(--settings-accent, var(--isUser-fill));
+   outline-offset: 1px;
+ }
+ .settingsPanel .pluginIconBtn svg { width: 15px; height: 15px; }
+@@ -8780,7 +8794,7 @@ html.a2-offline .historyUploadBtn {
+ }
+ .settingsPanel .pluginHead:hover { background: rgba(255, 255, 255, 0.04); }
+ .settingsPanel .pluginHead:focus-visible {
+-  outline: 2px solid var(--isUser-fill);
++  outline: 2px solid var(--settings-accent, var(--isUser-fill));
+   outline-offset: -2px;
+ }
+ .settingsPanel .pluginMark {
 @@ -8790,8 +8804,8 @@ html.a2-offline .historyUploadBtn {
    width: 28px;
    height: 28px;

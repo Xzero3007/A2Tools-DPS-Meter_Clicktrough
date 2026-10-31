@@ -1,7 +1,7 @@
-From 5d4663724019f70d28c0052a7dc611f6b03dd2bf Mon Sep 17 00:00:00 2001
+From 0539bca6ab6b75a084c3bf44d3062f30df70c518 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Tue, 27 Oct 2026 23:02:23 +0000
-Subject: [PATCH 28/33] Plugins: character values with when the game reported
+Subject: [PATCH 28/34] Plugins: character values with when the game reported
  them; shops per character
 
 The character event now says when the game last reported each value
