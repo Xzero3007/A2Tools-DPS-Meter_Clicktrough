@@ -1,7 +1,7 @@
-From 7a25d3a5543b0f1fda330a1b2b7414d179e5b7f0 Mon Sep 17 00:00:00 2001
+From 190ab8c37c289510d20686f0a78f07ff34cff05e Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Tue, 27 Oct 2026 02:04:24 +0000
-Subject: [PATCH 26/35] Plugins this build leaves out don't run
+Subject: [PATCH 26/36] Plugins this build leaves out don't run
 
 The original's plugins this build leaves out (data/ct-plugins/
 left-out.txt, an id a line: Pet Soul Tracker, whose list is Pet Finder's)

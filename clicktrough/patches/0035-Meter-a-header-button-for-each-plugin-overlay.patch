@@ -1,7 +1,7 @@
-From 6196f462bb06107951d2887ffa2bef7ec79117de Mon Sep 17 00:00:00 2001
+From 649f14a788399699587ccb736069bfc93dcccd0a Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Mon, 2 Nov 2026 13:02:19 +0000
-Subject: [PATCH 35/35] Meter: a header button for each plugin overlay
+Subject: [PATCH 35/36] Meter: a header button for each plugin overlay
 
 A plugin that names an overlay in its manifest (ui.overlay: the Map's
 overlay, the Inventory's limits) gets a button of its own in the meter's

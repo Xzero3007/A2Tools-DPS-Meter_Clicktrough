@@ -1,7 +1,7 @@
-From 39966e3bd1b499e4463fae971f813dc7a148ac30 Mon Sep 17 00:00:00 2001
+From 9d277db8a647388daddd1402c373dd86d1995eb7 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Sat, 24 Oct 2026 12:42:42 +0000
-Subject: [PATCH 09/35] Plugins: a text size for each plugin
+Subject: [PATCH 09/36] Plugins: a text size for each plugin
 
 A plugin's text could be as large as it made it, larger than the
 meter's. Two buttons in the dock's panel bar and in a plugin's own

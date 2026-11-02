@@ -1,0 +1,92 @@
+From 4cb5716f746e48ebc5f9af0669e3b06f924da46f Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Mon, 2 Nov 2026 14:08:50 +0000
+Subject: [PATCH 36/36] Plugins: the meter's lock is every widget's lock
+
+Plugins' widgets had a lock of their own (a2.widgets.lock: Event Timers'
+icons, Cooldowns, Ping, the boss callouts, the Map's overlay ...) besides
+the meter's, so players had to open several locks to move or click one.
+The meter's lock in its header is now every widget's: locked, clicks go
+through them to the game; unlocked, they move and their buttons work. A
+plugin's own lock is not kept (one kept from before is undone), and its
+widgets hear the meter's lock change ("locked").
+---
+ src-tauri/src/plugins/a2.js      |  5 +++--
+ src-tauri/src/plugins/widgets.rs | 30 ++++++++++++++++++++++--------
+ 2 files changed, 25 insertions(+), 10 deletions(-)
+
+diff --git a/src-tauri/src/plugins/a2.js b/src-tauri/src/plugins/a2.js
+index 946d7e2..720ae2f 100644
+--- a/src-tauri/src/plugins/a2.js
++++ b/src-tauri/src/plugins/a2.js
+@@ -127,8 +127,9 @@
+ //   await a2.widgets.open("name", { width, height })  open one, or show it again; at most 16
+ //   await a2.widgets.close("name")
+ //   await a2.widgets.send("name", data)        the widget hears it: a2.on("widget", (data) => ...)
+-//   await a2.widgets.lock(true / false)        locked, clicks go through them and they stay put
+-//   await a2.widgets.locked()                  whether they are locked
++//   await a2.widgets.lock(true / false)        locked, clicks go through them and they stay put (Clicktrough:
++//                                              no effect: the meter's lock is every widget's lock)
++//   await a2.widgets.locked()                  whether they are locked (Clicktrough: the meter's lock)
+ //   a2.on("widget-message", ({ name, data }) => ...)  what a widget posted
+ //   From a widget's page (widget.html):
+ //   a2.widget.name                             its name
+diff --git a/src-tauri/src/plugins/widgets.rs b/src-tauri/src/plugins/widgets.rs
+index 9477242..9e02805 100644
+--- a/src-tauri/src/plugins/widgets.rs
++++ b/src-tauri/src/plugins/widgets.rs
+@@ -49,8 +49,13 @@ fn place_key(id: &str, name: &str) -> String {
+     format!("dpsMeter.pluginWidget.{id}.{name}")
+ }
+ 
+-fn is_locked(app: &tauri::AppHandle, id: &str) -> bool {
+-    app.try_state::<AppState>().and_then(|s| s.settings.get(&locked_key(id))).as_deref() == Some("true")
++/// Clicktrough: one lock for every widget, the meter's (the lock in its
++/// header, with "Lock all meter windows"): locked, clicks go through them to
++/// the game; unlocked, they move and their buttons work. A plugin's own lock
++/// (a2.widgets.lock) is no longer kept: players had to open several locks to
++/// use the overlays.
++fn is_locked(_app: &tauri::AppHandle, _id: &str) -> bool {
++    crate::app::all_windows_locked()
+ }
+ 
+ /// The calling window's widget: its plugin and name.
+@@ -268,6 +273,17 @@ pub fn reapply_locks(app: &tauri::AppHandle) {
+     for (_, window) in app.webview_windows() {
+         relock(app, &window);
+     }
++    // Clicktrough: the meter's lock is every widget's: they hear it change
++    // ("locked"), as they heard their plugin's own lock before.
++    static TOLD: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(2);
++    let now = crate::app::all_windows_locked();
++    if TOLD.swap(now as u8, std::sync::atomic::Ordering::Relaxed) != now as u8 {
++        for (label, window) in app.webview_windows() {
++            if let Some((id, _)) = parse_label(&label) {
++                let _ = window.emit("plugin-event", serde_json::json!({ "plugin": id, "event": "locked", "data": now }));
++            }
++        }
++    }
+ }
+ 
+ /// A widget's click-through as its lock and area say, if `window` is one:
+@@ -612,13 +628,11 @@ pub fn plugin_widget_send(app: tauri::AppHandle, window: tauri::WebviewWindow, p
+ pub fn plugin_widgets_lock(app: tauri::AppHandle, window: tauri::WebviewWindow, plugin: Option<String>, locked: bool) -> Result<(), String> {
+     let id = window_plugin(&window, plugin.as_deref())?;
+     require(&app, &id, "widgets")?;
++    // Clicktrough: the meter's lock is every widget's (`is_locked`); a
++    // plugin's own is not kept, nor any lock kept from before.
++    let _ = locked;
+     if let Some(state) = app.try_state::<AppState>() {
+-        state.settings.set(&locked_key(&id), if locked { "true" } else { "false" });
+-    }
+-    for widget in open_widgets(&app, &id) {
+-        apply_lock(&widget, locked);
+-        let event = serde_json::json!({ "plugin": id, "event": "locked", "data": locked });
+-        let _ = widget.emit("plugin-event", event);
++        state.settings.set(&locked_key(&id), "false");
+     }
+     Ok(())
+ }
+-- 
+2.43.0
+

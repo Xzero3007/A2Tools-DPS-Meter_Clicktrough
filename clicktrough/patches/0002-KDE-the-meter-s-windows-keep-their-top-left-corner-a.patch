@@ -1,7 +1,7 @@
-From a8d28bf6926a82edc469d2ea56a6619abedd73d2 Mon Sep 17 00:00:00 2001
+From c4d3315bea8cfd86686be51e8907708ce517f6d1 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Thu, 22 Oct 2026 13:04:42 +0000
-Subject: [PATCH 02/35] KDE: the meter's windows keep their top-left corner as
+Subject: [PATCH 02/36] KDE: the meter's windows keep their top-left corner as
  they resize
 
 KWin 6 keeps the centre of a Wayland window that resizes itself
