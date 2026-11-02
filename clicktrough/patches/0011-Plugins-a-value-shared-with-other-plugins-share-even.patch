@@ -1,7 +1,7 @@
-From 6feffef4a834ed34d4f9298609c0a41e011ab167 Mon Sep 17 00:00:00 2001
+From 55623a9a757172ad25bd3aead3565471924adc22 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Sat, 24 Oct 2026 14:16:36 +0000
-Subject: [PATCH 11/34] Plugins: a value shared with other plugins (share,
+Subject: [PATCH 11/35] Plugins: a value shared with other plugins (share,
  events:shared)
 
 A plugin with the permission "share" can hand other plugins a value:

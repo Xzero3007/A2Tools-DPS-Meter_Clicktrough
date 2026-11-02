@@ -1,7 +1,7 @@
-From 81754f7a94be67c1e9ef647f144677b08a172db3 Mon Sep 17 00:00:00 2001
+From 316003b83872d773a94f5a5178abc24df9cb2d66 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Sat, 31 Oct 2026 15:22:53 +0000
-Subject: [PATCH 34/34] Plugins: the player's items (events:items), and Abyss
+Subject: [PATCH 34/35] Plugins: the player's items (events:items), and Abyss
  Points live
 
 The inventory, the character storage and the account storage as the game
@@ -9842,7 +9842,7 @@ index a38c5ec..f4183ea 100644
  pub mod packet_accumulator;
  pub mod stream_assembler;
 diff --git a/src-tauri/src/capture/stream_processor.rs b/src-tauri/src/capture/stream_processor.rs
-index 721ceaf..192fa40 100644
+index 5b11071..7a6a99f 100644
 --- a/src-tauri/src/capture/stream_processor.rs
 +++ b/src-tauri/src/capture/stream_processor.rs
 @@ -280,6 +280,14 @@ impl StreamProcessor {

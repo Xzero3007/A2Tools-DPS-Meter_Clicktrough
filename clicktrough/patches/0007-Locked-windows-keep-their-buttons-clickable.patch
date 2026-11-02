@@ -1,7 +1,7 @@
-From 1f3a6dc06bf1a928d74949a593b137cc98d6f806 Mon Sep 17 00:00:00 2001
+From 850b3d4a6655d0dd08493a58adec595558ffd6fe Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Sat, 24 Oct 2026 10:31:21 +0000
-Subject: [PATCH 07/34] Locked windows keep their buttons clickable
+Subject: [PATCH 07/35] Locked windows keep their buttons clickable
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit

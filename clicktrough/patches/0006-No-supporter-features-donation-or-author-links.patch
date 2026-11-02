@@ -1,7 +1,7 @@
-From e482d64f8571f1b128f069ff97c31c4df37ff8e9 Mon Sep 17 00:00:00 2001
+From a9e9f57d2158e701a3b9850c674c44fe41e0e801 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Sat, 24 Oct 2026 10:13:55 +0000
-Subject: [PATCH 06/34] No supporter features, donation or author links
+Subject: [PATCH 06/35] No supporter features, donation or author links
 
 This build is a fork; the app carries nothing that points to the original
 author's support channels:

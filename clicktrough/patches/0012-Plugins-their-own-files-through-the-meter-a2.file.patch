@@ -1,7 +1,7 @@
-From 1f23d5935ddb39ba46eb1559410dbc31f93dab07 Mon Sep 17 00:00:00 2001
+From c837c13b4e93e51591127dba72aabbd966a54ec6 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Sat, 24 Oct 2026 17:16:33 +0000
-Subject: [PATCH 12/34] Plugins: their own files through the meter (a2.file)
+Subject: [PATCH 12/35] Plugins: their own files through the meter (a2.file)
 
 WebKitGTK 2.54 refuses every file a sandboxed plugin frame asks for from
 the plugin scheme; the meter inlines what a page names at the start, but

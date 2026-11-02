@@ -1,0 +1,659 @@
+From 7e7f8a2dd290508c9cb98d7cf3f533a7c27fb4a6 Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Mon, 2 Nov 2026 13:02:19 +0000
+Subject: [PATCH 35/35] Meter: a header button for each plugin overlay
+
+A plugin that names an overlay in its manifest (ui.overlay: the Map's
+overlay, the Inventory's limits) gets a button of its own in the meter's
+header, before the plugins button: it shows or hides that overlay alone,
+the plugin window staying as it is, and is gold while the overlay shows.
+The plugin hears "overlay" and opens or closes its widget, as its own
+switch does. With the plugins turned off by the plugins button, the
+overlay asked for shows on its own; the plugins button hides or shows
+them all again.
+
+A widget moved by its plugin (a2.widgets.place) moves on KDE's native
+Wayland too, where no app may move a window: it goes and comes back, and
+KWin puts it at the place the meter keeps; a2.widgets.where says the
+place KWin last reported there.
+---
+ index.html                                   |   1 +
+ public/src/js/overlayButtons.js              |  71 +++++++++++
+ src-tauri/src/app.rs                         |   2 +
+ src-tauri/src/platform/linux/window.rs       |   7 ++
+ src-tauri/src/platform/unsupported/window.rs |   5 +
+ src-tauri/src/platform/win32/window.rs       |   5 +
+ src-tauri/src/plugins/a2.js                  |   7 ++
+ src-tauri/src/plugins/mod.rs                 |   4 +
+ src-tauri/src/plugins/overlays.rs            | 122 +++++++++++++++++++
+ src-tauri/src/plugins/widgets.rs             | 101 ++++++++++++++-
+ src/styles.css                               |   3 +
+ tests/overlay-buttons.test.mjs               |  94 ++++++++++++++
+ 12 files changed, 416 insertions(+), 6 deletions(-)
+ create mode 100644 public/src/js/overlayButtons.js
+ create mode 100644 src-tauri/src/plugins/overlays.rs
+ create mode 100644 tests/overlay-buttons.test.mjs
+
+diff --git a/index.html b/index.html
+index 7df8ffb..422c4da 100644
+--- a/index.html
++++ b/index.html
+@@ -1563,6 +1563,7 @@
+     <script src="/src/js/core.js?v=2076a"></script>
+     <script src="/src/js/lockedButtons.js"></script>
+     <script src="/src/js/pluginsButton.js"></script>
++    <script src="/src/js/overlayButtons.js"></script>
+     <script src="/src/js/pluginIcons.js"></script>
+     <script src="/src/js/pluginSettings.js"></script>
+   </body>
+diff --git a/public/src/js/overlayButtons.js b/public/src/js/overlayButtons.js
+new file mode 100644
+index 0000000..65b93be
+--- /dev/null
++++ b/public/src/js/overlayButtons.js
+@@ -0,0 +1,71 @@
++// Clicktrough: a button in the meter's header for each plugin overlay a
++// plugin names in its manifest (`ui.overlay`: the Map's overlay, the
++// Inventory's limits), before the plugins button: it shows or hides that
++// overlay alone, the plugin window staying as it is. Gold while the overlay
++// is on. While the meter is locked it stays clickable with the other header
++// buttons (lockedButtons.js). The backend: plugins/overlays.rs.
++(() => {
++  const view = window.A2_VIEW || window.__A2_VIEW__ || "main";
++  const invoke = window.__TAURI__?.core?.invoke;
++  const listen = window.__TAURI__?.event?.listen;
++  if (view !== "main" || typeof invoke !== "function") return;
++
++  const start = () => {
++    const bar = document.querySelector(".headerBtns");
++    const before = document.querySelector(".pluginsBtn");
++    if (!bar) return;
++    let shownKey = "";
++    const render = (list) => {
++      if (!Array.isArray(list)) return;
++      const key = JSON.stringify(list.map((o) => [o.id, o.icon, o.title]));
++      if (key !== shownKey) {
++        shownKey = key;
++        for (const old of bar.querySelectorAll(".overlayBtn")) old.remove();
++        for (const o of list) {
++          const btn = document.createElement("div");
++          btn.className = "headerBtn overlayBtn";
++          btn.dataset.plugin = o.id;
++          btn.setAttribute("role", "button");
++          btn.setAttribute("tabindex", "0");
++          btn.setAttribute("aria-label", `Show or hide: ${o.title}`);
++          const icon = document.createElement("i");
++          icon.setAttribute("data-lucide", o.icon);
++          btn.append(icon);
++          const toggle = () => Promise.resolve(invoke("plugin_overlay_toggle", { id: o.id })).then(mark).catch(() => {});
++          btn.addEventListener("click", (event) => {
++            event.stopPropagation();
++            toggle();
++          });
++          btn.addEventListener("keydown", (event) => {
++            if (event.key !== "Enter" && event.key !== " ") return;
++            event.preventDefault();
++            toggle();
++          });
++          bar.insertBefore(btn, before && before.parentNode === bar ? before : null);
++        }
++        try { window.lucide?.createIcons?.({ root: bar }); } catch {}
++        // The header's buttons moved: the lock button's place is sent again.
++        requestAnimationFrame(() => window._dpsApp?._sendLockBtnRect?.());
++      }
++      mark(list);
++    };
++    // On or off: gold while the overlay shows.
++    const mark = (list) => {
++      if (!Array.isArray(list)) return;
++      for (const o of list) {
++        const btn = bar.querySelector(`.overlayBtn[data-plugin="${CSS.escape(o.id)}"]`);
++        if (!btn) continue;
++        btn.classList.toggle("isActive", !!o.on);
++        btn.setAttribute("aria-pressed", String(!!o.on));
++        btn.title = `${o.title}: ${o.on ? "hide" : "show"}`;
++      }
++    };
++    const refresh = () => Promise.resolve(invoke("plugin_overlays")).then(render).catch(() => {});
++    refresh();
++    Promise.resolve(listen?.("overlays-changed", (event) => render(event?.payload))).catch(() => {});
++    // Plugins loaded later (the meter's start): asked again a few times.
++    for (const ms of [2000, 6000, 15000]) setTimeout(refresh, ms);
++  };
++  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start, { once: true });
++  else start();
++})();
+diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
+index a3a14c5..25fb231 100644
+--- a/src-tauri/src/app.rs
++++ b/src-tauri/src/app.rs
+@@ -4503,6 +4503,8 @@ pub fn run() {
+             crate::plugins::dock::dock_close,
+             crate::plugins::dock::dock_status,
+             crate::plugins::dock::dock_toggle,
++            crate::plugins::overlays::plugin_overlays,
++            crate::plugins::overlays::plugin_overlay_toggle,
+             crate::plugins::dock::dock_fold,
+             crate::plugins::dock::plugin_set_docked,
+             crate::plugins::set_plugin_theme,
+diff --git a/src-tauri/src/platform/linux/window.rs b/src-tauri/src/platform/linux/window.rs
+index d380cc5..db901f2 100644
+--- a/src-tauri/src/platform/linux/window.rs
++++ b/src-tauri/src/platform/linux/window.rs
+@@ -534,6 +534,13 @@ pub fn keep_places(
+     super::focus::keep_places(super::focus::Places { save: Box::new(save), load: Box::new(load) });
+ }
+ 
++/// Clicktrough: whether KWin puts the meter's windows where the meter keeps
++/// them each time they appear, an app being unable to move its own (KDE on
++/// native Wayland, `focus::kwin_places_windows`).
++pub fn kwin_places_windows() -> bool {
++    super::focus::kwin_places_windows()
++}
++
+ /// Whether the meter places its own windows and KWin only its widgets
+ /// (`focus::places_own_windows`).
+ pub fn places_own_windows() -> bool {
+diff --git a/src-tauri/src/platform/unsupported/window.rs b/src-tauri/src/platform/unsupported/window.rs
+index 55e32bd..d030a00 100644
+--- a/src-tauri/src/platform/unsupported/window.rs
++++ b/src-tauri/src/platform/unsupported/window.rs
+@@ -70,6 +70,11 @@ pub fn hide_in_place(window: &tauri::WebviewWindow) {
+     hide_without_focus(window);
+ }
+ 
++/// Clicktrough: KWin placing the meter's windows is KDE's (Linux).
++pub fn kwin_places_windows() -> bool {
++    false
++}
++
+ /// The meter places its own windows here.
+ pub fn places_own_windows() -> bool {
+     true
+diff --git a/src-tauri/src/platform/win32/window.rs b/src-tauri/src/platform/win32/window.rs
+index 610ce00..65eb621 100644
+--- a/src-tauri/src/platform/win32/window.rs
++++ b/src-tauri/src/platform/win32/window.rs
+@@ -302,6 +302,11 @@ pub fn hide_in_place(window: &tauri::WebviewWindow) {
+     hide_without_focus(window);
+ }
+ 
++/// Clicktrough: KWin placing the meter's windows is KDE's (Linux).
++pub fn kwin_places_windows() -> bool {
++    false
++}
++
+ /// The meter places its own windows here.
+ pub fn places_own_windows() -> bool {
+     true
+diff --git a/src-tauri/src/plugins/a2.js b/src-tauri/src/plugins/a2.js
+index f749e8d..946d7e2 100644
+--- a/src-tauri/src/plugins/a2.js
++++ b/src-tauri/src/plugins/a2.js
+@@ -64,6 +64,13 @@
+ //                                              (permission "share"); null withdraws it
+ //   a2.on("shared", ({ plugin, value }) => ...)  what another plugin shared (permission "events:shared"):
+ //                                              at once, and every value shared so far at start
++//   a2.on("overlay", ({ show, widget }) => ...)  Clicktrough: the meter's header button for the plugin's
++//                                              overlay was pressed: open (show) or close that widget. A
++//                                              plugin names its overlay in its manifest:
++//                                              "ui": { "overlay": { "widget": "<name>", "title": "...", "icon": "<lucide>" } }
++//   a2.widgets.place(name, { x, y })           moves a widget (on KDE's native Wayland it goes and comes
++//                                              back at the place, KWin placing it); a2.widgets.where(name)
++//                                              says where it is (there: as KWin last reported it)
+ //   a2.on("items", (it) => ...)                Clicktrough: the player's items (permission "events:items"),
+ //                                              at start and on each change: { owner, snapshotAt, listedAt,
+ //                                              containers: { "1" inventory, "15" character storage, "2" account
+diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
+index 871d7b7..639fbfa 100644
+--- a/src-tauri/src/plugins/mod.rs
++++ b/src-tauri/src/plugins/mod.rs
+@@ -16,6 +16,8 @@ pub mod catalog;
+ pub mod decoder;
+ pub mod dock;
+ pub mod fps;
++// Clicktrough: a plugin's overlay on a button in the meter's header.
++pub mod overlays;
+ pub mod widgets;
+ // Clicktrough: the world around the player (`events:world`).
+ pub mod world;
+@@ -488,6 +490,8 @@ pub async fn plugin_set_enabled(app: tauri::AppHandle, id: String, enabled: bool
+         dock::sync(&app, None);
+     }
+     tracing::info!("Plugins: {id} {}", if enabled { "enabled" } else { "disabled" });
++    // Clicktrough: its overlay's header button comes or goes.
++    overlays::notify(&app);
+     let host = host(&app)?;
+     Ok(view(&app, &host))
+ }
+diff --git a/src-tauri/src/plugins/overlays.rs b/src-tauri/src/plugins/overlays.rs
+new file mode 100644
+index 0000000..c346d96
+--- /dev/null
++++ b/src-tauri/src/plugins/overlays.rs
+@@ -0,0 +1,122 @@
++//! Clicktrough: a plugin's overlay on a button of its own in the meter's
++//! header (the Map's overlay, the Inventory's limits), shown or hidden
++//! without the plugin window. A plugin names it in its manifest:
++//!
++//! ```json
++//! "ui": { "overlay": { "widget": "overlay", "title": "Map overlay", "icon": "map" } }
++//! ```
++//!
++//! The button asks the plugin's page (running in the dock, or its window,
++//! hidden or not) to open or close that widget (event `overlay`, `{ show,
++//! widget }`), as its own switch does. With the plugins turned off by the
++//! plugins button, the overlay asked for shows on its own (`widgets::show_alone`).
++
++use serde_json::Value;
++use tauri::Emitter;
++
++#[derive(Debug, Clone, PartialEq)]
++struct Overlay {
++    id: String,
++    name: String,
++    widget: String,
++    title: String,
++    icon: String,
++}
++
++/// An overlay as a manifest's `ui.overlay` declares it, or None.
++fn read(id: &str, name: &str, ui: Option<&Value>) -> Option<Overlay> {
++    let o = ui?.get("overlay")?;
++    let widget = o.get("widget")?.as_str()?.to_string();
++    let ok_name = |s: &str| !s.is_empty() && s.len() <= 32 && s.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
++    if !ok_name(&widget) {
++        return None;
++    }
++    let title: String = o.get("title").and_then(Value::as_str).unwrap_or(name).chars().take(40).collect();
++    let icon = o.get("icon").and_then(Value::as_str).filter(|s| ok_name(s)).unwrap_or("layers").to_string();
++    Some(Overlay { id: id.to_string(), name: name.to_string(), widget, title, icon })
++}
++
++/// The overlays of the plugins loaded and turned on, in the plugins' order.
++fn declared(app: &tauri::AppHandle) -> Vec<Overlay> {
++    let Ok(host) = super::host(app) else { return Vec::new() };
++    let off = super::disabled(app);
++    let mut out: Vec<Overlay> = host
++        .list()
++        .into_iter()
++        .filter(|p| p.error.is_none() && !off.contains(&p.id))
++        .filter_map(|p| host.with(&p.id, |l| read(&l.manifest.id, &l.manifest.name, l.manifest.ui.as_ref())).flatten())
++        .collect();
++    let order = super::order(app);
++    out.sort_by_key(|o| order.iter().position(|id| id == &o.id).unwrap_or(usize::MAX));
++    out
++}
++
++/// Whether an overlay is on: open, not closed by its plugin, not held off
++/// by the plugins button.
++fn is_on(app: &tauri::AppHandle, label: &str) -> bool {
++    use tauri::Manager;
++    app.get_webview_window(label).is_some()
++        && !super::widgets::is_closed(label)
++        && !super::widgets::held_by_button(label)
++        && !(super::widgets::plugins_hidden(app) && !super::widgets::is_alone(label))
++}
++
++fn listed(app: &tauri::AppHandle) -> Value {
++    let list: Vec<Value> = declared(app)
++        .into_iter()
++        .map(|o| {
++            let on = is_on(app, &super::widgets::label(&o.id, &o.widget));
++            serde_json::json!({ "id": o.id, "name": o.name, "title": o.title, "icon": o.icon, "on": on })
++        })
++        .collect();
++    Value::Array(list)
++}
++
++/// The header's overlay buttons: `[{ id, name, title, icon, on }]`.
++#[tauri::command]
++pub fn plugin_overlays(app: tauri::AppHandle) -> Value {
++    listed(&app)
++}
++
++/// A header button pressed: plugin `id`'s overlay shown, or hidden.
++#[tauri::command]
++pub fn plugin_overlay_toggle(app: tauri::AppHandle, id: String) -> Value {
++    let Some(o) = declared(&app).into_iter().find(|o| o.id == id) else { return listed(&app) };
++    let label = super::widgets::label(&o.id, &o.widget);
++    let show = !is_on(&app, &label);
++    if show {
++        super::widgets::show_alone(&app, &label);
++    } else {
++        super::widgets::forget_alone(&label);
++    }
++    tracing::debug!("Plugins: the header {} {}'s overlay", if show { "shows" } else { "hides" }, o.id);
++    let event = serde_json::json!({ "plugin": o.id, "event": "overlay", "data": { "show": show, "widget": o.widget } });
++    super::emit_plugin(&app, &o.id, event);
++    listed(&app)
++}
++
++/// The meter's header hears how the overlays stand (a plugin opened or
++/// closed one, the plugins button, a plugin turned on or off).
++pub fn notify(app: &tauri::AppHandle) {
++    let _ = app.emit_to("main", "overlays-changed", listed(app));
++}
++
++#[cfg(test)]
++mod tests {
++    use super::read;
++
++    #[test]
++    fn a_manifest_names_its_overlay() {
++        let ui = serde_json::json!({ "panel": {}, "overlay": { "widget": "limits", "title": "Limits", "icon": "gauge" } });
++        let o = read("inventory", "Inventory", Some(&ui)).unwrap();
++        assert_eq!((o.widget.as_str(), o.title.as_str(), o.icon.as_str()), ("limits", "Limits", "gauge"));
++        let plain = serde_json::json!({ "overlay": { "widget": "overlay" } });
++        let o = read("map", "Map", Some(&plain)).unwrap();
++        assert_eq!((o.title.as_str(), o.icon.as_str()), ("Map", "layers"));
++        for bad in [serde_json::json!({}), serde_json::json!({ "overlay": { "widget": "Bad_Name" } }), serde_json::json!({ "overlay": { "widget": "x", "icon": "<svg>" } })] {
++            let o = read("x", "X", Some(&bad));
++            assert!(o.is_none() || o.unwrap().icon == "layers", "{bad}");
++        }
++        assert!(read("x", "X", None).is_none());
++    }
++}
+diff --git a/src-tauri/src/plugins/widgets.rs b/src-tauri/src/plugins/widgets.rs
+index 51367ca..5e02775 100644
+--- a/src-tauri/src/plugins/widgets.rs
++++ b/src-tauri/src/plugins/widgets.rs
+@@ -27,7 +27,7 @@ const MAX_MESSAGE: usize = 64 * 1024;
+ /// A widget's window label: `pw_<plugin>_<name>`. Neither a plugin id nor a
+ /// widget name has a `_`, so the label reads back unambiguously, and it never
+ /// starts with `plugin-`, so no main-window command accepts it.
+-fn label(id: &str, name: &str) -> String {
++pub(crate) fn label(id: &str, name: &str) -> String {
+     format!("pw_{id}_{name}")
+ }
+ 
+@@ -100,6 +100,47 @@ fn held_by_button_set() -> &'static Mutex<std::collections::HashSet<String>> {
+     HELD.get_or_init(Mutex::default)
+ }
+ 
++/// Clicktrough: the overlays a header button showed on their own while the
++/// plugins button has the plugins off (`overlays.rs`), by label.
++fn alone_set() -> &'static Mutex<std::collections::HashSet<String>> {
++    static ALONE: std::sync::OnceLock<Mutex<std::collections::HashSet<String>>> = std::sync::OnceLock::new();
++    ALONE.get_or_init(Mutex::default)
++}
++
++/// Whether widget `label` shows on its own (a header button) while the
++/// plugins are off.
++pub fn is_alone(label: &str) -> bool {
++    alone_set().lock().unwrap_or_else(|p| p.into_inner()).contains(label)
++}
++
++/// A header button shows widget `label`: with the plugins off it shows on
++/// its own, at once if its plugin has it open already.
++pub fn show_alone(app: &tauri::AppHandle, label: &str) {
++    if !plugins_hidden(app) {
++        return;
++    }
++    alone_set().lock().unwrap_or_else(|p| p.into_inner()).insert(label.to_string());
++    let was_held = held_by_button_set().lock().unwrap_or_else(|p| p.into_inner()).remove(label);
++    if !was_held || is_closed(label) {
++        return;
++    }
++    let Some(window) = app.get_webview_window(label) else { return };
++    let Some((id, _)) = parse_label(label) else { return };
++    if super::game_hides(app, &id) {
++        super::hold_for_game(&window);
++    } else {
++        if !crate::platform::window::reveal_in_place(&window) {
++            crate::platform::window::show_on_top_without_focus(&window);
++        }
++        relock(app, &window);
++    }
++}
++
++/// A header button hides widget `label` (its plugin closes it).
++pub fn forget_alone(label: &str) {
++    alone_set().lock().unwrap_or_else(|p| p.into_inner()).remove(label);
++}
++
+ /// Whether the plugins button has the plugins off.
+ pub fn plugins_hidden(app: &tauri::AppHandle) -> bool {
+     app.try_state::<AppState>().is_some_and(|s| s.settings.get(PLUGINS_HIDDEN_KEY).as_deref() == Some("true"))
+@@ -125,12 +166,16 @@ pub fn set_plugins_hidden(app: &tauri::AppHandle, off: bool) {
+     if let Some(state) = app.try_state::<AppState>() {
+         state.settings.set(PLUGINS_HIDDEN_KEY, if off { "true" } else { "false" });
+     }
++    // The plugins button hides or shows them all, the ones a header button
++    // showed on their own too (overlays.rs).
++    alone_set().lock().unwrap_or_else(|p| p.into_inner()).clear();
+     if off {
+         for (label, window) in app.webview_windows() {
+             if parse_label(&label).is_some() && !is_closed(&label) {
+                 hold_by_button(&window);
+             }
+         }
++        super::overlays::notify(app);
+         return;
+     }
+     let held: Vec<String> = held_by_button_set().lock().unwrap_or_else(|p| p.into_inner()).drain().collect();
+@@ -149,6 +194,7 @@ pub fn set_plugins_hidden(app: &tauri::AppHandle, off: bool) {
+         }
+         relock(app, &window);
+     }
++    super::overlays::notify(app);
+ }
+ 
+ /// The parts of each widget that take the mouse, as its page reported them
+@@ -265,13 +311,15 @@ pub async fn plugin_widget_open(
+         crate::platform::window::set_size(&widget, tauri::LogicalSize::new(width, height).into());
+         if super::game_hides(&app, &id) {
+             super::hold_for_game(&widget);
+-        } else if plugins_hidden(&app) || held_by_button(widget.label()) {
+-            // Clicktrough: the plugins are off (the meter's plugins button).
++        } else if (plugins_hidden(&app) && !is_alone(widget.label())) || held_by_button(widget.label()) {
++            // Clicktrough: the plugins are off (the meter's plugins button),
++            // unless a header button showed this one on its own.
+             hold_by_button(&widget);
+         } else if !crate::platform::window::reveal_in_place(&widget) {
+             crate::platform::window::show_on_top_without_focus(&widget);
+         }
+         apply_lock(&widget, is_locked(&app, &id));
++        super::overlays::notify(&app);
+         return Ok(());
+     }
+     if all_widgets(&app, &id).len() >= MAX_WIDGETS {
+@@ -342,10 +390,12 @@ pub async fn plugin_widget_open(
+     if super::game_hides(&app, &id) {
+         super::hold_for_game(&widget);
+     }
+-    // Clicktrough: the plugins are off (the meter's plugins button).
+-    if plugins_hidden(&app) {
++    // Clicktrough: the plugins are off (the meter's plugins button),
++    // unless a header button showed this one on its own.
++    if plugins_hidden(&app) && !is_alone(widget.label()) {
+         hold_by_button(&widget);
+     }
++    super::overlays::notify(&app);
+     Ok(())
+ }
+ 
+@@ -448,7 +498,14 @@ pub fn plugin_widget_where(app: tauri::AppHandle, window: tauri::WebviewWindow,
+     let id = window_plugin(&window, plugin.as_deref())?;
+     require(&app, &id, "widgets")?;
+     let Some(widget) = app.get_webview_window(&label(&id, &name)) else { return Ok(Value::Null) };
+-    let at = widget.outer_position().map_err(|e| e.to_string())?;
++    let mut at = widget.outer_position().map_err(|e| e.to_string())?;
++    // Clicktrough: where KWin places the meter's windows (KDE on native
++    // Wayland) an app never learns its window's place: KWin's last report.
++    if crate::platform::window::kwin_places_windows() {
++        if let Some((x, y)) = reported_place(&app, widget.label()) {
++            at = tauri::PhysicalPosition::new(x, y);
++        }
++    }
+     let size = widget.outer_size().map_err(|e| e.to_string())?;
+     let screen = widget.current_monitor().ok().flatten().map(|m| {
+         let area = m.work_area();
+@@ -482,11 +539,41 @@ pub fn plugin_widget_place(app: tauri::AppHandle, window: tauri::WebviewWindow,
+         state.settings.set(&format!("window.{widget_label}.placed"), &format!("{x},{y},0,0"));
+     }
+     match app.get_webview_window(&widget_label) {
++        // Clicktrough: KDE on native Wayland lets no app move its window, and
++        // KWin puts a widget where the meter keeps it each time it appears: a
++        // shown one goes and comes back there.
++        Some(widget) if crate::platform::window::kwin_places_windows() => {
++            let shown = widget.is_visible().unwrap_or(false) && !is_closed(&widget_label) && !held_by_button(&widget_label);
++            if shown {
++                crate::platform::window::hide_without_focus(&widget);
++                let app = app.clone();
++                tauri::async_runtime::spawn(async move {
++                    tokio::time::sleep(Duration::from_millis(150)).await;
++                    let Some(widget) = app.get_webview_window(&widget_label) else { return };
++                    if !is_closed(&widget_label) && !held_by_button(&widget_label) {
++                        crate::platform::window::show_on_top_without_focus(&widget);
++                        relock(&app, &widget);
++                    }
++                });
++            }
++            Ok(())
++        }
+         Some(widget) => widget.set_position(tauri::PhysicalPosition::new(x, y)).map_err(|e| e.to_string()),
+         None => Ok(()),
+     }
+ }
+ 
++/// Clicktrough: where the window manager last said window `label` was left
++/// (`window.<label>.placed`, KWin's report, app.rs `save_window_place`).
++fn reported_place(app: &tauri::AppHandle, label: &str) -> Option<(i32, i32)> {
++    let value = app.try_state::<AppState>()?.settings.get(&format!("window.{label}.placed"))?;
++    let n: Vec<i32> = value.split(',').filter_map(|v| v.trim().parse().ok()).collect();
++    match n[..] {
++        [x, y, ..] => Some((x, y)),
++        _ => None,
++    }
++}
++
+ /// Close widget `name` of the calling plugin: hidden and kept (`closed`),
+ /// its page and place as they are, for opening it again at once.
+ #[tauri::command]
+@@ -497,6 +584,8 @@ pub fn plugin_widget_close(app: tauri::AppHandle, window: tauri::WebviewWindow,
+         tracing::debug!("Widgets: {id} closes {name:?} (from {})", window.label());
+         closed().lock().unwrap_or_else(|p| p.into_inner()).insert(widget.label().to_string());
+         crate::platform::window::hide_in_place(&widget);
++        forget_alone(widget.label());
++        super::overlays::notify(&app);
+     }
+     Ok(())
+ }
+diff --git a/src/styles.css b/src/styles.css
+index dd26f22..aa6559a 100644
+--- a/src/styles.css
++++ b/src/styles.css
+@@ -568,6 +568,9 @@ body.linuxOverlay .meter {
+ /* Clicktrough: the plugin window's button; brighter while the window is shown. */
+ .header .headerBtns .pluginsBtn[hidden] { display: none; }
+ .header .headerBtns .pluginsBtn.isActive { color: rgba(255, 255, 255, 0.9); }
++/* Clicktrough: a plugin overlay's own button (overlayButtons.js): gold while it shows. */
++.header .headerBtns .overlayBtn.isActive { color: var(--ct-accent); }
++.header .headerBtns .overlayBtn.isActive:hover { color: var(--ct-accent-light); }
+ 
+ /* ---------- boss HP: the waterline ---------- */
+ 
+diff --git a/tests/overlay-buttons.test.mjs b/tests/overlay-buttons.test.mjs
+new file mode 100644
+index 0000000..015d363
+--- /dev/null
++++ b/tests/overlay-buttons.test.mjs
+@@ -0,0 +1,94 @@
++// Clicktrough: the header's overlay buttons (overlayButtons.js): one per
++// plugin overlay, before the plugins button, gold while it shows, a click
++// asks plugin_overlay_toggle.
++import assert from "node:assert/strict";
++import { readFileSync } from "node:fs";
++import test from "node:test";
++import vm from "node:vm";
++
++const source = readFileSync(new URL("../public/src/js/overlayButtons.js", import.meta.url), "utf8");
++const tick = () => new Promise((resolve) => setImmediate(resolve));
++
++function element(tag) {
++  const attrs = {};
++  const classes = new Set();
++  const el = {
++    tag, children: [], handlers: {}, dataset: {}, title: "", parentNode: null,
++    set className(v) { classes.clear(); for (const c of String(v).split(/\s+/).filter(Boolean)) classes.add(c); },
++    get className() { return [...classes].join(" "); },
++    classList: { toggle: (n, on) => (on ? classes.add(n) : classes.delete(n)), contains: (n) => classes.has(n) },
++    setAttribute: (k, v) => { attrs[k] = String(v); },
++    getAttribute: (k) => attrs[k],
++    addEventListener: (n, h) => { el.handlers[n] = h; },
++    append: (...kids) => { for (const k of kids) { k.parentNode = el; el.children.push(k); } },
++    remove: () => { const p = el.parentNode; if (p) p.children = p.children.filter((c) => c !== el); },
++    attrs, classes,
++  };
++  return el;
++}
++
++function setup(list, toggled) {
++  const calls = [];
++  const listeners = {};
++  const bar = element("div");
++  const plugins = element("div");
++  plugins.className = "headerBtn pluginsBtn";
++  bar.append(plugins);
++  bar.insertBefore = (node, ref) => {
++    node.parentNode = bar;
++    const i = ref ? bar.children.indexOf(ref) : bar.children.length;
++    bar.children.splice(i, 0, node);
++  };
++  bar.querySelectorAll = (s) => (s === ".overlayBtn" ? bar.children.filter((c) => c.classList.contains("overlayBtn")) : []);
++  bar.querySelector = (s) => {
++    const m = /data-plugin="([^"]+)"/.exec(s);
++    return m ? bar.children.find((c) => c.dataset.plugin === m[1]) || null : null;
++  };
++  const window = {
++    A2_VIEW: "main",
++    lucide: { createIcons: () => calls.push("icons") },
++    __TAURI__: {
++      core: { invoke: (command, args) => { calls.push([command, args]); return Promise.resolve(command === "plugin_overlay_toggle" ? toggled : list); } },
++      event: { listen: (name, handler) => { listeners[name] = handler; return Promise.resolve(); } },
++    },
++  };
++  const document = {
++    readyState: "complete",
++    querySelector: (s) => (s === ".headerBtns" ? bar : s === ".pluginsBtn" ? plugins : null),
++    createElement: element,
++  };
++  vm.runInContext(source, vm.createContext({ window, document, Promise, CSS: { escape: (s) => s }, requestAnimationFrame: (f) => f(), setTimeout: () => 0 }));
++  return { bar, plugins, calls, listeners };
++}
++
++const MAP = { id: "map", name: "Map", title: "Map overlay", icon: "map", on: false };
++const LIMITS = { id: "inventory", name: "Inventory", title: "Limits", icon: "gauge", on: true };
++
++test("a button per overlay, before the plugins button, gold while it shows", async () => {
++  const app = setup([MAP, LIMITS]);
++  await tick();
++  const btns = app.bar.children;
++  assert.deepEqual(btns.map((b) => b.dataset.plugin ?? "plugins"), ["map", "inventory", "plugins"]);
++  assert.equal(btns[0].classList.contains("isActive"), false);
++  assert.equal(btns[1].classList.contains("isActive"), true);
++  assert.equal(btns[1].children[0].attrs["data-lucide"], "gauge");
++  assert.ok(app.calls.includes("icons"));
++});
++
++test("a click asks the backend and follows its answer", async () => {
++  const app = setup([MAP], [{ ...MAP, on: true }]);
++  await tick();
++  let stopped = false;
++  app.bar.children[0].handlers.click({ stopPropagation: () => { stopped = true; } });
++  await tick();
++  assert.ok(stopped);
++  assert.ok(app.calls.some((c) => Array.isArray(c) && c[0] === "plugin_overlay_toggle" && c[1].id === "map"));
++  assert.equal(app.bar.children[0].classList.contains("isActive"), true);
++});
++
++test("follows overlays-changed: a plugin turned off loses its button", async () => {
++  const app = setup([MAP, LIMITS]);
++  await tick();
++  app.listeners["overlays-changed"]({ payload: [LIMITS] });
++  assert.deepEqual(app.bar.children.map((b) => b.dataset.plugin ?? "plugins"), ["inventory", "plugins"]);
++});
+-- 
+2.43.0
+

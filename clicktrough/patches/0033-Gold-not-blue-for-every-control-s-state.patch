@@ -1,7 +1,7 @@
-From b4084a8f84bd06ad9dccc029d0a64e9e53674b0d Mon Sep 17 00:00:00 2001
+From 895338e680b4ef5e44173e2ad3aa6c4a14074e83 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Thu, 29 Oct 2026 14:51:14 +0000
-Subject: [PATCH 33/34] Gold, not blue, for every control's state
+Subject: [PATCH 33/35] Gold, not blue, for every control's state
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit

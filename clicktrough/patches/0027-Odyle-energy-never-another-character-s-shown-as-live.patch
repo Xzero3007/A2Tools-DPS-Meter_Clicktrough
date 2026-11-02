@@ -1,7 +1,7 @@
-From a8574d281f7a2878437785beb310301a8ec8f594 Mon Sep 17 00:00:00 2001
+From 8b53a4d588e7da196e4db30b0ae77c7d206b8a68 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Tue, 27 Oct 2026 22:44:15 +0000
-Subject: [PATCH 27/34] Odyle energy: never another character's shown as live
+Subject: [PATCH 27/35] Odyle energy: never another character's shown as live
 
 After switching to a twink the meter's title showed the last character's
 Odyle energy (390 (+50)) as live while the game said 0. The window kept the
@@ -70,7 +70,7 @@ index 5e6e916..aedabe2 100644
  
                          // --- Hide while AION2 is closed, or while solo (every 2 s) ---
 diff --git a/src-tauri/src/capture/stream_processor.rs b/src-tauri/src/capture/stream_processor.rs
-index 7d40dba..1b9d6a7 100644
+index 389d18a..58f15a5 100644
 --- a/src-tauri/src/capture/stream_processor.rs
 +++ b/src-tauri/src/capture/stream_processor.rs
 @@ -376,6 +376,15 @@ impl StreamProcessor {
@@ -99,7 +99,7 @@ index 7d40dba..1b9d6a7 100644
          .find_map(|i| match content_entry_at(body, i)?.0 {
              Entry::Count(entry) => odyle_energy_in(&[entry]),
              Entry::Time(..) => None,
-@@ -4738,6 +4748,24 @@ mod tests {
+@@ -4760,6 +4770,24 @@ mod tests {
          assert_eq!(storage.odyle_energy(), Some((0, 1995)));
      }
  
