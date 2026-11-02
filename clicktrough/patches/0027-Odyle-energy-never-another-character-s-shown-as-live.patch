@@ -1,4 +1,4 @@
-From 8b53a4d588e7da196e4db30b0ae77c7d206b8a68 Mon Sep 17 00:00:00 2001
+From 6d0b7c44bc7b0a99f56c32f0d2e3231cc7836e6c Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Tue, 27 Oct 2026 22:44:15 +0000
 Subject: [PATCH 27/35] Odyle energy: never another character's shown as live

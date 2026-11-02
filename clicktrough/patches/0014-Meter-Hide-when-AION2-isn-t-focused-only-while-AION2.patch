@@ -1,4 +1,4 @@
-From 47085f6abc5b0d01475993fc32bb05dce0b3a29e Mon Sep 17 00:00:00 2001
+From 3d6290e1541458dfe5b095664a8bc45ae635da2a Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Sat, 24 Oct 2026 20:12:56 +0000
 Subject: [PATCH 14/35] Meter: "Hide when AION2 isn't focused" only while AION2

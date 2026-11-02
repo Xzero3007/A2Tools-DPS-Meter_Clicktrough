@@ -1,4 +1,4 @@
-From 1fe0443a3e05c611d58240f206cd890b5140f5c2 Mon Sep 17 00:00:00 2001
+From cdfceee2d7eb0f5db9b3a6ab12eecb8fac882960 Mon Sep 17 00:00:00 2001
 From: A2Tools patch <patch@localhost>
 Date: Tue, 20 Oct 2026 10:26:21 +0000
 Subject: [PATCH 01/35] Lock all meter windows; the click-through lock on

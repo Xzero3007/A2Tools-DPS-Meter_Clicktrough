@@ -1,35 +1,35 @@
-From 7e7f8a2dd290508c9cb98d7cf3f533a7c27fb4a6 Mon Sep 17 00:00:00 2001
+From 6196f462bb06107951d2887ffa2bef7ec79117de Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Mon, 2 Nov 2026 13:02:19 +0000
 Subject: [PATCH 35/35] Meter: a header button for each plugin overlay
 
 A plugin that names an overlay in its manifest (ui.overlay: the Map's
 overlay, the Inventory's limits) gets a button of its own in the meter's
-header, before the plugins button: it shows or hides that overlay alone,
-the plugin window staying as it is, and is gold while the overlay shows.
-The plugin hears "overlay" and opens or closes its widget, as its own
-switch does. With the plugins turned off by the plugins button, the
-overlay asked for shows on its own; the plugins button hides or shows
-them all again.
+header, before the plugins button: it shows or hides that overlay, the
+plugin window staying as it is, and is gold while the overlay shows. The
+plugin hears "overlay" and opens or closes its widget, as its own switch
+does. The plugins button leaves these overlays alone: it hides the plugin
+window and the other widgets only.
 
 A widget moved by its plugin (a2.widgets.place) moves on KDE's native
 Wayland too, where no app may move a window: it goes and comes back, and
-KWin puts it at the place the meter keeps; a2.widgets.where says the
-place KWin last reported there.
+KWin puts it at the new place (the place KWin reports as it goes is not
+kept meanwhile: it would put it back where it was); a2.widgets.where says
+the place KWin last reported there.
 ---
  index.html                                   |   1 +
  public/src/js/overlayButtons.js              |  71 +++++++++++
- src-tauri/src/app.rs                         |   2 +
+ src-tauri/src/app.rs                         |   9 ++
  src-tauri/src/platform/linux/window.rs       |   7 ++
  src-tauri/src/platform/unsupported/window.rs |   5 +
  src-tauri/src/platform/win32/window.rs       |   5 +
  src-tauri/src/plugins/a2.js                  |   7 ++
  src-tauri/src/plugins/mod.rs                 |   4 +
- src-tauri/src/plugins/overlays.rs            | 122 +++++++++++++++++++
- src-tauri/src/plugins/widgets.rs             | 101 ++++++++++++++-
+ src-tauri/src/plugins/overlays.rs            | 126 +++++++++++++++++++
+ src-tauri/src/plugins/widgets.rs             | 107 ++++++++++++++--
  src/styles.css                               |   3 +
  tests/overlay-buttons.test.mjs               |  94 ++++++++++++++
- 12 files changed, 416 insertions(+), 6 deletions(-)
+ 12 files changed, 432 insertions(+), 7 deletions(-)
  create mode 100644 public/src/js/overlayButtons.js
  create mode 100644 src-tauri/src/plugins/overlays.rs
  create mode 100644 tests/overlay-buttons.test.mjs
@@ -124,10 +124,31 @@ index 0000000..65b93be
 +  else start();
 +})();
 diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
-index a3a14c5..25fb231 100644
+index a3a14c5..9ac4cae 100644
 --- a/src-tauri/src/app.rs
 +++ b/src-tauri/src/app.rs
-@@ -4503,6 +4503,8 @@ pub fn run() {
+@@ -262,6 +262,9 @@ pub(crate) fn note_window_title(title: &str, label: &str) {
+ /// Where the window manager says a window was left, by its label (#76).
+ fn save_window_place(app: &tauri::AppHandle, title: &str, (x, y, w, h): (i32, i32, i32, i32)) {
+     let (Some(label), Some(state)) = (window_titled(app, title), app.try_state::<AppState>()) else { return };
++    // Clicktrough: a widget on its way to a new place keeps that one, not
++    // the old one KWin reports as it goes (plugins::widgets::moving_to).
++    let (x, y) = crate::plugins::widgets::moving_to(&label).unwrap_or((x, y));
+     state.settings.set(&format!("window.{label}.placed"), &format!("{x},{y},{w},{h}"));
+ }
+ 
+@@ -269,6 +272,10 @@ fn save_window_place(app: &tauri::AppHandle, title: &str, (x, y, w, h): (i32, i3
+ /// overlay sizes itself to its content, so it gets its place only.
+ fn load_window_place(app: &tauri::AppHandle, title: &str) -> Option<(i32, i32, i32, i32)> {
+     let label = window_titled(app, title)?;
++    // Clicktrough: a widget on its way to a new place goes there.
++    if let Some((x, y)) = crate::plugins::widgets::moving_to(&label) {
++        return Some((x, y, 0, 0));
++    }
+     // On X11 the meter places its windows itself; KWin puts back only a
+     // widget, where the meter saved it, as KWin may not let it go there
+     // (platform::linux::focus, X11_IN_WAYLAND).
+@@ -4503,6 +4510,8 @@ pub fn run() {
              crate::plugins::dock::dock_close,
              crate::plugins::dock::dock_status,
              crate::plugins::dock::dock_toggle,
@@ -228,10 +249,10 @@ index 871d7b7..639fbfa 100644
  }
 diff --git a/src-tauri/src/plugins/overlays.rs b/src-tauri/src/plugins/overlays.rs
 new file mode 100644
-index 0000000..c346d96
+index 0000000..dfa28d6
 --- /dev/null
 +++ b/src-tauri/src/plugins/overlays.rs
-@@ -0,0 +1,122 @@
+@@ -0,0 +1,126 @@
 +//! Clicktrough: a plugin's overlay on a button of its own in the meter's
 +//! header (the Map's overlay, the Inventory's limits), shown or hidden
 +//! without the plugin window. A plugin names it in its manifest:
@@ -242,8 +263,8 @@ index 0000000..c346d96
 +//!
 +//! The button asks the plugin's page (running in the dock, or its window,
 +//! hidden or not) to open or close that widget (event `overlay`, `{ show,
-+//! widget }`), as its own switch does. With the plugins turned off by the
-+//! plugins button, the overlay asked for shows on its own (`widgets::show_alone`).
++//! widget }`), as its own switch does. The plugins button leaves these
++//! overlays alone: it hides the plugin window (and the other widgets) only.
 +
 +use serde_json::Value;
 +use tauri::Emitter;
@@ -292,7 +313,13 @@ index 0000000..c346d96
 +    app.get_webview_window(label).is_some()
 +        && !super::widgets::is_closed(label)
 +        && !super::widgets::held_by_button(label)
-+        && !(super::widgets::plugins_hidden(app) && !super::widgets::is_alone(label))
++}
++
++/// Whether widget `label` is a plugin overlay with a header button.
++pub fn is_overlay(app: &tauri::AppHandle, label: &str) -> bool {
++    let Some((id, name)) = super::widgets::parse_label(label) else { return false };
++    let Ok(host) = super::host(app) else { return false };
++    host.with(&id, |l| read(&l.manifest.id, &l.manifest.name, l.manifest.ui.as_ref())).flatten().is_some_and(|o| o.widget == name)
 +}
 +
 +fn listed(app: &tauri::AppHandle) -> Value {
@@ -319,9 +346,7 @@ index 0000000..c346d96
 +    let label = super::widgets::label(&o.id, &o.widget);
 +    let show = !is_on(&app, &label);
 +    if show {
-+        super::widgets::show_alone(&app, &label);
-+    } else {
-+        super::widgets::forget_alone(&label);
++        super::widgets::release_overlay(&app, &label);
 +    }
 +    tracing::debug!("Plugins: the header {} {}'s overlay", if show { "shows" } else { "hides" }, o.id);
 +    let event = serde_json::json!({ "plugin": o.id, "event": "overlay", "data": { "show": show, "widget": o.widget } });
@@ -355,7 +380,7 @@ index 0000000..c346d96
 +    }
 +}
 diff --git a/src-tauri/src/plugins/widgets.rs b/src-tauri/src/plugins/widgets.rs
-index 51367ca..5e02775 100644
+index 51367ca..9477242 100644
 --- a/src-tauri/src/plugins/widgets.rs
 +++ b/src-tauri/src/plugins/widgets.rs
 @@ -27,7 +27,7 @@ const MAX_MESSAGE: usize = 64 * 1024;
@@ -367,30 +392,21 @@ index 51367ca..5e02775 100644
      format!("pw_{id}_{name}")
  }
  
-@@ -100,6 +100,47 @@ fn held_by_button_set() -> &'static Mutex<std::collections::HashSet<String>> {
+@@ -100,6 +100,53 @@ fn held_by_button_set() -> &'static Mutex<std::collections::HashSet<String>> {
      HELD.get_or_init(Mutex::default)
  }
  
-+/// Clicktrough: the overlays a header button showed on their own while the
-+/// plugins button has the plugins off (`overlays.rs`), by label.
-+fn alone_set() -> &'static Mutex<std::collections::HashSet<String>> {
-+    static ALONE: std::sync::OnceLock<Mutex<std::collections::HashSet<String>>> = std::sync::OnceLock::new();
-+    ALONE.get_or_init(Mutex::default)
++/// Clicktrough: whether the plugins button holds widget `label` off: the
++/// plugins are off, and it is no plugin overlay with a header button of its
++/// own (overlays.rs), which only that button shows or hides.
++pub fn plugins_button_holds(app: &tauri::AppHandle, label: &str) -> bool {
++    plugins_hidden(app) && !super::overlays::is_overlay(app, label)
 +}
 +
-+/// Whether widget `label` shows on its own (a header button) while the
-+/// plugins are off.
-+pub fn is_alone(label: &str) -> bool {
-+    alone_set().lock().unwrap_or_else(|p| p.into_inner()).contains(label)
-+}
-+
-+/// A header button shows widget `label`: with the plugins off it shows on
-+/// its own, at once if its plugin has it open already.
-+pub fn show_alone(app: &tauri::AppHandle, label: &str) {
-+    if !plugins_hidden(app) {
-+        return;
-+    }
-+    alone_set().lock().unwrap_or_else(|p| p.into_inner()).insert(label.to_string());
++/// A header button shows overlay `label`: held off by the plugins button
++/// before (a meter of an earlier version, or one started with the plugins
++/// off), it comes back now.
++pub fn release_overlay(app: &tauri::AppHandle, label: &str) {
 +    let was_held = held_by_button_set().lock().unwrap_or_else(|p| p.into_inner()).remove(label);
 +    if !was_held || is_closed(label) {
 +        return;
@@ -407,24 +423,36 @@ index 51367ca..5e02775 100644
 +    }
 +}
 +
-+/// A header button hides widget `label` (its plugin closes it).
-+pub fn forget_alone(label: &str) {
-+    alone_set().lock().unwrap_or_else(|p| p.into_inner()).remove(label);
++/// Clicktrough: widgets on their way to a place (`plugin_widget_place` where
++/// KWin places the meter's windows): until it is there, the place KWin
++/// reports as the widget goes away (`app::save_window_place`) is not kept,
++/// and the place KWin asks for as it comes back (`app::load_window_place`)
++/// is the new one. Before, KWin's report of the old place, sent as the
++/// widget went, overwrote the new one: the overlay came back where it was.
++const MOVING_FOR: Duration = Duration::from_millis(2500);
++
++fn moving() -> &'static Mutex<HashMap<String, (i32, i32, std::time::Instant)>> {
++    static MOVING: std::sync::OnceLock<Mutex<HashMap<String, (i32, i32, std::time::Instant)>>> = std::sync::OnceLock::new();
++    MOVING.get_or_init(Mutex::default)
++}
++
++/// Where widget `label` is on its way to, if it is.
++pub fn moving_to(label: &str) -> Option<(i32, i32)> {
++    let mut map = moving().lock().unwrap_or_else(|p| p.into_inner());
++    map.retain(|_, (_, _, at)| at.elapsed() < MOVING_FOR);
++    map.get(label).map(|(x, y, _)| (*x, *y))
 +}
 +
  /// Whether the plugins button has the plugins off.
  pub fn plugins_hidden(app: &tauri::AppHandle) -> bool {
      app.try_state::<AppState>().is_some_and(|s| s.settings.get(PLUGINS_HIDDEN_KEY).as_deref() == Some("true"))
-@@ -125,12 +166,16 @@ pub fn set_plugins_hidden(app: &tauri::AppHandle, off: bool) {
-     if let Some(state) = app.try_state::<AppState>() {
-         state.settings.set(PLUGINS_HIDDEN_KEY, if off { "true" } else { "false" });
+@@ -127,10 +174,12 @@ pub fn set_plugins_hidden(app: &tauri::AppHandle, off: bool) {
      }
-+    // The plugins button hides or shows them all, the ones a header button
-+    // showed on their own too (overlays.rs).
-+    alone_set().lock().unwrap_or_else(|p| p.into_inner()).clear();
      if off {
          for (label, window) in app.webview_windows() {
-             if parse_label(&label).is_some() && !is_closed(&label) {
+-            if parse_label(&label).is_some() && !is_closed(&label) {
++            // Clicktrough: not the overlays with a header button of their own.
++            if parse_label(&label).is_some() && !is_closed(&label) && !super::overlays::is_overlay(app, &label) {
                  hold_by_button(&window);
              }
          }
@@ -432,7 +460,7 @@ index 51367ca..5e02775 100644
          return;
      }
      let held: Vec<String> = held_by_button_set().lock().unwrap_or_else(|p| p.into_inner()).drain().collect();
-@@ -149,6 +194,7 @@ pub fn set_plugins_hidden(app: &tauri::AppHandle, off: bool) {
+@@ -149,6 +198,7 @@ pub fn set_plugins_hidden(app: &tauri::AppHandle, off: bool) {
          }
          relock(app, &window);
      }
@@ -440,15 +468,15 @@ index 51367ca..5e02775 100644
  }
  
  /// The parts of each widget that take the mouse, as its page reported them
-@@ -265,13 +311,15 @@ pub async fn plugin_widget_open(
+@@ -265,13 +315,15 @@ pub async fn plugin_widget_open(
          crate::platform::window::set_size(&widget, tauri::LogicalSize::new(width, height).into());
          if super::game_hides(&app, &id) {
              super::hold_for_game(&widget);
 -        } else if plugins_hidden(&app) || held_by_button(widget.label()) {
 -            // Clicktrough: the plugins are off (the meter's plugins button).
-+        } else if (plugins_hidden(&app) && !is_alone(widget.label())) || held_by_button(widget.label()) {
++        } else if plugins_button_holds(&app, widget.label()) || held_by_button(widget.label()) {
 +            // Clicktrough: the plugins are off (the meter's plugins button),
-+            // unless a header button showed this one on its own.
++            // unless it is an overlay with a header button of its own.
              hold_by_button(&widget);
          } else if !crate::platform::window::reveal_in_place(&widget) {
              crate::platform::window::show_on_top_without_focus(&widget);
@@ -458,22 +486,22 @@ index 51367ca..5e02775 100644
          return Ok(());
      }
      if all_widgets(&app, &id).len() >= MAX_WIDGETS {
-@@ -342,10 +390,12 @@ pub async fn plugin_widget_open(
+@@ -342,10 +394,12 @@ pub async fn plugin_widget_open(
      if super::game_hides(&app, &id) {
          super::hold_for_game(&widget);
      }
 -    // Clicktrough: the plugins are off (the meter's plugins button).
 -    if plugins_hidden(&app) {
 +    // Clicktrough: the plugins are off (the meter's plugins button),
-+    // unless a header button showed this one on its own.
-+    if plugins_hidden(&app) && !is_alone(widget.label()) {
++    // unless it is an overlay with a header button of its own.
++    if plugins_button_holds(&app, widget.label()) {
          hold_by_button(&widget);
      }
 +    super::overlays::notify(&app);
      Ok(())
  }
  
-@@ -448,7 +498,14 @@ pub fn plugin_widget_where(app: tauri::AppHandle, window: tauri::WebviewWindow,
+@@ -448,7 +502,14 @@ pub fn plugin_widget_where(app: tauri::AppHandle, window: tauri::WebviewWindow,
      let id = window_plugin(&window, plugin.as_deref())?;
      require(&app, &id, "widgets")?;
      let Some(widget) = app.get_webview_window(&label(&id, &name)) else { return Ok(Value::Null) };
@@ -489,7 +517,7 @@ index 51367ca..5e02775 100644
      let size = widget.outer_size().map_err(|e| e.to_string())?;
      let screen = widget.current_monitor().ok().flatten().map(|m| {
          let area = m.work_area();
-@@ -482,11 +539,41 @@ pub fn plugin_widget_place(app: tauri::AppHandle, window: tauri::WebviewWindow,
+@@ -482,11 +543,42 @@ pub fn plugin_widget_place(app: tauri::AppHandle, window: tauri::WebviewWindow,
          state.settings.set(&format!("window.{widget_label}.placed"), &format!("{x},{y},0,0"));
      }
      match app.get_webview_window(&widget_label) {
@@ -497,6 +525,7 @@ index 51367ca..5e02775 100644
 +        // KWin puts a widget where the meter keeps it each time it appears: a
 +        // shown one goes and comes back there.
 +        Some(widget) if crate::platform::window::kwin_places_windows() => {
++            moving().lock().unwrap_or_else(|p| p.into_inner()).insert(widget_label.clone(), (x, y, std::time::Instant::now()));
 +            let shown = widget.is_visible().unwrap_or(false) && !is_closed(&widget_label) && !held_by_button(&widget_label);
 +            if shown {
 +                crate::platform::window::hide_without_focus(&widget);
@@ -531,11 +560,10 @@ index 51367ca..5e02775 100644
  /// Close widget `name` of the calling plugin: hidden and kept (`closed`),
  /// its page and place as they are, for opening it again at once.
  #[tauri::command]
-@@ -497,6 +584,8 @@ pub fn plugin_widget_close(app: tauri::AppHandle, window: tauri::WebviewWindow,
+@@ -497,6 +589,7 @@ pub fn plugin_widget_close(app: tauri::AppHandle, window: tauri::WebviewWindow,
          tracing::debug!("Widgets: {id} closes {name:?} (from {})", window.label());
          closed().lock().unwrap_or_else(|p| p.into_inner()).insert(widget.label().to_string());
          crate::platform::window::hide_in_place(&widget);
-+        forget_alone(widget.label());
 +        super::overlays::notify(&app);
      }
      Ok(())

@@ -1,4 +1,4 @@
-From f79a3c4c411106afcc8b464ec49838de80a5184d Mon Sep 17 00:00:00 2001
+From 237fdf7968e7e5972104cdc994238344ab22b0cf Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Tue, 27 Oct 2026 23:06:32 +0000
 Subject: [PATCH 30/35] Plugin dock: full opacity at a press, and a lock of its
