@@ -1,0 +1,41 @@
+{
+ "repo": [
+  "alt-roster",
+  "boss-telegraph",
+  "checklist",
+  "cooldowns",
+  "death-recap",
+  "dice-rolls",
+  "event-timers",
+  "heal-alert",
+  "mantra-watch",
+  "pet-souls",
+  "ping"
+ ],
+ "versions": {
+  "alt-roster": "1.4.9",
+  "boss-telegraph": "0.1.9",
+  "checklist": "1.1.2",
+  "cooldowns": "0.2.13",
+  "death-recap": "0.1.1",
+  "dice-rolls": "0.1.0",
+  "event-timers": "0.6.29",
+  "heal-alert": "1.2.4",
+  "mantra-watch": "0.1.3",
+  "pet-souls": "0.5.4",
+  "ping": "0.2.1"
+ },
+ "catalog": [
+  "alt-roster",
+  "checklist",
+  "cooldowns",
+  "death-recap",
+  "dice-rolls",
+  "event-timers",
+  "heal-alert",
+  "mantra-watch",
+  "pet-souls",
+  "ping"
+ ],
+ "checked": "2026-11-07T19:34Z"
+}
