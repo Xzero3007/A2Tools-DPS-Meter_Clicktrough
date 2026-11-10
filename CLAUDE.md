@@ -42,7 +42,12 @@ with its own CLAUDE.md: plugin work happens there.
   api-search.plaync.com, profileimg.plaync.com portraits: the Armory plugin,
   patch 0032; the person's decision, 2026-10-28). The Radio plugin's
   station streams, listening only (a plugin page's `media-src`, `RADIO_HOSTS`,
-  patch 0043; the person's decision, 2026-11-10). The release is the original's private
+  patch 0043; the person's decision, 2026-11-10). The Streams plugin (patch 0047,
+  the person's decision, 2026-11-10): Twitch's public API (gql.twitch.tv, fixed
+  queries), YouTube's channel feeds (www.youtube.com/feeds/videos.xml) and
+  both picture servers through net_guard; the videos and YouTube's search
+  through the person's mpv and yt-dlp, only for a Twitch channel or a
+  YouTube video id. The release is the original's private
   build (`--no-default-features --features desktop,net`). Anything else needs
   the person's yes first.
 - **This repo is public. No network analysis goes in here**: no write-ups of

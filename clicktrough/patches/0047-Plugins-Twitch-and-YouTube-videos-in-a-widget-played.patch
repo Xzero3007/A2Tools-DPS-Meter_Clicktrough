@@ -1,0 +1,1216 @@
+From 987940abeae47ee1da4734793b0626efddac6d97 Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Tue, 10 Nov 2026 22:53:41 +0000
+Subject: [PATCH] Plugins: Twitch and YouTube videos in a widget, played by mpv
+ (permission video)
+
+A plugin with the permission "video" plays a Twitch channel or a YouTube
+video in one of its widgets (a2.video.play): libmpv, loaded at run time,
+draws it into a GL area under the widget's page (a GTK overlay), so the
+video is an overlay like the others: above the game, and click-through
+while the meter is locked. Only a Twitch channel's or a YouTube video's
+address, built from the name or id, is handed to mpv; mpv and yt-dlp
+fetch the stream as the player's own mpv would.
+
+The lists: Twitch's public API (gql.twitch.tv, fixed queries, read only,
+no account), YouTube's search through yt-dlp, a channel's public feed
+(www.youtube.com/feeds/videos.xml), FreeTube's subscriptions from its own
+file on this computer (read only), and their pictures (a2.web.image:
+i.ytimg.com, yt3.ggpht.com, static-cdn.jtvnw.net). For the Streams plugin.
+mpv and yt-dlp are optional dependencies of the package.
+---
+ packaging/arch/PKGBUILD         |   4 +-
+ public/src/js/pluginFrame.js    |  33 ++
+ public/src/js/pluginIcons.js    |   2 +
+ public/src/js/pluginSettings.js |   3 +
+ src-tauri/src/app.rs            |   6 +
+ src-tauri/src/net_guard.rs      |  10 +
+ src-tauri/src/plugins/a2.js     |  19 +
+ src-tauri/src/plugins/mod.rs    |  13 +
+ src-tauri/src/plugins/video.rs  | 965 ++++++++++++++++++++++++++++++++
+ 9 files changed, 1054 insertions(+), 1 deletion(-)
+ create mode 100644 src-tauri/src/plugins/video.rs
+
+diff --git a/packaging/arch/PKGBUILD b/packaging/arch/PKGBUILD
+index 3219e77..dbebb74 100644
+--- a/packaging/arch/PKGBUILD
++++ b/packaging/arch/PKGBUILD
+@@ -26,7 +26,9 @@ depends=('webkit2gtk-4.1' 'gtk3' 'libpcap' 'libcap' 'hicolor-icon-theme' 'gst-pl
+ # without one (platform::window::tray_supported).
+ optdepends=('libayatana-appindicator: tray icon'
+             'gst-libav: AAC radio streams in the Radio plugin'
+-            'gst-plugins-bad: HLS radio streams in the Radio plugin (MPEG-TS)')
++            'gst-plugins-bad: HLS radio streams in the Radio plugin (MPEG-TS)'
++            'mpv: videos in the Streams plugin (its library, libmpv)'
++            'yt-dlp: Twitch and YouTube in the Streams plugin')
+ makedepends=('rust' 'nodejs' 'npm' 'git' 'pkgconf')
+ install=a2tools-dps-meter.install
+ options=('!lto' '!debug')
+diff --git a/public/src/js/pluginFrame.js b/public/src/js/pluginFrame.js
+index 30036ae..3232d55 100644
+--- a/public/src/js/pluginFrame.js
++++ b/public/src/js/pluginFrame.js
+@@ -184,6 +184,39 @@
+         if (!allowed(`web:${host}`)) throw new Error(`the plugin lacks the "web:${host}" permission`);
+         return call("plugin_web_image", { url: String(url) });
+       },
++      // Clicktrough: video in a widget, and the lists to pick it from
++      // (permission "video"; plugins::video).
++      "video.play": ([widget, what]) => {
++        if (!allowed("video")) throw new Error('the plugin lacks the "video" permission');
++        const kind = what?.twitch ? "twitch" : "youtube";
++        return call("plugin_video_play", {
++          widget: String(widget),
++          kind,
++          name: String(what?.twitch || what?.youtube || ""),
++          quality: what?.quality == null ? null : String(what.quality),
++          volume: what?.volume == null ? null : Number(what.volume),
++        });
++      },
++      "video.control": ([widget, action, value]) => {
++        if (!allowed("video")) throw new Error('the plugin lacks the "video" permission');
++        return call("plugin_video_control", { widget: String(widget), action: String(action), value: value ?? null });
++      },
++      "video.twitch": ([kind, arg]) => {
++        if (!allowed("video")) throw new Error('the plugin lacks the "video" permission');
++        return call("plugin_video_twitch", { kind: String(kind), arg: arg ?? null });
++      },
++      "video.feed": ([channel]) => {
++        if (!allowed("video")) throw new Error('the plugin lacks the "video" permission');
++        return call("plugin_video_feed", { channel: String(channel) });
++      },
++      "video.search": ([text]) => {
++        if (!allowed("video")) throw new Error('the plugin lacks the "video" permission');
++        return call("plugin_video_search", { text: String(text) });
++      },
++      "video.freetube": () => {
++        if (!allowed("video")) throw new Error('the plugin lacks the "video" permission');
++        return call("plugin_video_freetube");
++      },
+       // Clicktrough: share a value with plugins allowed to hear it.
+       share: ([value]) => {
+         if (!allowed("share")) throw new Error('the plugin lacks the "share" permission');
+diff --git a/public/src/js/pluginIcons.js b/public/src/js/pluginIcons.js
+index 5dba33a..68f54b1 100644
+--- a/public/src/js/pluginIcons.js
++++ b/public/src/js/pluginIcons.js
+@@ -19,6 +19,8 @@ window.A2_PLUGIN_ICONS = Object.freeze({
+   map: ["map", 155],
+   armory: ["shield", 290],
+   inventory: ["backpack", 15],
++  // Twitch's purple.
++  streams: ["tv", 275],
+ });
+ 
+ // A plugin's glyph (a Lucide name) or null, and its hue.
+diff --git a/public/src/js/pluginSettings.js b/public/src/js/pluginSettings.js
+index 9cdfd15..2dfbf22 100644
+--- a/public/src/js/pluginSettings.js
++++ b/public/src/js/pluginSettings.js
+@@ -72,6 +72,9 @@
+       if (permission === "radio") {
+         return t("settings.plugins.permRadio", "Play internet radio stations (listening only, from the stations this build lists)");
+       }
++      if (permission === "video") {
++        return t("settings.plugins.permVideo", "Play Twitch and YouTube videos with mpv, and list them (Twitch, YouTube, FreeTube's subscriptions)");
++      }
+       if (permission.startsWith("web:")) {
+         return t("settings.plugins.permWeb", "Read data from {host} on the internet", { host: permission.slice(4) });
+       }
+diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
+index 8d1fc80..09e2d5f 100644
+--- a/src-tauri/src/app.rs
++++ b/src-tauri/src/app.rs
+@@ -4567,6 +4567,12 @@ pub fn run() {
+             crate::plugins::plugin_file,
+             crate::plugins::plugin_web_get,
+             crate::plugins::plugin_web_image,
++            crate::plugins::video::plugin_video_play,
++            crate::plugins::video::plugin_video_control,
++            crate::plugins::video::plugin_video_twitch,
++            crate::plugins::video::plugin_video_feed,
++            crate::plugins::video::plugin_video_search,
++            crate::plugins::video::plugin_video_freetube,
+             crate::plugins::plugin_window_size,
+             crate::plugins::plugin_restore_bundled,
+             crate::plugins::plugin_set_order,
+diff --git a/src-tauri/src/net_guard.rs b/src-tauri/src/net_guard.rs
+index 545084c..9bec3b4 100644
+--- a/src-tauri/src/net_guard.rs
++++ b/src-tauri/src/net_guard.rs
+@@ -35,6 +35,16 @@ const ALLOWED: &[(&str, &str)] = &[
+     ("api-search.plaync.com", "/aion2global/search/"),
+     ("assets.playnccdn.com", "/static-aion2-gamedata/resources/"),
+     ("profileimg.plaync.com", "/game_profile_images/"),
++    // The Streams plugin (permission "video"): Twitch's public API for its
++    // channels and live streams (the fixed queries in plugins::video), a
++    // YouTube channel's public feed of its newest videos, and their pictures
++    // (a2.web.image). The videos themselves mpv and yt-dlp fetch.
++    ("gql.twitch.tv", "/gql"),
++    ("www.youtube.com", "/feeds/videos.xml"),
++    ("i.ytimg.com", "/vi/"),
++    ("yt3.ggpht.com", "/"),
++    ("static-cdn.jtvnw.net", "/previews-ttv/"),
++    ("static-cdn.jtvnw.net", "/jtv_user_pictures/"),
+ ];
+ 
+ /// Whether `url` is one of the places above: https, no port, user or
+diff --git a/src-tauri/src/plugins/a2.js b/src-tauri/src/plugins/a2.js
+index 160ecdd..dc8690d 100644
+--- a/src-tauri/src/plugins/a2.js
++++ b/src-tauri/src/plugins/a2.js
+@@ -90,6 +90,16 @@
+ //                                              address is read at most once a minute; also NC's
+ //                                              character pages (aion2.plaync.com/api/character/,
+ //                                              api-search.plaync.com/aion2global/search/)
++//   Video (permission "video", Clicktrough): a Twitch channel or a YouTube video played by mpv
++//   in one of the plugin's widgets, under the widget's page (open the widget first):
++//   await a2.video.play("name", { twitch: "login" | youtube: "videoId", quality: "720", volume: 70 })
++//   await a2.video.control("name", "pause" | "mute" | "volume" | "stop", value)
++//   a2.on("video", (v) => ...)                 { widget, state: "loading" | "playing" | "ended" | "error",
++//                                              error, title, pause, buffering, volume, mute }
++//   await a2.video.twitch("search" | "user" | "channels" | "live", words | login | [logins] | game)
++//   await a2.video.search(words)               YouTube's search (yt-dlp): [{ id, title, channel, ... }]
++//   await a2.video.feed(channelId)             a YouTube channel's newest videos (its Atom feed, text)
++//   await a2.video.freetube()                  FreeTube's subscriptions on this computer, or null
+ //   await a2.web.image(url)                    Clicktrough: a picture from the game's icon server
+ //                                              (assets.playnccdn.com) or NC's character portraits
+ //                                              (profileimg.plaync.com) as a data: URL for an <img>,
+@@ -274,6 +284,15 @@
+       hide: () => call("window.hide", []),
+       fit: (height) => call("window.fit", [height ?? null]),
+     }),
++    // Clicktrough: video in a widget (permission "video").
++    video: Object.freeze({
++      play: (widget, what) => call("video.play", [String(widget), what || {}]),
++      control: (widget, action, value) => call("video.control", [String(widget), String(action), value ?? null]),
++      twitch: (kind, arg) => call("video.twitch", [String(kind), arg ?? null]),
++      feed: (channel) => call("video.feed", [String(channel)]),
++      search: (text) => call("video.search", [String(text)]),
++      freetube: () => call("video.freetube", []),
++    }),
+     widgets: Object.freeze({
+       open: (name, size) => call("widgets.open", [String(name), size || {}]),
+       close: (name) => call("widgets.close", [String(name)]),
+diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
+index 39260e4..d2eefa2 100644
+--- a/src-tauri/src/plugins/mod.rs
++++ b/src-tauri/src/plugins/mod.rs
+@@ -18,6 +18,7 @@ pub mod dock;
+ pub mod fps;
+ // Clicktrough: a plugin's overlay on a button in the meter's header.
+ pub mod overlays;
++pub mod video;
+ pub mod widgets;
+ // Clicktrough: the world around the player (`events:world`).
+ pub mod world;
+@@ -157,6 +158,9 @@ const PLUGIN_SURFACE_COMMANDS: &[&str] = &[
+     "plugin_share", "plugin_file", "plugin_web_get", "plugin_web_image", "plugin_window_size", "plugin_set_order",
+     "dock_lock_toggle", "dock_lock_state",
+     "plugin_widget_file", "plugin_widget_resize", "set_locked_buttons",
++    // Clicktrough: video in a widget and the lists to pick it from (a2.video).
++    "plugin_video_play", "plugin_video_control", "plugin_video_twitch", "plugin_video_feed",
++    "plugin_video_search", "plugin_video_freetube",
+ ];
+ 
+ /// Whether the window `label` may call the app command `command`: any of the
+@@ -1583,6 +1587,7 @@ fn describe_permission(t: &PromptTexts, permission: &str) -> String {
+         "events:shared" => "See what other plugins share (e.g. the pets they track)".into(),
+         "events:items" => "See your inventory and storages, and the items you get (from the game data)".into(),
+         "radio" => "Play internet radio stations (listening only, from the stations this build lists)".into(),
++        "video" => "Play Twitch and YouTube videos with mpv, and list them (Twitch, YouTube, FreeTube's subscriptions)".into(),
+         p => match (p.strip_prefix("decoder:"), p.strip_prefix("web:")) {
+             (Some(name), _) => t.perm_decoder.replace("{name}", name),
+             (_, Some(host)) => format!("Read data from {host} on the internet"),
+@@ -2576,9 +2581,17 @@ pub const WEB_HOSTS: &[(&str, &str)] = &[
+ ///   assets.playnccdn.com  the game's icons (items, skills, wings), the
+ ///                   server the meter's own skill icons come from
+ ///   profileimg.plaync.com  character portraits on NC's character pages
++///   i.ytimg.com, yt3.ggpht.com  YouTube's video and channel pictures
++///   static-cdn.jtvnw.net  Twitch's stream previews and channel pictures
+ pub const IMAGE_HOSTS: &[(&str, &str)] = &[
+     ("assets.playnccdn.com", "/static-aion2-gamedata/resources/"),
+     ("profileimg.plaync.com", "/game_profile_images/"),
++    // The Streams plugin: YouTube's video pictures and channel pictures,
++    // Twitch's stream previews and channel pictures.
++    ("i.ytimg.com", "/vi/"),
++    ("yt3.ggpht.com", "/"),
++    ("static-cdn.jtvnw.net", "/previews-ttv/"),
++    ("static-cdn.jtvnw.net", "/jtv_user_pictures/"),
+ ];
+ 
+ /// Most bytes an image may have.
+diff --git a/src-tauri/src/plugins/video.rs b/src-tauri/src/plugins/video.rs
+new file mode 100644
+index 0000000..9a0b327
+--- /dev/null
++++ b/src-tauri/src/plugins/video.rs
+@@ -0,0 +1,965 @@
++//! Clicktrough: video in a plugin's widget, and the lists to pick it from
++//! (the Streams plugin; permission "video").
++//!
++//! A plugin plays a Twitch channel or a YouTube video in one of its widgets
++//! (`a2.video.play`): mpv's library (libmpv, loaded at run time) plays it
++//! and draws each frame into the widget's window, under the widget's page.
++//! So the video is an overlay like the others: above the game, and locked,
++//! clicks go through it. mpv fetches the stream itself, with yt-dlp, as the
++//! player's own mpv would: only a Twitch channel's or a YouTube video's
++//! address is ever handed to it, built here from the name or id.
++//!
++//! The lists: Twitch's channels and live streams from Twitch's public API
++//! (gql.twitch.tv, the queries below, read only, no account), YouTube's
++//! search through yt-dlp, a channel's newest videos from its public feed
++//! (www.youtube.com/feeds/videos.xml), and the player's subscriptions from
++//! FreeTube's own file on this computer (read only). Nothing else is read,
++//! and nothing is sent but the search words, channel names and ids.
++
++use std::path::PathBuf;
++use std::time::Duration;
++
++use serde_json::{json, Value};
++
++use super::{require, widgets, window_plugin};
++
++/// What a plugin may play, as the address mpv gets: a Twitch channel by its
++/// login (letters, digits, `_`, at most 25), or a YouTube video by its id
++/// (11 letters, digits, `-`, `_`). Nothing else.
++pub fn stream_url(kind: &str, id: &str) -> Result<String, String> {
++    match kind {
++        "twitch" if !id.is_empty() && id.len() <= 25 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') => {
++            Ok(format!("https://www.twitch.tv/{}", id.to_ascii_lowercase()))
++        }
++        "youtube" if id.len() == 11 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') => {
++            Ok(format!("https://www.youtube.com/watch?v={id}"))
++        }
++        "twitch" | "youtube" => Err("not a channel or video name".into()),
++        _ => Err("only Twitch and YouTube play".into()),
++    }
++}
++
++/// yt-dlp's format for a quality the player picked: the best up to that
++/// height (a stream with its sound, or video and sound joined), or sound only.
++pub fn ytdl_format(quality: &str) -> String {
++    match quality {
++        "audio" => "bestaudio/best".to_string(),
++        q => match q.parse::<u32>() {
++            Ok(h) if (144..=2160).contains(&h) => {
++                format!("bestvideo[height<=?{h}]+bestaudio/best[height<=?{h}]/best")
++            }
++            _ => "bestvideo[height<=?1080]+bestaudio/best".to_string(),
++        },
++    }
++}
++
++/// A YouTube channel id: `UC` and 22 more.
++fn valid_channel_id(id: &str) -> bool {
++    id.len() == 24 && id.starts_with("UC") && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
++}
++
++fn valid_login(login: &str) -> bool {
++    !login.is_empty() && login.len() <= 25 && login.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
++}
++
++/// The widget window a plugin plays in: one of its own, open.
++fn widget_window(app: &tauri::AppHandle, id: &str, name: &str) -> Result<tauri::WebviewWindow, String> {
++    use tauri::Manager;
++    app.get_webview_window(&widgets::label(id, name)).ok_or_else(|| "open the widget first".to_string())
++}
++
++/// `a2.video.play(widget, { twitch | youtube, quality, volume })`.
++#[tauri::command]
++pub async fn plugin_video_play(
++    app: tauri::AppHandle,
++    window: tauri::WebviewWindow,
++    plugin: Option<String>,
++    widget: String,
++    kind: String,
++    name: String,
++    quality: Option<String>,
++    volume: Option<f64>,
++) -> Result<(), String> {
++    let id = window_plugin(&window, plugin.as_deref())?;
++    require(&app, &id, "video")?;
++    let url = stream_url(&kind, &name)?;
++    let target = widget_window(&app, &id, &widget)?;
++    let format = ytdl_format(quality.as_deref().unwrap_or("1080"));
++    let volume = volume.filter(|v| v.is_finite()).unwrap_or(70.0).clamp(0.0, 100.0);
++    tracing::info!("Video: {id} plays {kind} {name} in {widget}");
++    player::play(&app, &id, &target, &url, &format, volume)
++}
++
++/// `a2.video.control(widget, { pause, volume, mute, stop })`.
++#[tauri::command]
++pub fn plugin_video_control(
++    app: tauri::AppHandle,
++    window: tauri::WebviewWindow,
++    plugin: Option<String>,
++    widget: String,
++    action: String,
++    value: Option<Value>,
++) -> Result<(), String> {
++    let id = window_plugin(&window, plugin.as_deref())?;
++    require(&app, &id, "video")?;
++    let label = widgets::label(&id, &widget);
++    match action.as_str() {
++        "stop" => player::stop(&app, &label),
++        "pause" => player::set(&label, "pause", if value.and_then(|v| v.as_bool()).unwrap_or(true) { "yes" } else { "no" }),
++        "mute" => player::set(&label, "mute", if value.and_then(|v| v.as_bool()).unwrap_or(true) { "yes" } else { "no" }),
++        "volume" => {
++            let v = value.and_then(|v| v.as_f64()).filter(|v| v.is_finite()).ok_or("not a volume")?;
++            player::set(&label, "volume", &format!("{:.0}", v.clamp(0.0, 100.0)))
++        }
++        _ => Err("unknown video control".into()),
++    }
++}
++
++/// The Twitch queries a plugin may run: `search` (channels by name),
++/// `channels` (these logins, live or not), `live` (the live streams with
++/// the most viewers, of one game or all). Twitch's public API, the client
++/// id its own web page uses; no account.
++pub fn twitch_query(kind: &str, arg: &Value) -> Result<Value, String> {
++    const USER: &str = "login displayName profileImageURL(width: 70) \
++        stream { title viewersCount createdAt previewImageURL(width: 320, height: 180) game { displayName } }";
++    const STREAM: &str = "title viewersCount createdAt previewImageURL(width: 320, height: 180) game { displayName } \
++        broadcaster { login displayName profileImageURL(width: 70) }";
++    match kind {
++        "search" => {
++            let text = arg.as_str().map(str::trim).filter(|t| !t.is_empty() && t.len() <= 100).ok_or("no search words")?;
++            Ok(json!({
++                "query": format!("query($q: String!) {{ searchFor(userQuery: $q, platform: \"web\") {{ channels {{ items {{ {USER} }} }} }} }}"),
++                "variables": { "q": text },
++            }))
++        }
++        "user" => {
++            let login = arg.as_str().map(str::trim).filter(|l| valid_login(l)).ok_or("not a channel name")?;
++            Ok(json!({
++                "query": format!("query($l: String!) {{ user(login: $l) {{ {USER} }} }}"),
++                "variables": { "l": login.to_ascii_lowercase() },
++            }))
++        }
++        "channels" => {
++            let logins: Vec<String> = arg.as_array().ok_or("no channels")?.iter()
++                .filter_map(|l| l.as_str()).filter(|l| valid_login(l)).map(str::to_ascii_lowercase).take(100).collect();
++            Ok(json!({
++                "query": format!("query($l: [String!]) {{ users(logins: $l) {{ {USER} }} }}"),
++                "variables": { "l": logins },
++            }))
++        }
++        "live" => match arg.as_str().map(str::trim).filter(|g| !g.is_empty()) {
++            Some(game) if game.len() <= 100 => Ok(json!({
++                "query": format!("query($g: String!) {{ game(name: $g) {{ streams(first: 30) {{ edges {{ node {{ {STREAM} }} }} }} }} }}"),
++                "variables": { "g": game },
++            })),
++            Some(_) => Err("not a game".into()),
++            None => Ok(json!({
++                "query": format!("query {{ streams(first: 30) {{ edges {{ node {{ {STREAM} }} }} }} }}"),
++            })),
++        },
++        _ => Err("unknown Twitch query".into()),
++    }
++}
++
++/// `a2.video.twitch(kind, arg)`: Twitch's answer (its `data`).
++#[tauri::command]
++pub async fn plugin_video_twitch(
++    app: tauri::AppHandle,
++    window: tauri::WebviewWindow,
++    plugin: Option<String>,
++    kind: String,
++    arg: Value,
++) -> Result<Value, String> {
++    let id = window_plugin(&window, plugin.as_deref())?;
++    require(&app, &id, "video")?;
++    let body = twitch_query(&kind, &arg)?;
++    net::twitch(&app, body).await
++}
++
++/// `a2.video.feed(channelId)`: a YouTube channel's newest videos, its public
++/// feed (Atom XML) as it is.
++#[tauri::command]
++pub async fn plugin_video_feed(
++    app: tauri::AppHandle,
++    window: tauri::WebviewWindow,
++    plugin: Option<String>,
++    channel: String,
++) -> Result<String, String> {
++    let id = window_plugin(&window, plugin.as_deref())?;
++    require(&app, &id, "video")?;
++    if !valid_channel_id(&channel) {
++        return Err("not a YouTube channel id".into());
++    }
++    net::text(&app, &format!("https://www.youtube.com/feeds/videos.xml?channel_id={channel}")).await
++}
++
++/// `a2.video.search(text)`: YouTube's search, through yt-dlp: the first 20
++/// videos (id, title, channel, length, views).
++#[tauri::command]
++pub async fn plugin_video_search(
++    app: tauri::AppHandle,
++    window: tauri::WebviewWindow,
++    plugin: Option<String>,
++    text: String,
++) -> Result<Value, String> {
++    let id = window_plugin(&window, plugin.as_deref())?;
++    require(&app, &id, "video")?;
++    let text = text.trim().replace(['\n', '\r'], " ");
++    if text.is_empty() || text.len() > 100 {
++        return Err("no search words".into());
++    }
++    let out = tokio::time::timeout(
++        Duration::from_secs(40),
++        tokio::process::Command::new("yt-dlp")
++            .args(["--ignore-config", "--no-warnings", "--flat-playlist", "--dump-single-json", "--"])
++            .arg(format!("ytsearch20:{text}"))
++            .kill_on_drop(true)
++            .output(),
++    )
++    .await
++    .map_err(|_| "YouTube didn't answer in time".to_string())?
++    .map_err(|e| if e.kind() == std::io::ErrorKind::NotFound { "yt-dlp is not installed".to_string() } else { e.to_string() })?;
++    if !out.status.success() {
++        let err = String::from_utf8_lossy(&out.stderr);
++        return Err(err.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("yt-dlp failed").chars().take(300).collect());
++    }
++    let all: Value = serde_json::from_slice(&out.stdout).map_err(|e| e.to_string())?;
++    Ok(search_entries(&all))
++}
++
++/// yt-dlp's search answer, cut to what a list shows.
++pub fn search_entries(all: &Value) -> Value {
++    let entries = all.get("entries").and_then(Value::as_array).cloned().unwrap_or_default();
++    Value::Array(entries.iter().filter_map(|e| {
++        let id = e.get("id")?.as_str()?;
++        if stream_url("youtube", id).is_err() {
++            return None;
++        }
++        Some(json!({
++            "id": id,
++            "title": e.get("title").and_then(Value::as_str).unwrap_or(""),
++            "channel": e.get("channel").or_else(|| e.get("uploader")).and_then(Value::as_str).unwrap_or(""),
++            "channelId": e.get("channel_id").and_then(Value::as_str).unwrap_or(""),
++            "duration": e.get("duration").and_then(Value::as_f64),
++            "views": e.get("view_count").and_then(Value::as_u64),
++            "live": e.get("live_status").and_then(Value::as_str) == Some("is_live"),
++        }))
++    }).collect())
++}
++
++/// Where FreeTube keeps its profiles: its own folder, or the Flatpak's.
++fn freetube_files() -> Vec<PathBuf> {
++    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
++    let config = std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).unwrap_or_else(|| home.join(".config"));
++    vec![
++        config.join("FreeTube").join("profiles.db"),
++        home.join(".var/app/io.freetubeapp.FreeTube/config/FreeTube/profiles.db"),
++    ]
++}
++
++/// FreeTube's subscriptions out of its profiles file (NeDB: one JSON
++/// document a line, a later line of the same `_id` replacing an earlier
++/// one): every profile's channels, each once.
++pub fn freetube_subscriptions(text: &str) -> Value {
++    let mut profiles: Vec<(String, Value)> = Vec::new();
++    for line in text.lines() {
++        let Ok(doc) = serde_json::from_str::<Value>(line) else { continue };
++        let Some(key) = doc.get("_id").and_then(Value::as_str).map(str::to_string) else { continue };
++        profiles.retain(|(k, _)| *k != key);
++        if doc.get("$$deleted").and_then(Value::as_bool) != Some(true) {
++            profiles.push((key, doc));
++        }
++    }
++    let mut seen = std::collections::HashSet::new();
++    let mut out = Vec::new();
++    for (_, profile) in &profiles {
++        for sub in profile.get("subscriptions").and_then(Value::as_array).into_iter().flatten() {
++            let Some(id) = sub.get("id").and_then(Value::as_str) else { continue };
++            if valid_channel_id(id) && seen.insert(id.to_string()) {
++                out.push(json!({
++                    "id": id,
++                    "name": sub.get("name").and_then(Value::as_str).unwrap_or(id),
++                    "thumbnail": sub.get("thumbnail").and_then(Value::as_str).unwrap_or(""),
++                }));
++            }
++        }
++    }
++    Value::Array(out)
++}
++
++/// `a2.video.freetube()`: FreeTube's subscriptions on this computer, or
++/// null when FreeTube isn't there.
++#[tauri::command]
++pub fn plugin_video_freetube(app: tauri::AppHandle, window: tauri::WebviewWindow, plugin: Option<String>) -> Result<Value, String> {
++    let id = window_plugin(&window, plugin.as_deref())?;
++    require(&app, &id, "video")?;
++    for file in freetube_files() {
++        if let Ok(text) = std::fs::read_to_string(&file) {
++            return Ok(freetube_subscriptions(&text));
++        }
++    }
++    Ok(Value::Null)
++}
++
++/// The two requests, through the meter's client (net_guard's list).
++#[cfg(feature = "net")]
++mod net {
++    use super::*;
++    use crate::app::AppState;
++    use tauri::Manager;
++
++    /// The client id Twitch's own web page uses, as other players do.
++    const TWITCH_CLIENT_ID: &str = "kimne78kx3ncx6brgo4mv6wki5h1ko";
++
++    async fn wait_turn() {
++        static NEXT: std::sync::OnceLock<tokio::sync::Mutex<std::time::Instant>> = std::sync::OnceLock::new();
++        let mut next = NEXT.get_or_init(|| tokio::sync::Mutex::new(std::time::Instant::now())).lock().await;
++        let now = std::time::Instant::now();
++        if *next > now {
++            tokio::time::sleep(*next - now).await;
++        }
++        *next = std::time::Instant::now() + Duration::from_millis(250);
++    }
++
++    pub async fn twitch(app: &tauri::AppHandle, body: Value) -> Result<Value, String> {
++        const URL: &str = "https://gql.twitch.tv/gql";
++        wait_turn().await;
++        crate::net_guard::check(URL)?;
++        let state = app.try_state::<AppState>().ok_or("no app state")?;
++        let res = state.http.post(URL)
++            .header("Client-Id", TWITCH_CLIENT_ID)
++            .header("Content-Type", "application/json")
++            .body(body.to_string())
++            .timeout(Duration::from_secs(20))
++            .send().await
++            .map_err(|e| format!("Twitch: {}", super::super::web_error(&e)))?;
++        if !res.status().is_success() {
++            return Err(format!("Twitch answered {}", res.status()));
++        }
++        let bytes = res.bytes().await.map_err(|e| e.to_string())?;
++        let answer: Value = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
++        if let Some(err) = answer.get("errors").and_then(|e| e.get(0)).and_then(|e| e.get("message")).and_then(Value::as_str) {
++            if answer.get("data").map_or(true, Value::is_null) {
++                return Err(format!("Twitch: {err}"));
++            }
++        }
++        Ok(answer.get("data").cloned().unwrap_or(Value::Null))
++    }
++
++    pub async fn text(app: &tauri::AppHandle, url: &str) -> Result<String, String> {
++        wait_turn().await;
++        crate::net_guard::check(url)?;
++        let state = app.try_state::<AppState>().ok_or("no app state")?;
++        let res = state.http.get(url).timeout(Duration::from_secs(20)).send().await.map_err(|e| super::super::web_error(&e))?;
++        if !res.status().is_success() {
++            return Err(format!("YouTube answered {}", res.status()));
++        }
++        let bytes = res.bytes().await.map_err(|e| e.to_string())?;
++        if bytes.len() > 2 * 1024 * 1024 {
++            return Err("the answer is too large".into());
++        }
++        Ok(String::from_utf8_lossy(&bytes).into_owned())
++    }
++}
++
++#[cfg(not(feature = "net"))]
++mod net {
++    use super::*;
++    pub async fn twitch(_app: &tauri::AppHandle, _body: Value) -> Result<Value, String> {
++        Err("this meter is built without network features".into())
++    }
++    pub async fn text(_app: &tauri::AppHandle, _url: &str) -> Result<String, String> {
++        Err("this meter is built without network features".into())
++    }
++}
++
++#[cfg(not(target_os = "linux"))]
++mod player {
++    pub fn play(_: &tauri::AppHandle, _: &str, _: &tauri::WebviewWindow, _: &str, _: &str, _: f64) -> Result<(), String> {
++        Err("video plays on Linux only in this build".into())
++    }
++    pub fn stop(_: &tauri::AppHandle, _: &str) -> Result<(), String> {
++        Ok(())
++    }
++    pub fn set(_: &str, _: &str, _: &str) -> Result<(), String> {
++        Err("no video is playing".into())
++    }
++}
++
++/// libmpv, loaded at run time, drawing into a GL area under the widget's
++/// page (a GTK overlay: the video below, the page above it, transparent).
++#[cfg(target_os = "linux")]
++mod player {
++    use std::cell::RefCell;
++    use std::collections::HashMap;
++    use std::ffi::{c_char, c_int, c_void, CStr, CString};
++    use std::sync::{Mutex, OnceLock};
++
++    use gtk::prelude::*;
++    use serde_json::json;
++
++    type Handle = *mut c_void;
++
++    #[repr(C)]
++    struct Event {
++        event_id: c_int,
++        error: c_int,
++        reply_userdata: u64,
++        data: *mut c_void,
++    }
++    #[repr(C)]
++    struct EventProperty {
++        name: *const c_char,
++        format: c_int,
++        data: *mut c_void,
++    }
++    #[repr(C)]
++    struct EventEndFile {
++        reason: c_int,
++        error: c_int,
++    }
++    #[repr(C)]
++    struct RenderParam {
++        kind: c_int,
++        data: *mut c_void,
++    }
++    #[repr(C)]
++    struct GlInitParams {
++        get_proc_address: extern "C" fn(*mut c_void, *const c_char) -> *mut c_void,
++        ctx: *mut c_void,
++    }
++    #[repr(C)]
++    struct GlFbo {
++        fbo: c_int,
++        w: c_int,
++        h: c_int,
++        internal_format: c_int,
++    }
++
++    const EVENT_SHUTDOWN: c_int = 1;
++    const EVENT_START_FILE: c_int = 6;
++    const EVENT_END_FILE: c_int = 7;
++    const EVENT_FILE_LOADED: c_int = 8;
++    const EVENT_PLAYBACK_RESTART: c_int = 21;
++    const EVENT_PROPERTY_CHANGE: c_int = 22;
++    const FORMAT_STRING: c_int = 1;
++    const FORMAT_FLAG: c_int = 3;
++    const FORMAT_DOUBLE: c_int = 5;
++    const END_ERROR: c_int = 4;
++    const END_EOF: c_int = 0;
++    const PARAM_API_TYPE: c_int = 1;
++    const PARAM_GL_INIT: c_int = 2;
++    const PARAM_GL_FBO: c_int = 3;
++    const PARAM_FLIP_Y: c_int = 4;
++    const PARAM_X11_DISPLAY: c_int = 8;
++    const PARAM_WL_DISPLAY: c_int = 9;
++
++    /// libmpv's calls, from the library found at run time.
++    struct Mpv {
++        _lib: libloading::Library,
++        create: unsafe extern "C" fn() -> Handle,
++        initialize: unsafe extern "C" fn(Handle) -> c_int,
++        set_option_string: unsafe extern "C" fn(Handle, *const c_char, *const c_char) -> c_int,
++        set_property_string: unsafe extern "C" fn(Handle, *const c_char, *const c_char) -> c_int,
++        command: unsafe extern "C" fn(Handle, *const *const c_char) -> c_int,
++        observe_property: unsafe extern "C" fn(Handle, u64, *const c_char, c_int) -> c_int,
++        wait_event: unsafe extern "C" fn(Handle, f64) -> *mut Event,
++        terminate_destroy: unsafe extern "C" fn(Handle),
++        error_string: unsafe extern "C" fn(c_int) -> *const c_char,
++        render_create: unsafe extern "C" fn(*mut Handle, Handle, *mut RenderParam) -> c_int,
++        render_set_update_callback: unsafe extern "C" fn(Handle, Option<extern "C" fn(*mut c_void)>, *mut c_void),
++        render_render: unsafe extern "C" fn(Handle, *mut RenderParam) -> c_int,
++        render_free: unsafe extern "C" fn(Handle),
++    }
++    unsafe impl Send for Mpv {}
++    unsafe impl Sync for Mpv {}
++
++    fn mpv() -> Result<&'static Mpv, String> {
++        static MPV: OnceLock<Result<Mpv, String>> = OnceLock::new();
++        MPV.get_or_init(|| unsafe {
++            let lib = ["libmpv.so.2", "libmpv.so.1", "libmpv.so"].iter()
++                .find_map(|n| libloading::Library::new(n).ok())
++                .ok_or("mpv is not installed (its library libmpv was not found)")?;
++            macro_rules! f {
++                ($name:literal) => {
++                    *lib.get(concat!($name, "\0").as_bytes()).map_err(|e| format!("libmpv: {e}"))?
++                };
++            }
++            Ok(Mpv {
++                create: f!("mpv_create"),
++                initialize: f!("mpv_initialize"),
++                set_option_string: f!("mpv_set_option_string"),
++                set_property_string: f!("mpv_set_property_string"),
++                command: f!("mpv_command"),
++                observe_property: f!("mpv_observe_property"),
++                wait_event: f!("mpv_wait_event"),
++                terminate_destroy: f!("mpv_terminate_destroy"),
++                error_string: f!("mpv_error_string"),
++                render_create: f!("mpv_render_context_create"),
++                render_set_update_callback: f!("mpv_render_context_set_update_callback"),
++                render_render: f!("mpv_render_context_render"),
++                render_free: f!("mpv_render_context_free"),
++                _lib: lib,
++            })
++        }).as_ref().map_err(Clone::clone)
++    }
++
++    fn error(code: c_int) -> String {
++        mpv().ok().map(|m| unsafe { CStr::from_ptr((m.error_string)(code)) }.to_string_lossy().into_owned())
++            .unwrap_or_else(|| format!("mpv error {code}"))
++    }
++
++    /// GL's functions by name, for mpv: EGL's lookup (Wayland, and X11
++    /// where GTK uses EGL), else GLX's.
++    extern "C" fn get_proc_address(_: *mut c_void, name: *const c_char) -> *mut c_void {
++        type Lookup = unsafe extern "C" fn(*const c_char) -> *mut c_void;
++        static LOOKUPS: OnceLock<Vec<(libloading::Library, Lookup)>> = OnceLock::new();
++        let lookups = LOOKUPS.get_or_init(|| unsafe {
++            let mut out = Vec::new();
++            for (lib, sym) in [("libEGL.so.1", "eglGetProcAddress\0"), ("libGL.so.1", "glXGetProcAddressARB\0")] {
++                if let Ok(l) = libloading::Library::new(lib) {
++                    if let Ok(f) = l.get::<Lookup>(sym.as_bytes()) {
++                        let f = *f;
++                        out.push((l, f));
++                    }
++                }
++            }
++            out
++        });
++        let egl_current = egl_context_current();
++        for (i, (_, lookup)) in lookups.iter().enumerate() {
++            // EGL's first when an EGL context is current, GLX's otherwise.
++            if (i == 0) != egl_current && lookups.len() > 1 {
++                continue;
++            }
++            let p = unsafe { lookup(name) };
++            if !p.is_null() {
++                return p;
++            }
++        }
++        std::ptr::null_mut()
++    }
++
++    fn egl_context_current() -> bool {
++        type Current = unsafe extern "C" fn() -> *mut c_void;
++        static F: OnceLock<Option<(libloading::Library, Current)>> = OnceLock::new();
++        F.get_or_init(|| unsafe {
++            let l = libloading::Library::new("libEGL.so.1").ok()?;
++            let f = *l.get::<Current>(b"eglGetCurrentContext\0").ok()?;
++            Some((l, f))
++        }).as_ref().is_some_and(|(_, f)| !unsafe { f() }.is_null())
++    }
++
++    /// The display GTK draws on, for mpv's hardware decoding.
++    fn display_param() -> Option<(c_int, *mut c_void)> {
++        let display = gtk::gdk::Display::default()?;
++        let raw = display.as_ptr() as *mut c_void;
++        type Get = unsafe extern "C" fn(*mut c_void) -> *mut c_void;
++        let lib = unsafe { libloading::Library::new("libgdk-3.so.0") }.ok()?;
++        let name = display.type_().name();
++        let (kind, sym): (c_int, &[u8]) = if name.contains("Wayland") {
++            (PARAM_WL_DISPLAY, b"gdk_wayland_display_get_wl_display\0")
++        } else if name.contains("X11") {
++            (PARAM_X11_DISPLAY, b"gdk_x11_display_get_xdisplay\0")
++        } else {
++            return None;
++        };
++        let get = unsafe { lib.get::<Get>(sym) }.ok()?;
++        let p = unsafe { get(raw) };
++        (!p.is_null()).then_some((kind, p))
++    }
++
++    /// One player: its mpv (any thread may use it until it is told to
++    /// quit) and the plugin it tells.
++    struct Player {
++        handle: usize,
++    }
++
++    fn players() -> &'static Mutex<HashMap<String, Player>> {
++        static P: OnceLock<Mutex<HashMap<String, Player>>> = OnceLock::new();
++        P.get_or_init(Mutex::default)
++    }
++
++    /// On GTK's thread: each widget's GL area and its render context.
++    struct View {
++        area: gtk::GLArea,
++        render: Handle,
++        label: Box<String>,
++    }
++    thread_local! {
++        static VIEWS: RefCell<HashMap<String, View>> = RefCell::new(HashMap::new());
++    }
++
++    fn handle_of(label: &str) -> Option<Handle> {
++        players().lock().unwrap_or_else(|p| p.into_inner()).get(label).map(|p| p.handle as Handle)
++    }
++
++    pub fn set(label: &str, name: &str, value: &str) -> Result<(), String> {
++        let m = mpv()?;
++        let h = handle_of(label).ok_or("no video is playing")?;
++        let (n, v) = (CString::new(name).map_err(|e| e.to_string())?, CString::new(value).map_err(|e| e.to_string())?);
++        match unsafe { (m.set_property_string)(h, n.as_ptr(), v.as_ptr()) } {
++            0 => Ok(()),
++            e => Err(error(e)),
++        }
++    }
++
++    fn command(h: Handle, args: &[&str]) -> Result<(), String> {
++        let m = mpv()?;
++        let owned: Vec<CString> = args.iter().map(|a| CString::new(*a).map_err(|e| e.to_string())).collect::<Result<_, _>>()?;
++        let mut ptrs: Vec<*const c_char> = owned.iter().map(|s| s.as_ptr()).collect();
++        ptrs.push(std::ptr::null());
++        match unsafe { (m.command)(h, ptrs.as_ptr()) } {
++            0 => Ok(()),
++            e => Err(error(e)),
++        }
++    }
++
++    fn tell(app: &tauri::AppHandle, id: &str, widget: &str, data: serde_json::Value) {
++        let mut data = data;
++        data["widget"] = json!(widget);
++        super::super::emit_plugin(app, id, json!({ "plugin": id, "event": "video", "data": data }));
++    }
++
++    /// A new mpv for widget `label`, told nothing yet; its events go to the
++    /// plugin until it shuts down.
++    fn start(app: &tauri::AppHandle, id: &str, label: &str, volume: f64) -> Result<Handle, String> {
++        let m = mpv()?;
++        // libmpv wants C's number format.
++        unsafe { libc::setlocale(libc::LC_NUMERIC, c"C".as_ptr()) };
++        let h = unsafe { (m.create)() };
++        if h.is_null() {
++            return Err("mpv could not start".into());
++        }
++        let opt = |k: &str, v: &str| {
++            let (k, v) = (CString::new(k).unwrap_or_default(), CString::new(v).unwrap_or_default());
++            unsafe { (m.set_option_string)(h, k.as_ptr(), v.as_ptr()) }
++        };
++        for (k, v) in [
++            ("config", "no"),
++            ("terminal", "no"),
++            ("vo", "libmpv"),
++            ("hwdec", "auto-safe"),
++            ("input-default-bindings", "no"),
++            ("input-vo-keyboard", "no"),
++            ("osc", "no"),
++            ("idle", "yes"),
++            ("keep-open", "no"),
++            ("ytdl", "yes"),
++            ("cache", "yes"),
++            ("demuxer-max-bytes", "64MiB"),
++            ("audio-client-name", "A2Tools Streams"),
++            ("title", "A2Tools Streams"),
++        ] {
++            opt(k, v);
++        }
++        opt("volume", &format!("{volume:.0}"));
++        let code = unsafe { (m.initialize)(h) };
++        if code < 0 {
++            unsafe { (m.terminate_destroy)(h) };
++            return Err(error(code));
++        }
++        for (name, format) in [("pause", FORMAT_FLAG), ("paused-for-cache", FORMAT_FLAG), ("media-title", FORMAT_STRING),
++                               ("volume", FORMAT_DOUBLE), ("mute", FORMAT_FLAG)] {
++            let n = CString::new(name).unwrap_or_default();
++            unsafe { (m.observe_property)(h, 0, n.as_ptr(), format) };
++        }
++        let (app, id) = (app.clone(), id.to_string());
++        let widget = super::widgets::parse_label(label).map(|(_, w)| w).unwrap_or_default();
++        let raw = h as usize;
++        std::thread::Builder::new().name("video-events".into()).spawn(move || {
++            let h = raw as Handle;
++            loop {
++                let ev = unsafe { &*(m.wait_event)(h, -1.0) };
++                match ev.event_id {
++                    EVENT_SHUTDOWN => break,
++                    EVENT_START_FILE => tell(&app, &id, &widget, json!({ "state": "loading" })),
++                    EVENT_FILE_LOADED | EVENT_PLAYBACK_RESTART => tell(&app, &id, &widget, json!({ "state": "playing" })),
++                    EVENT_END_FILE if !ev.data.is_null() => {
++                        let end = unsafe { &*(ev.data as *const EventEndFile) };
++                        match end.reason {
++                            END_ERROR => tell(&app, &id, &widget, json!({ "state": "error", "error": error(end.error) })),
++                            END_EOF => tell(&app, &id, &widget, json!({ "state": "ended" })),
++                            _ => {}
++                        }
++                    }
++                    EVENT_PROPERTY_CHANGE if !ev.data.is_null() => {
++                        let p = unsafe { &*(ev.data as *const EventProperty) };
++                        if p.data.is_null() {
++                            continue;
++                        }
++                        let name = unsafe { CStr::from_ptr(p.name) }.to_string_lossy().into_owned();
++                        let value = match p.format {
++                            FORMAT_FLAG => json!(unsafe { *(p.data as *const c_int) } != 0),
++                            FORMAT_DOUBLE => json!(unsafe { *(p.data as *const f64) }),
++                            FORMAT_STRING => json!(unsafe { CStr::from_ptr(*(p.data as *const *const c_char)) }.to_string_lossy()),
++                            _ => continue,
++                        };
++                        let key = match name.as_str() {
++                            "media-title" => "title",
++                            "paused-for-cache" => "buffering",
++                            other => other,
++                        };
++                        tell(&app, &id, &widget, json!({ key: value }));
++                    }
++                    _ => {}
++                }
++            }
++            unsafe { (m.terminate_destroy)(h) };
++        }).map_err(|e| e.to_string())?;
++        Ok(h)
++    }
++
++    extern "C" fn on_update(ctx: *mut c_void) {
++        // mpv's thread: draw again on GTK's.
++        let label = unsafe { &*(ctx as *const String) }.clone();
++        gtk::glib::MainContext::default().invoke(move || {
++            VIEWS.with(|v| {
++                if let Some(view) = v.borrow().get(&label) {
++                    view.area.queue_render();
++                }
++            });
++        });
++    }
++
++    /// The render context for widget `label`'s mpv, made with the area's GL
++    /// context current.
++    fn make_render(area: &gtk::GLArea, h: Handle, label_ptr: *mut c_void) -> Result<Handle, String> {
++        let m = mpv()?;
++        area.make_current();
++        if let Some(e) = area.error() {
++            return Err(format!("GL: {e}"));
++        }
++        let api = c"opengl";
++        let mut init = GlInitParams { get_proc_address, ctx: std::ptr::null_mut() };
++        let mut params = vec![
++            RenderParam { kind: PARAM_API_TYPE, data: api.as_ptr() as *mut c_void },
++            RenderParam { kind: PARAM_GL_INIT, data: &mut init as *mut _ as *mut c_void },
++        ];
++        if let Some((kind, p)) = display_param() {
++            params.push(RenderParam { kind, data: p });
++        }
++        params.push(RenderParam { kind: 0, data: std::ptr::null_mut() });
++        let mut render: Handle = std::ptr::null_mut();
++        match unsafe { (m.render_create)(&mut render, h, params.as_mut_ptr()) } {
++            0 => {
++                unsafe { (m.render_set_update_callback)(render, Some(on_update), label_ptr) };
++                Ok(render)
++            }
++            e => Err(error(e)),
++        }
++    }
++
++    fn draw(area: &gtk::GLArea, render: Handle) {
++        let Ok(m) = mpv() else { return };
++        type GetIntegerv = unsafe extern "C" fn(u32, *mut c_int);
++        static GET: OnceLock<usize> = OnceLock::new();
++        let get = *GET.get_or_init(|| get_proc_address(std::ptr::null_mut(), c"glGetIntegerv".as_ptr()) as usize);
++        let mut fbo: c_int = 0;
++        if get != 0 {
++            let f: GetIntegerv = unsafe { std::mem::transmute(get) };
++            const GL_FRAMEBUFFER_BINDING: u32 = 0x8CA6;
++            unsafe { f(GL_FRAMEBUFFER_BINDING, &mut fbo) };
++        }
++        let scale = area.scale_factor();
++        let mut target = GlFbo { fbo, w: area.allocated_width() * scale, h: area.allocated_height() * scale, internal_format: 0 };
++        let mut flip: c_int = 1;
++        let mut params = [
++            RenderParam { kind: PARAM_GL_FBO, data: &mut target as *mut _ as *mut c_void },
++            RenderParam { kind: PARAM_FLIP_Y, data: &mut flip as *mut _ as *mut c_void },
++            RenderParam { kind: 0, data: std::ptr::null_mut() },
++        ];
++        unsafe { (m.render_render)(render, params.as_mut_ptr()) };
++    }
++
++    /// The widget's window, its page put over a GL area: once per widget.
++    fn attach(window: &tauri::WebviewWindow, label: &str) -> Result<gtk::GLArea, String> {
++        if let Some(area) = VIEWS.with(|v| v.borrow().get(label).map(|v| v.area.clone())) {
++            return Ok(area);
++        }
++        let vbox = window.default_vbox().map_err(|e| e.to_string())?;
++        let page = vbox.children().into_iter()
++            .find(|c| c.type_().name().contains("WebView"))
++            .ok_or("the widget has no page")?;
++        vbox.remove(&page);
++        let overlay = gtk::Overlay::new();
++        let area = gtk::GLArea::new();
++        area.set_has_alpha(true);
++        area.set_auto_render(false);
++        overlay.add(&area);
++        overlay.add_overlay(&page);
++        vbox.pack_start(&overlay, true, true, 0);
++        overlay.show_all();
++        area.set_visible(false);
++        let key = label.to_string();
++        // The render context is made at the first draw, the area's GL
++        // context current: a widget just opened isn't on screen yet when
++        // its video starts, and a GL context made then drew nothing.
++        area.connect_render(move |area, _| {
++            let Some((mut render, ptr)) = VIEWS.with(|v| {
++                v.borrow().get(&key).map(|v| (v.render, &*v.label as *const String as *mut c_void))
++            }) else {
++                return gtk::glib::Propagation::Stop;
++            };
++            if render.is_null() {
++                if let Some(h) = handle_of(&key) {
++                    match make_render(area, h, ptr) {
++                        Ok(r) => {
++                            // Its own framebuffer again, whatever mpv bound.
++                            area.attach_buffers();
++                            render = r;
++                            VIEWS.with(|v| {
++                                if let Some(view) = v.borrow_mut().get_mut(&key) {
++                                    view.render = r;
++                                }
++                            });
++                        }
++                        Err(e) => tracing::warn!("Video: no picture ({e})"),
++                    }
++                }
++            }
++            if !render.is_null() {
++                draw(area, render);
++            }
++            gtk::glib::Propagation::Stop
++        });
++        let key = label.to_string();
++        area.connect_unrealize(move |area| free_render(area, &key));
++        VIEWS.with(|v| v.borrow_mut().insert(label.to_string(), View {
++            area: area.clone(),
++            render: std::ptr::null_mut(),
++            label: Box::new(label.to_string()),
++        }));
++        Ok(area)
++    }
++
++    /// The render context goes before its mpv: then mpv is told to quit,
++    /// and its event thread ends it.
++    fn free_render(area: &gtk::GLArea, label: &str) {
++        let render = VIEWS.with(|v| v.borrow_mut().get_mut(label).map(|v| std::mem::replace(&mut v.render, std::ptr::null_mut())));
++        if let (Some(r), Ok(m)) = (render, mpv()) {
++            if !r.is_null() {
++                area.make_current();
++                unsafe { (m.render_free)(r) };
++            }
++        }
++        if let Some(p) = players().lock().unwrap_or_else(|p| p.into_inner()).remove(label) {
++            let _ = command(p.handle as Handle, &["quit"]);
++        }
++    }
++
++    pub fn play(app: &tauri::AppHandle, id: &str, window: &tauri::WebviewWindow, url: &str, format: &str, volume: f64) -> Result<(), String> {
++        mpv()?;
++        let label = window.label().to_string();
++        let (app2, id, window, url, format) = (app.clone(), id.to_string(), window.clone(), url.to_string(), format.to_string());
++        let (tx, rx) = std::sync::mpsc::channel();
++        app.run_on_main_thread(move || {
++            let result = (|| -> Result<(), String> {
++                let area = attach(&window, &label)?;
++                let h = match handle_of(&label) {
++                    Some(h) => h,
++                    None => {
++                        let h = start(&app2, &id, &label, volume)?;
++                        players().lock().unwrap_or_else(|p| p.into_inner()).insert(label.clone(), Player { handle: h as usize });
++                        h
++                    }
++                };
++                area.set_visible(true);
++                area.queue_render();
++                let f = CString::new("ytdl-format").unwrap_or_default();
++                let fv = CString::new(format.as_str()).map_err(|e| e.to_string())?;
++                if let Ok(m) = mpv() {
++                    unsafe { (m.set_property_string)(h, f.as_ptr(), fv.as_ptr()) };
++                }
++                set(&label, "volume", &format!("{volume:.0}"))?;
++                set(&label, "pause", "no")?;
++                command(h, &["loadfile", &url, "replace"])
++            })();
++            let _ = tx.send(result);
++        }).map_err(|e| e.to_string())?;
++        rx.recv_timeout(std::time::Duration::from_secs(10)).map_err(|_| "the video didn't start".to_string())?
++    }
++
++    /// Stop: mpv ends, the area hides, the widget's page alone shows.
++    pub fn stop(app: &tauri::AppHandle, label: &str) -> Result<(), String> {
++        let label = label.to_string();
++        app.run_on_main_thread(move || {
++            if let Some(h) = handle_of(&label) {
++                let _ = command(h, &["stop"]);
++            }
++            VIEWS.with(|v| {
++                if let Some(view) = v.borrow().get(&label) {
++                    view.area.set_visible(false);
++                }
++            });
++        }).map_err(|e| e.to_string())
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn only_a_twitch_channel_or_a_youtube_video_plays() {
++        assert_eq!(stream_url("twitch", "Some_Streamer").as_deref(), Ok("https://www.twitch.tv/some_streamer"));
++        assert_eq!(stream_url("youtube", "dQw4w9WgXcQ").as_deref(), Ok("https://www.youtube.com/watch?v=dQw4w9WgXcQ"));
++        for (kind, id) in [
++            ("twitch", ""), ("twitch", "a/b"), ("twitch", "x?y=1"), ("twitch", "--option"),
++            ("twitch", "a_very_long_channel_name_over_25"),
++            ("youtube", "short"), ("youtube", "dQw4w9WgXc?"), ("youtube", "../../etc/pa"),
++            ("file", "dQw4w9WgXcQ"), ("https", "//example.com"),
++        ] {
++            assert!(stream_url(kind, id).is_err(), "{kind} {id}");
++        }
++    }
++
++    #[test]
++    fn a_quality_is_a_height_or_sound_only() {
++        assert_eq!(ytdl_format("720"), "bestvideo[height<=?720]+bestaudio/best[height<=?720]/best");
++        assert_eq!(ytdl_format("audio"), "bestaudio/best");
++        assert!(ytdl_format("; rm -rf").contains("1080"));
++    }
++
++    #[test]
++    fn twitch_queries_carry_the_words_as_variables() {
++        let q = twitch_query("search", &json!("aion \" }")).unwrap();
++        assert_eq!(q["variables"]["q"], "aion \" }");
++        assert!(!q["query"].as_str().unwrap().contains("aion"));
++        let q = twitch_query("channels", &json!(["Good_One", "bad/one", "x"])).unwrap();
++        assert_eq!(q["variables"]["l"], json!(["good_one", "x"]));
++        assert!(twitch_query("live", &json!(null)).unwrap().get("variables").is_none());
++        assert_eq!(twitch_query("live", &json!("AION 2")).unwrap()["variables"]["g"], "AION 2");
++        assert!(twitch_query("mutation", &json!("x")).is_err());
++        assert!(twitch_query("search", &json!("")).is_err());
++    }
++
++    #[test]
++    fn freetube_subscriptions_from_its_profiles_file() {
++        let text = [
++            r#"{"name":"All Channels","subscriptions":[{"id":"UC0123456789012345678901","name":"Old","thumbnail":""}],"_id":"allChannels"}"#,
++            r#"{"name":"All Channels","subscriptions":[{"id":"UC0123456789012345678901","name":"Guides","thumbnail":"https://yt3.ggpht.com/a"},{"id":"bad","name":"x"}],"_id":"allChannels"}"#,
++            r#"{"name":"Games","subscriptions":[{"id":"UC0123456789012345678901","name":"Guides"},{"id":"UCabcdefghijabcdefghijab","name":"Second"}],"_id":"p2"}"#,
++            r#"{"name":"Gone","subscriptions":[{"id":"UCzzzzzzzzzzzzzzzzzzzzzz","name":"Gone"}],"_id":"p3"}"#,
++            r#"{"$$deleted":true,"_id":"p3"}"#,
++            "not json",
++        ].join("\n");
++        let subs = freetube_subscriptions(&text);
++        let names: Vec<&str> = subs.as_array().unwrap().iter().map(|s| s["name"].as_str().unwrap()).collect();
++        assert_eq!(names, ["Guides", "Second"]);
++    }
++
++    #[test]
++    fn a_search_answer_keeps_videos_only() {
++        let all = json!({ "entries": [
++            { "id": "dQw4w9WgXcQ", "title": "A guide", "channel": "C", "channel_id": "UC0123456789012345678901", "duration": 61.0, "view_count": 5 },
++            { "id": "UC0123456789012345678901", "title": "a channel" },
++            { "id": "abcdefghijk", "title": "Live", "uploader": "U", "live_status": "is_live" },
++        ]});
++        let e = search_entries(&all);
++        assert_eq!(e.as_array().unwrap().len(), 2);
++        assert_eq!(e[0]["title"], "A guide");
++        assert_eq!(e[1]["channel"], "U");
++        assert_eq!(e[1]["live"], true);
++    }
++}
+-- 
+2.43.0
+
