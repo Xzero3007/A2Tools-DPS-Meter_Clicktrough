@@ -1,4 +1,4 @@
-From 38464c8c54056549efb8cd6f8cf126ab12fb35a6 Mon Sep 17 00:00:00 2001
+From 04356a9e30473d13b2c66f7f056eb04b2c813f03 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Tue, 10 Nov 2026 21:54:11 +0000
 Subject: [PATCH] Plugins: internet radio, from the listed stations only
@@ -10,22 +10,23 @@ those; any other plugin's page plays none (media-src 'none'). Listening
 only: the page still connects nowhere (connect-src 'none'), and the
 meter's own network client doesn't know these hosts. For the Radio plugin.
 ---
- packaging/arch/PKGBUILD         |   3 +-
+ packaging/arch/PKGBUILD         |   4 +-
  public/src/js/pluginSettings.js |   3 +
  src-tauri/src/plugins/mod.rs    | 130 +++++++++++++++++++++++++++++---
- 3 files changed, 124 insertions(+), 12 deletions(-)
+ 3 files changed, 125 insertions(+), 12 deletions(-)
 
 diff --git a/packaging/arch/PKGBUILD b/packaging/arch/PKGBUILD
-index 81fa7ca..8db0f82 100644
+index 81fa7ca..3219e77 100644
 --- a/packaging/arch/PKGBUILD
 +++ b/packaging/arch/PKGBUILD
-@@ -24,7 +24,8 @@ license=('GPL-3.0-only')
+@@ -24,7 +24,9 @@ license=('GPL-3.0-only')
  depends=('webkit2gtk-4.1' 'gtk3' 'libpcap' 'libcap' 'hicolor-icon-theme' 'gst-plugins-base' 'gst-plugins-good')
  # The tray icon is an AppIndicator; without the library the meter runs
  # without one (platform::window::tray_supported).
 -optdepends=('libayatana-appindicator: tray icon')
 +optdepends=('libayatana-appindicator: tray icon'
-+            'gst-libav: AAC radio streams in the Radio plugin')
++            'gst-libav: AAC radio streams in the Radio plugin'
++            'gst-plugins-bad: HLS radio streams in the Radio plugin (MPEG-TS)')
  makedepends=('rust' 'nodejs' 'npm' 'git' 'pkgconf')
  install=a2tools-dps-meter.install
  options=('!lto' '!debug')
