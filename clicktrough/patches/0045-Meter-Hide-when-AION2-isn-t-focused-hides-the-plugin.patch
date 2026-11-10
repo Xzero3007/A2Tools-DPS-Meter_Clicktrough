@@ -1,0 +1,103 @@
+From 024b25af0668e91f707fb0234290fa60a595b836 Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Tue, 10 Nov 2026 22:46:31 +0000
+Subject: [PATCH] Meter: "Hide when AION2 isn't focused" hides the plugins too
+
+With the meter's option on, the plugin window (the dock), the plugins'
+own windows and their widgets (the Map's overlay, the Limits) go while
+another program is in front of the game, and come back with it. Before,
+the dock went only when every plugin in it had its own option on, so with
+eight plugins it stayed over the browser. The plugins' own options stay,
+for hiding one plugin without the meter.
+---
+ index.html               |  2 +-
+ src-tauri/src/app.rs     | 28 ++++++++++++++++++++++------
+ src/data/i18n/ui/en.json |  2 +-
+ 3 files changed, 24 insertions(+), 8 deletions(-)
+
+diff --git a/index.html b/index.html
+index 7f069eb..c3ffa46 100644
+--- a/index.html
++++ b/index.html
+@@ -651,7 +651,7 @@
+                     </span>
+                   </label>
+                   <label class="settingsToggle">
+-                    <span class="settingsToggleLabel settingsLabel" data-i18n="settings.autoHideMeter" title="The meter disappears while another window is in front of the game, and comes back with it." data-i18n-title="settings.tips.autoHideMeter">Hide when AION2 isn't focused</span>
++                    <span class="settingsToggleLabel settingsLabel" data-i18n="settings.autoHideMeter" title="The meter, its windows, the plugin window and the plugins' overlays disappear while another window is in front of the game, and come back with it." data-i18n-title="settings.tips.autoHideMeter">Hide when AION2 isn't focused</span>
+                     <span class="settingsToggleControl">
+                       <input type="checkbox" class="autoHideMeterCheckbox" />
+                       <span class="settingsToggleTrack" aria-hidden="true"></span>
+diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
+index dc25542..8d1fc80 100644
+--- a/src-tauri/src/app.rs
++++ b/src-tauri/src/app.rs
+@@ -202,15 +202,25 @@ fn show_meter_again(app: &tauri::AppHandle, window: &tauri::WebviewWindow) {
+ /// (only the meter hid, and the rest stayed over the browser: Hirai,
+ /// 2026-10-19); and, whether or not that is on, the windows and icons of
+ /// plugins set to (Settings → Plugins). A plugin's own option did nothing
+-/// while the meter's was off (2026-10-27).
+-fn hides_with_meter(app: &tauri::AppHandle, label: &str, meter: bool) -> bool {
+-    (meter && (TOOL_WINDOWS.contains(&label) || label.starts_with("details-"))) || crate::plugins::hides_unfocused(app, label)
++/// while the meter's was off (2026-10-27). Clicktrough: with the meter's
++/// option (`plugins`), every plugin window, the dock and every widget (the
++/// overlays) too: the dock stayed over the browser unless each of its
++/// plugins had its own option on.
++fn hides_with_meter(app: &tauri::AppHandle, label: &str, meter: bool, plugins: bool) -> bool {
++    (meter && (TOOL_WINDOWS.contains(&label) || label.starts_with("details-")))
++        || (plugins && is_plugin_surface(label))
++        || crate::plugins::hides_unfocused(app, label)
++}
++
++/// Clicktrough: a plugin's window, the dock, or a plugin's widget.
++fn is_plugin_surface(label: &str) -> bool {
++    crate::plugins::is_plugin_window(label) || crate::plugins::widgets::parse_label(label).is_some()
+ }
+ 
+ /// Hide those of `hides_with_meter` that are up, noting each.
+-fn hide_with_meter(app: &tauri::AppHandle, meter: bool, hidden: &mut std::collections::HashSet<String>) {
++fn hide_with_meter(app: &tauri::AppHandle, meter: bool, plugins: bool, hidden: &mut std::collections::HashSet<String>) {
+     for (label, window) in app.webview_windows() {
+-        if !hides_with_meter(app, &label, meter) || hidden.contains(&label) {
++        if !hides_with_meter(app, &label, meter, plugins) || hidden.contains(&label) {
+             continue;
+         }
+         if window.is_visible().unwrap_or(false) && !platform::window::is_hidden_in_place(&window) {
+@@ -229,6 +239,12 @@ fn show_with_meter(app: &tauri::AppHandle, hidden: &mut std::collections::HashSe
+         if crate::plugins::widgets::is_closed(&label) || crate::plugins::widgets::kept_hidden(&label) {
+             continue;
+         }
++        // Clicktrough: a plugin's window or widget only if nothing else
++        // keeps it hidden (AION2 closed meanwhile, its plugin set to hide then).
++        if is_plugin_surface(&label) {
++            crate::plugins::reveal_if_free(app, &window);
++            continue;
++        }
+         if !platform::window::reveal_in_place(&window) {
+             platform::window::show_on_top_without_focus(&window);
+         }
+@@ -4370,7 +4386,7 @@ pub fn run() {
+                                 // after three (1.5 s), as the meter does, so a
+                                 // quick alt-tab doesn't take a form in use away.
+                                 others_delay += 1;
+-                                hide_with_meter(&handle, meter_auto_hide && others_delay >= 3, &mut hidden_with_meter);
++                                hide_with_meter(&handle, meter_auto_hide && others_delay >= 3, meter_auto_hide, &mut hidden_with_meter);
+                             }
+                         } else if !hidden_with_meter.is_empty() {
+                             // Auto-hide turned off meanwhile: back.
+diff --git a/src/data/i18n/ui/en.json b/src/data/i18n/ui/en.json
+index 6ea2cf3..711dd1e 100644
+--- a/src/data/i18n/ui/en.json
++++ b/src/data/i18n/ui/en.json
+@@ -579,7 +579,7 @@
+       "defaultMeterMode": "The target mode the meter opens in: Boss, Target, Train or All.",
+       "playerLimit": "How many player rows the meter shows; the rest are left out.",
+       "pinMeToTop": "Your row stays first, whatever your damage.",
+-      "autoHideMeter": "The meter disappears while another window is in front of the game, and comes back with it.",
++      "autoHideMeter": "The meter, its windows, the plugin window and the plugins' overlays disappear while another window is in front of the game, and come back with it.",
+       "detailsMonitor": "Opens the Details window on the chosen display and keeps it there.",
+       "showTtk": "Beside the battle timer, an estimate of how long the whole boss fight will take.",
+       "showHealModes": "The DPS/DMG button on the meter also cycles through healing per second and total healing.",
+-- 
+2.43.0
+
