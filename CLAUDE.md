@@ -40,7 +40,9 @@ with its own CLAUDE.md: plugin work happens there.
   (assets.playnccdn.com, page CSP, and `a2.web.image` for plugins), and NC's
   character pages and search, read only (aion2.plaync.com/api/character/,
   api-search.plaync.com, profileimg.plaync.com portraits: the Armory plugin,
-  patch 0032; the person's decision, 2026-10-28). The release is the original's private
+  patch 0032; the person's decision, 2026-10-28). The Radio plugin's
+  station streams, listening only (a plugin page's `media-src`, `RADIO_HOSTS`,
+  patch 0043; the person's decision, 2026-11-10). The release is the original's private
   build (`--no-default-features --features desktop,net`). Anything else needs
   the person's yes first.
 - **This repo is public. No network analysis goes in here**: no write-ups of

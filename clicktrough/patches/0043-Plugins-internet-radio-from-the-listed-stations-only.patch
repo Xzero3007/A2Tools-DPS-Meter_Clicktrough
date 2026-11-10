@@ -1,0 +1,254 @@
+From 38464c8c54056549efb8cd6f8cf126ab12fb35a6 Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Tue, 10 Nov 2026 21:54:11 +0000
+Subject: [PATCH] Plugins: internet radio, from the listed stations only
+ (permission radio)
+
+A plugin with the permission "radio" may play sound from the radio
+stations' stream servers in RADIO_HOSTS (its page's media-src), and only
+those; any other plugin's page plays none (media-src 'none'). Listening
+only: the page still connects nowhere (connect-src 'none'), and the
+meter's own network client doesn't know these hosts. For the Radio plugin.
+---
+ packaging/arch/PKGBUILD         |   3 +-
+ public/src/js/pluginSettings.js |   3 +
+ src-tauri/src/plugins/mod.rs    | 130 +++++++++++++++++++++++++++++---
+ 3 files changed, 124 insertions(+), 12 deletions(-)
+
+diff --git a/packaging/arch/PKGBUILD b/packaging/arch/PKGBUILD
+index 81fa7ca..8db0f82 100644
+--- a/packaging/arch/PKGBUILD
++++ b/packaging/arch/PKGBUILD
+@@ -24,7 +24,8 @@ license=('GPL-3.0-only')
+ depends=('webkit2gtk-4.1' 'gtk3' 'libpcap' 'libcap' 'hicolor-icon-theme' 'gst-plugins-base' 'gst-plugins-good')
+ # The tray icon is an AppIndicator; without the library the meter runs
+ # without one (platform::window::tray_supported).
+-optdepends=('libayatana-appindicator: tray icon')
++optdepends=('libayatana-appindicator: tray icon'
++            'gst-libav: AAC radio streams in the Radio plugin')
+ makedepends=('rust' 'nodejs' 'npm' 'git' 'pkgconf')
+ install=a2tools-dps-meter.install
+ options=('!lto' '!debug')
+diff --git a/public/src/js/pluginSettings.js b/public/src/js/pluginSettings.js
+index 34db63a..4e347f1 100644
+--- a/public/src/js/pluginSettings.js
++++ b/public/src/js/pluginSettings.js
+@@ -69,6 +69,9 @@
+       if (permission === "events:items") {
+         return t("settings.plugins.permItems", "See your inventory and storages, and the items you get (from the game data)");
+       }
++      if (permission === "radio") {
++        return t("settings.plugins.permRadio", "Play internet radio stations (listening only, from the stations this build lists)");
++      }
+       if (permission.startsWith("web:")) {
+         return t("settings.plugins.permWeb", "Read data from {host} on the internet", { host: permission.slice(4) });
+       }
+diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
+index 9d498b8..557d8d3 100644
+--- a/src-tauri/src/plugins/mod.rs
++++ b/src-tauri/src/plugins/mod.rs
+@@ -1534,6 +1534,7 @@ fn describe_permission(t: &PromptTexts, permission: &str) -> String {
+         "share" => "Share what it follows with other plugins (e.g. the pets it tracks, for a map)".into(),
+         "events:shared" => "See what other plugins share (e.g. the pets they track)".into(),
+         "events:items" => "See your inventory and storages, and the items you get (from the game data)".into(),
++        "radio" => "Play internet radio stations (listening only, from the stations this build lists)".into(),
+         p => match (p.strip_prefix("decoder:"), p.strip_prefix("web:")) {
+             (Some(name), _) => t.perm_decoder.replace("{name}", name),
+             (_, Some(host)) => format!("Read data from {host} on the internet"),
+@@ -2810,7 +2811,7 @@ const SDK: &str = include_str!("a2.js");
+ /// scheme itself is allowed too, in case WebKit does not match a path on a
+ /// custom scheme: that lets a plugin load another plugin's files, which gives
+ /// it nothing (each runs in the same sandbox, with only its own permissions).
+-fn content_policy(id: &str) -> String {
++fn content_policy(id: &str, radio: bool) -> String {
+     let base = if cfg!(windows) { "http://a2plugin.localhost" } else { "a2plugin://localhost" };
+     let mut own = format!("'self' {base}/_sdk/a2.js");
+     if valid_id(id) {
+@@ -2820,13 +2821,96 @@ fn content_policy(id: &str) -> String {
+         own.push_str(" a2plugin:");
+     }
+     format!(
+-        "default-src 'none'; script-src {own}; style-src {own} 'unsafe-inline'; img-src {own} data:;          font-src {own} data:; connect-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'"
++        "default-src 'none'; script-src {own}; style-src {own} 'unsafe-inline'; img-src {own} data:;          font-src {own} data:; {}; connect-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'",
++        media_policy(radio)
+     )
+ }
+ 
++/// Clicktrough: the radio stations' stream servers a plugin with the
++/// permission "radio" may play sound from (its page's `media-src`; the Radio
++/// plugin). Listening only: the page still connects nowhere (`connect-src
++/// 'none'`), and the meter's own network client doesn't know these hosts.
++/// The stations are the Radio plugin's list (its `stations.js`); a station
++/// added there needs its server here.
++pub const RADIO_HOSTS: &[&str] = &[
++    // Türkiye
++    "*.turkhosted.com",
++    "46.20.7.125",
++    "46.20.7.126",
++    "*.radyotvonline.com",
++    "*.radyotvonline.net",
++    "*.powerapp.com.tr",
++    "*.radyofenomen.com",
++    "n10101m.mediatriple.net",
++    "radyo.duhnet.tv",
++    "*.trt.com.tr",
++    "radyo.turkuradyo.net:4591",
++    "yayin.radyoseymen.com.tr:1070",
++    "*.radioca.st",
++    "live.streamlojik.com:8000",
++    "trkvz-radyolar.ercdn.net",
++    "shoutcast.radyogrup.com:3050",
++    // Triton (StreamTheWorld): Süper FM, Joy Türk, Metro FM, Hot 97 and
++    // other US stations; its redirect picks a numbered server.
++    "*.streamtheworld.com",
++    // USA
++    "*.ihrhls.com",
++    "*.amperwave.net",
++    "*.streamon.fm",
++    "live.powerhitz.com",
++    "*.cdnstream1.com",
++    "icepool.silvacast.com",
++    "radio.978host.com",
++    "azh.webradiomanager.fr",
++    "ec7.yesstreaming.net:1360",
++    // Germany
++    "*.wdr.de",
++    "*.bigfm.de",
++    "stream.sunshine-live.de",
++    "streams.fluxfm.de",
++    "fluxmusic.api.radiosphere.io",
++    "frontend.streamonkey.net",
++    "dispatcher.rndfnk.com",
++    "icecast.ndr.de",
++    // World
++    "*.somafm.com",
++    "listenssl.ibizaglobalradio.com:8024",
++    "control.streaming-pro.com:8000",
++    "radiorecord.hostingradio.ru",
++    "radio.intergalactic.fm",
++    // Where the servers above hand a listener on (redirects).
++    "*.streamabc.net",
++    "*.rndfnk.com",
++    "*.ndr.de",
++    "*.streamonkey.net",
++    "*.addradio.de",
++];
++
++/// The page's `media-src`: the stream servers above for a plugin with the
++/// permission "radio", else none.
++fn media_policy(radio: bool) -> String {
++    if !radio {
++        return "media-src 'none'".into();
++    }
++    let mut sources = String::from("media-src");
++    for host in RADIO_HOSTS {
++        sources.push_str(&format!(" https://{host} http://{host}"));
++    }
++    sources
++}
++
++/// Whether the plugin `id` may play the radio stations' streams.
++fn plays_radio(app: &tauri::AppHandle, id: &str) -> bool {
++    host(app)
++        .ok()
++        .and_then(|h| h.with(id, |l| l.manifest.permissions.iter().any(|p| p == "radio")))
++        .unwrap_or(false)
++}
++
+ pub fn serve(app: &tauri::AppHandle, path: &str) -> tauri::http::Response<Vec<u8>> {
+     let path = percent_decode(path.trim_start_matches('/'));
+-    let policy = content_policy(path.split('/').next().unwrap_or(""));
++    let radio = plays_radio(app, path.split('/').next().unwrap_or(""));
++    let policy = content_policy(path.split('/').next().unwrap_or(""), radio);
+     let respond = |status: u16, kind: &str, body: Vec<u8>| {
+         tauri::http::Response::builder()
+             .status(status)
+@@ -2860,7 +2944,7 @@ pub fn serve(app: &tauri::AppHandle, path: &str) -> tauri::http::Response<Vec<u8
+         if let Ok(html) = std::fs::read_to_string(&file) {
+             let (page, hashes) = inline_page(&html, &root, file.parent().unwrap_or(&root));
+             let page = with_meter_fonts(&page);
+-            let policy = inlined_policy(id, &hashes);
++            let policy = inlined_policy(id, &hashes, radio);
+             return tauri::http::Response::builder()
+                 .status(200)
+                 .header("Content-Type", "text/html; charset=utf-8")
+@@ -3036,13 +3120,14 @@ fn with_meter_fonts(page: &str) -> String {
+     format!("{}{}{}", &page[..at], meter_fonts_style(), &page[at..])
+ }
+ 
+-fn inlined_policy(id: &str, hashes: &[String]) -> String {
++fn inlined_policy(id: &str, hashes: &[String], radio: bool) -> String {
+     let scripts: String = hashes.iter().map(|h| format!(" 'sha256-{h}'")).collect();
+     let own = if valid_id(id) { format!("a2plugin://localhost/{id}/") } else { "'none'".into() };
+     format!(
+         "default-src 'none'; script-src{}; style-src 'unsafe-inline'; img-src {own} data:; font-src {own} data:; \
+-         connect-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'",
+-        if scripts.is_empty() { " 'none'".to_string() } else { scripts }
++         {}; connect-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'",
++        if scripts.is_empty() { " 'none'".to_string() } else { scripts },
++        media_policy(radio)
+     )
+ }
+ 
+@@ -3192,7 +3277,7 @@ mod tests {
+         assert!(text.to_lowercase().contains("refused"), "{text}");
+         assert!(!text.contains("error sending request"), "{text}");
+     }
+-    use super::{read_own_file, update_prompt, updates_to_offer, within_reach, Pending, PluginAvailable, PluginInfo, LANGUAGES, SETTLE};
++    use super::{read_own_file, RADIO_HOSTS, update_prompt, updates_to_offer, within_reach, Pending, PluginAvailable, PluginInfo, LANGUAGES, SETTLE};
+     use std::collections::{HashMap, HashSet};
+     use std::time::{Duration, Instant};
+ 
+@@ -3339,7 +3424,7 @@ mod tests {
+         assert!(page.contains("<script src=\"../secret.js\"></script>"));
+         assert!(page.contains("https://example.com/x.js"));
+         assert_eq!(hashes.len(), 2);
+-        let policy = inlined_policy("plugin", &hashes);
++        let policy = inlined_policy("plugin", &hashes, false);
+         assert!(policy.contains(&format!("script-src 'sha256-{}' 'sha256-{}';", hashes[0], hashes[1])), "{policy}");
+         assert!(policy.contains("connect-src 'none'"));
+         let _ = std::fs::remove_dir_all(&dir);
+@@ -3374,7 +3459,7 @@ mod tests {
+     #[test]
+     fn the_policy_names_the_plugins_own_files() {
+         let base = if cfg!(windows) { "http://a2plugin.localhost" } else { "a2plugin://localhost" };
+-        let policy = content_policy("pet-souls");
++        let policy = content_policy("pet-souls", false);
+         for directive in ["script-src", "style-src"] {
+             let sources = policy.split(';').find(|d| d.trim().starts_with(directive)).unwrap();
+             // Not 'self' alone: WebKit refuses everything in a sandboxed frame then.
+@@ -3383,7 +3468,30 @@ mod tests {
+         }
+         assert!(policy.contains("connect-src 'none'"));
+         // A path that is not a plugin id adds no folder.
+-        assert!(!content_policy("../x").contains("/../x/"));
++        assert!(!content_policy("../x", false).contains("/../x/"));
++    }
++
++    #[test]
++    fn only_a_radio_plugin_plays_sound_and_only_from_the_stations() {
++        for policy in [content_policy("map", false), inlined_policy("map", &[], false)] {
++            assert!(policy.contains("media-src 'none'"), "{policy}");
++        }
++        for policy in [content_policy("radio", true), inlined_policy("radio", &[], true)] {
++            let media = policy.split(';').find(|d| d.trim().starts_with("media-src")).unwrap();
++            assert!(!media.contains("'none'") && !media.contains(" * ") && !media.trim().ends_with('*'), "{media}");
++            for host in RADIO_HOSTS {
++                assert!(media.contains(&format!(" https://{host} ")) || media.ends_with(&format!(" http://{host}")), "{host}");
++            }
++            // Listening only: still no connection of its own.
++            assert!(policy.contains("connect-src 'none'"));
++        }
++        for host in RADIO_HOSTS {
++            let bare = host.strip_prefix("*.").unwrap_or(host);
++            assert!(
++                !bare.is_empty() && bare.contains('.') && bare.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == ':'),
++                "{host}"
++            );
++        }
+     }
+ 
+     fn event(plugin: &str, name: &str, settle: bool, at: Instant) -> Pending {
+-- 
+2.43.0
+
