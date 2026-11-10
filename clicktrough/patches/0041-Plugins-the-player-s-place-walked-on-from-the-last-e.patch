@@ -1,0 +1,311 @@
+From 578f3e81f030272362d2b731869614f0affc2d77 Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Tue, 10 Nov 2026 19:53:52 +0000
+Subject: [PATCH] Plugins: the player's place walked on from the last exact one
+
+The client's movement to the server is encrypted, but its steps (a
+31-byte segment about ten times a second) say whether the player moves.
+Standing, the last exact place stays exact; walking, the place goes on at
+the speed between the last two exact places (80 % of it, for up to 4 s of
+moving), before the middle of what is around takes over again. The world
+event says `moving`. Measured on a capture: 5.2 m off in the median
+between exact reports before, 2.1 m now.
+---
+ src-tauri/src/combat/capture_dispatcher.rs |   6 +-
+ src-tauri/src/plugins/a2.js                |  12 +-
+ src-tauri/src/plugins/mod.rs               |   8 ++
+ src-tauri/src/plugins/world.rs             | 155 ++++++++++++++++++++-
+ 4 files changed, 171 insertions(+), 10 deletions(-)
+
+diff --git a/src-tauri/src/combat/capture_dispatcher.rs b/src-tauri/src/combat/capture_dispatcher.rs
+index 15f4fc0..f430499 100644
+--- a/src-tauri/src/combat/capture_dispatcher.rs
++++ b/src-tauri/src/combat/capture_dispatcher.rs
+@@ -416,9 +416,11 @@ impl CaptureDispatcher {
+             // Only parse server->client (src == locked port)
+             if let Some(port) = current_port {
+                 if cap.src_port != port {
+-                    // Clicktrough: what the client sent is not read, but
+-                    // written to the packet log while that is on.
++                    // Clicktrough: what the client sends is encrypted; its
++                    // length alone tells whether the player is moving. Written
++                    // to the packet log while that is on.
+                     if cap.dst_port == port && !cap.data.is_empty() {
++                        crate::plugins::client_sent(cap.data.len());
+                         crate::logging::logger::log_sent_packet(&cap);
+                     }
+                     continue;
+diff --git a/src-tauri/src/plugins/a2.js b/src-tauri/src/plugins/a2.js
+index 720ae2f..160ecdd 100644
+--- a/src-tauri/src/plugins/a2.js
++++ b/src-tauri/src/plugins/a2.js
+@@ -53,10 +53,14 @@
+ //   a2.on("world", (w) => ...)                 Clicktrough: the world around the player (permission
+ //                                              "events:world"), at most 4 times a second and every 2 s:
+ //                                              { at, zone, me: { x, y, exact, from, at } | null,
+-//                                              fix: the last exact report | null, npcs: [[entity, npcId, x, y]],
+-//                                              objects: [[entity, objectId, x, y]] }; world units are cm.
+-//                                              `me` is exact for 4 s after a report (an action pose, an effect,
+-//                                              a teleport), else the middle of the entities around (~10 m off)
++//                                              fix: the last exact report | null, moving: true | false | null,
++//                                              npcs: [[entity, npcId, x, y]], objects: [[entity, objectId, x, y]] };
++//                                              world units are cm. `me` is exact after a report (an action pose,
++//                                              an effect, a teleport) while the player stands (`moving` false:
++//                                              the client sends no movement; null: not heard) or for 4 s;
++//                                              walking, from "reckoned": on from the report at the speed between
++//                                              the last two, for 4 s of moving; then the middle of the entities
++//                                              around (~10 m off)
+ //   await a2.file("tiles/a.webp")              Clicktrough: one of the plugin's own files (images, JSON) as a
+ //                                              data: URL, for files a page loads later (WebKitGTK 2.54 lets a
+ //                                              plugin's frame load none from the plugin scheme); in widgets too
+diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
+index 639fbfa..9d498b8 100644
+--- a/src-tauri/src/plugins/mod.rs
++++ b/src-tauri/src/plugins/mod.rs
+@@ -646,6 +646,14 @@ pub fn plugin_file(window: tauri::WebviewWindow, plugin: Option<String>, path: S
+     own_file(window.app_handle(), &id, &path)
+ }
+ 
++/// Clicktrough: a segment the game client sent to the server (only its
++/// length: what it holds is encrypted), for the world's walking on.
++pub fn client_sent(len: usize) {
++    if WORLD_WANTED.load(Ordering::Relaxed) {
++        with_world(|w| w.client_sent(len, Instant::now()));
++    }
++}
++
+ fn with_world<T>(f: impl FnOnce(&mut world::World) -> T) -> T {
+     let mut slot = WORLD.lock().unwrap_or_else(|p| p.into_inner());
+     f(slot.get_or_insert_with(world::World::default))
+diff --git a/src-tauri/src/plugins/world.rs b/src-tauri/src/plugins/world.rs
+index 75fb83b..482017b 100644
+--- a/src-tauri/src/plugins/world.rs
++++ b/src-tauri/src/plugins/world.rs
+@@ -58,6 +58,24 @@ const MAX_NPCS: usize = 1000;
+ const MAX_ENV: usize = 3000;
+ /// An object never reported gone is dropped after this long.
+ const ENV_STALE: Duration = Duration::from_secs(15 * 60);
++/// Clicktrough: walking on from the last exact place. The client sends its
++/// movement about 10 times a second while the player moves (encrypted, so
++/// only that it moves is known, not where): a segment of this many bytes, or
++/// two together.
++const STEP_BYTES: [usize; 2] = [31, 62];
++/// Moving while a step came this shortly before.
++const STEP_GAP: Duration = Duration::from_millis(400);
++/// At most this much of a gap between steps counts as moving time.
++const STEP_MOST: Duration = Duration::from_millis(150);
++/// The speed between two exact places counts if they are this far apart in
++/// time, and is taken at this share (a turn costs less than a straight line).
++const SPEED_FROM: Duration = Duration::from_millis(200);
++const SPEED_TO: Duration = Duration::from_secs(6);
++const SPEED_SHARE: f32 = 0.8;
++/// Faster than this (cm/s) between two exact places: not walking or riding.
++const SPEED_MOST: f32 = 2000.0;
++/// Walked on from the last exact place for at most this much moving time.
++const RECKON_MOST: Duration = Duration::from_secs(4);
+ 
+ #[derive(Debug, Clone, Copy, PartialEq)]
+ struct Fix {
+@@ -84,6 +102,11 @@ pub struct World {
+     env: HashMap<i64, Placed>,
+     changed: bool,
+     sent: Option<Instant>,
++    /// The speed (x, y per second) between the last two exact places.
++    velocity: Option<(f32, f32)>,
++    /// The client's last movement step, and the moving time since the fix.
++    last_step: Option<Instant>,
++    moved: Duration,
+ }
+ 
+ fn varint(b: &[u8], p: &mut usize) -> Option<i64> {
+@@ -147,6 +170,45 @@ impl World {
+         }
+     }
+ 
++    /// Clicktrough: a segment the game client sent to the server, by its
++    /// length. Movement steps tell whether the player is moving.
++    pub fn client_sent(&mut self, len: usize, now: Instant) {
++        if !STEP_BYTES.contains(&len) {
++            return;
++        }
++        if let Some(last) = self.last_step {
++            self.moved += now.saturating_duration_since(last).min(STEP_MOST);
++        }
++        self.last_step = Some(now);
++    }
++
++    /// Whether the player is moving, when the client's steps are heard.
++    fn moving(&self, now: Instant) -> Option<bool> {
++        self.last_step.map(|last| now.saturating_duration_since(last) <= STEP_GAP)
++    }
++
++    /// A new exact place; `walked` when it follows the last one on foot (or
++    /// mounted), so the speed between them counts.
++    fn set_fix(&mut self, fix: Fix, walked: bool) {
++        if let (true, Some(old)) = (walked, self.fix) {
++            let dt = fix.at.saturating_duration_since(old.at);
++            if dt < SPEED_FROM {
++                // The same place reported twice: the speed stays.
++            } else if dt <= SPEED_TO {
++                let secs = dt.as_secs_f32();
++                let (vx, vy) = ((fix.x - old.x) / secs, (fix.y - old.y) / secs);
++                self.velocity = ((vx * vx + vy * vy).sqrt() <= SPEED_MOST).then_some((vx * SPEED_SHARE, vy * SPEED_SHARE));
++            } else {
++                self.velocity = None;
++            }
++        } else {
++            self.velocity = None;
++        }
++        self.fix = Some(fix);
++        self.moved = Duration::ZERO;
++        self.changed = true;
++    }
++
+     fn zone_frame(&mut self, b: &[u8], now: Instant) {
+         let Some(zone) = u32_at(b, 4).filter(|z| *z > 0) else { return };
+         if zone != self.zone {
+@@ -156,7 +218,7 @@ impl World {
+         // Where the frame puts the player (a teleport, a loading screen): an
+         // exact place, and what was around belongs to the place he left.
+         if let Some((x, y)) = place_at(b, 16, 100.0, 500_000.0) {
+-            self.fix = Some(Fix { x, y, at: now, how: "zone" });
++            self.set_fix(Fix { x, y, at: now, how: "zone" }, false);
+             self.around.clear();
+             self.npcs.clear();
+             self.env.clear();
+@@ -172,7 +234,7 @@ impl World {
+         if !f32_at(b, 14).is_some_and(|z| z.is_finite() && z.abs() < 50_000.0) {
+             return;
+         }
+-        self.fix = Some(Fix { x, y, at: now, how: "teleport" });
++        self.set_fix(Fix { x, y, at: now, how: "teleport" }, false);
+         // What was around belongs to the place left, but for what came with
+         // the teleport.
+         let fresh = |at: Instant| now.saturating_duration_since(at) <= TELEPORT_KEEP;
+@@ -246,7 +308,7 @@ impl World {
+         }
+         if Some(entity) == me {
+             if let Some((x, y)) = place_at(b, p + 1, 0.0, 1_000_000.0) {
+-                self.fix = Some(Fix { x, y, at: now, how: "pose" });
++                self.set_fix(Fix { x, y, at: now, how: "pose" }, true);
+                 self.changed = true;
+             }
+         } else if let Some((x, y)) = place_at(b, p + 1, 1.0, 200_000.0) {
+@@ -281,7 +343,7 @@ impl World {
+         let end = b.len() - 12;
+         let Some((x, y)) = place_at(b, end, 100.0, 500_000.0) else { return };
+         if f32_at(b, end + 8).is_some_and(|z| z.is_finite() && z.abs() < 50_000.0) {
+-            self.fix = Some(Fix { x, y, at: now, how: "effect" });
++            self.set_fix(Fix { x, y, at: now, how: "effect" }, true);
+             self.changed = true;
+         }
+     }
+@@ -330,6 +392,23 @@ impl World {
+     /// The best guess of where the player is: (x, y, exact, how, when).
+     fn position(&self, now: Instant) -> Option<(f32, f32, bool, &'static str, Instant)> {
+         if let Some(fix) = self.fix {
++            // Clicktrough: with the client's steps heard, no step since the
++            // fix means standing there; with steps and a speed, walked on.
++            if self.last_step.is_some() {
++                let moved = self.moved.min(RECKON_MOST);
++                if moved.is_zero() {
++                    return Some((fix.x, fix.y, true, fix.how, fix.at));
++                }
++                if let Some((vx, vy)) = self.velocity {
++                    if self.moved <= RECKON_MOST {
++                        let s = moved.as_secs_f32();
++                        return Some((fix.x + vx * s, fix.y + vy * s, false, "reckoned", fix.at));
++                    }
++                }
++            } else if let (Some((vx, vy)), true) = (self.velocity, now.saturating_duration_since(fix.at) <= FIX_TRUST) {
++                let s = now.saturating_duration_since(fix.at).as_secs_f32();
++                return Some((fix.x + vx * s, fix.y + vy * s, false, "reckoned", fix.at));
++            }
+             if now.saturating_duration_since(fix.at) <= FIX_TRUST {
+                 return Some((fix.x, fix.y, true, fix.how, fix.at));
+             }
+@@ -377,6 +456,7 @@ impl World {
+             "zone": (self.zone > 0).then_some(self.zone),
+             "me": me,
+             "fix": fix,
++            "moving": self.moving(now),
+             "npcs": list(&self.npcs),
+             "objects": list(&self.env),
+         })
+@@ -446,6 +526,73 @@ mod tests {
+         assert!(!exact);
+     }
+ 
++    fn pose_at(w: &mut World, x: f32, y: f32, t: Instant) {
++        w.feed([0x3c, 0x37], &body(&[&[0x07, 3], &f(x), &f(y), &f(0.0)]), Some(7), t);
++    }
++
++    /// The client's movement steps, ten a second, from `from` for `secs`.
++    fn steps(w: &mut World, from: Instant, secs: u64) {
++        for i in 0..=secs * 10 {
++            w.client_sent(31, from + Duration::from_millis(i * 100));
++        }
++    }
++
++    #[test]
++    fn walking_on_from_the_last_two_exact_places() {
++        let mut w = World::default();
++        let t = Instant::now();
++        // 5 m/s east, as two poses a second apart say.
++        pose_at(&mut w, 0.0, 0.0, t);
++        steps(&mut w, t, 1);
++        pose_at(&mut w, 500.0, 0.0, t + Duration::from_secs(1));
++        steps(&mut w, t + Duration::from_millis(1100), 2);
++        let (x, y, exact, how, _) = w.position(t + Duration::from_millis(3100)).unwrap();
++        assert_eq!((exact, how, y), (false, "reckoned", 0.0));
++        // 2.1 s of moving at 80 % of 5 m/s: 8.4 m further.
++        assert!((x - 1340.0).abs() < 30.0, "{x}");
++        assert_eq!(w.moving(t + Duration::from_millis(3200)), Some(true));
++        // Stopped: the place stays where the steps ended.
++        let later = w.position(t + Duration::from_secs(30)).unwrap();
++        assert!((later.0 - x).abs() < 1.0 && !later.2);
++        assert_eq!(w.moving(t + Duration::from_secs(30)), Some(false));
++    }
++
++    #[test]
++    fn standing_since_an_exact_place_keeps_it() {
++        let mut w = World::default();
++        let t = Instant::now();
++        steps(&mut w, t, 1);
++        pose_at(&mut w, 100.0, 200.0, t + Duration::from_secs(2));
++        let (x, y, exact, ..) = w.position(t + Duration::from_secs(60)).unwrap();
++        assert_eq!((x, y, exact), (100.0, 200.0, true), "no step since: still there, a minute on");
++    }
++
++    #[test]
++    fn walked_too_long_the_middle_of_those_around_again() {
++        let mut w = World::default();
++        let t = Instant::now();
++        pose_at(&mut w, 0.0, 0.0, t);
++        pose_at(&mut w, 500.0, 0.0, t + Duration::from_secs(1));
++        steps(&mut w, t + Duration::from_millis(1100), 6);
++        for (i, (x, y)) in [(2000.0, 100.0), (2400.0, 400.0), (2400.0, -400.0)].into_iter().enumerate() {
++            w.feed([0x1a, 0x37], &body(&[&[10 + i as u8, 0, 0], &f(x), &f(y)]), Some(7), t + Duration::from_secs(7));
++        }
++        let (.., how, _) = w.position(t + Duration::from_millis(7200)).unwrap();
++        assert_eq!(how, "around");
++    }
++
++    #[test]
++    fn a_teleport_starts_without_a_speed() {
++        let mut w = World::default();
++        let t = Instant::now();
++        pose_at(&mut w, 0.0, 0.0, t);
++        pose_at(&mut w, 500.0, 0.0, t + Duration::from_secs(1));
++        assert!(w.velocity.is_some());
++        let tp = body(&[&[1, 0, 0, 0, 0, 0], &f(90_000.0), &f(90_000.0), &f(10.0)]);
++        w.feed([0x23, 0x36], &tp, Some(7), t + Duration::from_secs(2));
++        assert!(w.velocity.is_none());
++    }
++
+     #[test]
+     fn without_a_fresh_report_the_middle_of_those_around() {
+         let mut w = World::default();
+-- 
+2.43.0
+
