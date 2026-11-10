@@ -1,4 +1,4 @@
-From 9f4742f1e7321bc7c4a1046427f3f074e80cdfcf Mon Sep 17 00:00:00 2001
+From 0e706a79ad31a03708285e1c9d7a26672512eb81 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Tue, 10 Nov 2026 21:54:11 +0000
 Subject: [PATCH] Plugins: internet radio, from the listed stations only
@@ -13,8 +13,8 @@ meter's own network client doesn't know these hosts. For the Radio plugin.
  packaging/arch/PKGBUILD                 |   4 +-
  public/src/js/pluginSettings.js         |   3 +
  src-tauri/src/platform/linux/process.rs |  10 ++
- src-tauri/src/plugins/mod.rs            | 130 ++++++++++++++++++++++--
- 4 files changed, 135 insertions(+), 12 deletions(-)
+ src-tauri/src/plugins/mod.rs            | 158 ++++++++++++++++++++++--
+ 4 files changed, 163 insertions(+), 12 deletions(-)
 
 diff --git a/packaging/arch/PKGBUILD b/packaging/arch/PKGBUILD
 index 81fa7ca..3219e77 100644
@@ -74,7 +74,7 @@ index 6596371..f80834f 100644
      (!notes.is_empty()).then(|| notes.join("; "))
  }
 diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
-index 9d498b8..557d8d3 100644
+index 9d498b8..147c241 100644
 --- a/src-tauri/src/plugins/mod.rs
 +++ b/src-tauri/src/plugins/mod.rs
 @@ -1534,6 +1534,7 @@ fn describe_permission(t: &PromptTexts, permission: &str) -> String {
@@ -94,7 +94,7 @@ index 9d498b8..557d8d3 100644
      let base = if cfg!(windows) { "http://a2plugin.localhost" } else { "a2plugin://localhost" };
      let mut own = format!("'self' {base}/_sdk/a2.js");
      if valid_id(id) {
-@@ -2820,13 +2821,96 @@ fn content_policy(id: &str) -> String {
+@@ -2820,13 +2821,124 @@ fn content_policy(id: &str) -> String {
          own.push_str(" a2plugin:");
      }
      format!(
@@ -150,6 +150,34 @@ index 9d498b8..557d8d3 100644
 +    "frontend.streamonkey.net",
 +    "dispatcher.rndfnk.com",
 +    "icecast.ndr.de",
++    // Japan
++    "listen.moe",
++    "relay0.r-a-d.io",
++    "jenny.torontocast.com:2000",
++    "quincy.torontocast.com:2020",
++    "quincy.torontocast.com:2070",
++    "kathy.torontocast.com:2880",
++    "kathy.torontocast.com:3060",
++    "kathy.torontocast.com:3330",
++    "kathy.torontocast.com:3340",
++    "kathy.torontocast.com:3350",
++    "kathy.torontocast.com:3560",
++    "cast1.torontocast.com:2060",
++    "boxradio-edge-00.streamafrica.net",
++    "radio.retroko.com",
++    "s1.yumicoradio.net:8000",
++    "radio.plaza.one",
++    "miku.fm",
++    "stream.gensokyoradio.net",
++    "uk5.internet-radio.com",
++    "antares.dribbcast.com",
++    "pool.anison.fm",
++    "edenofthewest.com",
++    "a4.asurahosting.com:6930",
++    "*.nhkworld.jp",
++    "fmsetagaya834.out.airtime.pro",
++    "tcc117.jp",
++    "server10.reliastream.com",
 +    // World
 +    "*.somafm.com",
 +    "listenssl.ibizaglobalradio.com:8024",
@@ -193,7 +221,7 @@ index 9d498b8..557d8d3 100644
      let respond = |status: u16, kind: &str, body: Vec<u8>| {
          tauri::http::Response::builder()
              .status(status)
-@@ -2860,7 +2944,7 @@ pub fn serve(app: &tauri::AppHandle, path: &str) -> tauri::http::Response<Vec<u8
+@@ -2860,7 +2972,7 @@ pub fn serve(app: &tauri::AppHandle, path: &str) -> tauri::http::Response<Vec<u8
          if let Ok(html) = std::fs::read_to_string(&file) {
              let (page, hashes) = inline_page(&html, &root, file.parent().unwrap_or(&root));
              let page = with_meter_fonts(&page);
@@ -202,7 +230,7 @@ index 9d498b8..557d8d3 100644
              return tauri::http::Response::builder()
                  .status(200)
                  .header("Content-Type", "text/html; charset=utf-8")
-@@ -3036,13 +3120,14 @@ fn with_meter_fonts(page: &str) -> String {
+@@ -3036,13 +3148,14 @@ fn with_meter_fonts(page: &str) -> String {
      format!("{}{}{}", &page[..at], meter_fonts_style(), &page[at..])
  }
  
@@ -220,7 +248,7 @@ index 9d498b8..557d8d3 100644
      )
  }
  
-@@ -3192,7 +3277,7 @@ mod tests {
+@@ -3192,7 +3305,7 @@ mod tests {
          assert!(text.to_lowercase().contains("refused"), "{text}");
          assert!(!text.contains("error sending request"), "{text}");
      }
@@ -229,7 +257,7 @@ index 9d498b8..557d8d3 100644
      use std::collections::{HashMap, HashSet};
      use std::time::{Duration, Instant};
  
-@@ -3339,7 +3424,7 @@ mod tests {
+@@ -3339,7 +3452,7 @@ mod tests {
          assert!(page.contains("<script src=\"../secret.js\"></script>"));
          assert!(page.contains("https://example.com/x.js"));
          assert_eq!(hashes.len(), 2);
@@ -238,7 +266,7 @@ index 9d498b8..557d8d3 100644
          assert!(policy.contains(&format!("script-src 'sha256-{}' 'sha256-{}';", hashes[0], hashes[1])), "{policy}");
          assert!(policy.contains("connect-src 'none'"));
          let _ = std::fs::remove_dir_all(&dir);
-@@ -3374,7 +3459,7 @@ mod tests {
+@@ -3374,7 +3487,7 @@ mod tests {
      #[test]
      fn the_policy_names_the_plugins_own_files() {
          let base = if cfg!(windows) { "http://a2plugin.localhost" } else { "a2plugin://localhost" };
@@ -247,7 +275,7 @@ index 9d498b8..557d8d3 100644
          for directive in ["script-src", "style-src"] {
              let sources = policy.split(';').find(|d| d.trim().starts_with(directive)).unwrap();
              // Not 'self' alone: WebKit refuses everything in a sandboxed frame then.
-@@ -3383,7 +3468,30 @@ mod tests {
+@@ -3383,7 +3496,30 @@ mod tests {
          }
          assert!(policy.contains("connect-src 'none'"));
          // A path that is not a plugin id adds no folder.
