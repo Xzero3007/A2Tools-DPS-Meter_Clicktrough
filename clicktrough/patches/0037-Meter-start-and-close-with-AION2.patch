@@ -1,0 +1,724 @@
+From 883de1732764ab7e9284c4c6b0c9ee403219f5bd Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Tue, 10 Nov 2026 18:13:40 +0000
+Subject: [PATCH 37/37] Meter: start and close with AION2
+
+Settings' "Start and close with AION2" (on unless turned off) puts a small
+watcher, a2tools-game-watch, in the desktop's autostart and starts it. Every
+3 s it looks through /proc for the game, as the meter does; when the game
+starts and no meter runs, it starts one with --with-game. Only such a meter
+closes, 10 s after the game is gone (a quick restart of the game keeps it).
+A meter started by hand behaves as always, also when started by hand while
+one started with the game runs. A meter closed by hand while the game runs
+is started again only at the game's next start. Turned off, the entry is
+removed and the watcher stops by itself. It opens no window and sends
+nothing.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_012bGvDj8ZmT41uucm2ufqo7
+---
+ index.html                                    |   7 +
+ packaging/arch/PKGBUILD                       |   6 +-
+ public/src/js/core.js                         |  11 +
+ src-tauri/Cargo.toml                          |   6 +
+ src-tauri/src/app.rs                          |  55 ++++-
+ src-tauri/src/platform/game_watch.rs          | 197 ++++++++++++++++++
+ src-tauri/src/platform/linux/game_launch.rs   |  60 ++++++
+ src-tauri/src/platform/linux/mod.rs           |   1 +
+ src-tauri/src/platform/mod.rs                 |   3 +-
+ .../src/platform/unsupported/game_launch.rs   |   5 +
+ src-tauri/src/platform/unsupported/mod.rs     |   1 +
+ src-tauri/src/platform/win32/mod.rs           |   2 +
+ src-tauri/tools/a2t_game_watch.rs             | 108 ++++++++++
+ src/data/i18n/ui/de.json                      |   2 +
+ src/data/i18n/ui/en.json                      |   2 +
+ 15 files changed, 463 insertions(+), 3 deletions(-)
+ create mode 100644 src-tauri/src/platform/game_watch.rs
+ create mode 100644 src-tauri/src/platform/linux/game_launch.rs
+ create mode 100644 src-tauri/src/platform/unsupported/game_launch.rs
+ create mode 100644 src-tauri/tools/a2t_game_watch.rs
+
+diff --git a/index.html b/index.html
+index 422c4da..7f069eb 100644
+--- a/index.html
++++ b/index.html
+@@ -664,6 +664,13 @@
+                       <span class="settingsToggleTrack" aria-hidden="true"></span>
+                     </span>
+                   </label>
++                  <label class="settingsToggle startWithGameToggle">
++                    <span class="settingsToggleLabel settingsLabel" data-i18n="settings.startWithGame" title="The meter starts when AION2 starts, and closes when it closes. A meter you start yourself stays open as always." data-i18n-title="settings.tips.startWithGame">Start and close with AION2</span>
++                    <span class="settingsToggleControl">
++                      <input type="checkbox" class="startWithGameCheckbox" />
++                      <span class="settingsToggleTrack" aria-hidden="true"></span>
++                    </span>
++                  </label>
+                   <label class="settingsToggle">
+                     <span class="settingsToggleLabel settingsLabel" data-i18n="settings.hideWhenSolo" title="The meter hides while you're not in a party, and comes back when you join one. The Show/Hide keybind still brings it up." data-i18n-title="settings.tips.hideWhenSolo">Show only in a party</span>
+                     <span class="settingsToggleControl">
+diff --git a/packaging/arch/PKGBUILD b/packaging/arch/PKGBUILD
+index ae20df5..6234ed5 100644
+--- a/packaging/arch/PKGBUILD
++++ b/packaging/arch/PKGBUILD
+@@ -54,7 +54,7 @@ build() {
+   # CI packs the binaries its .deb job built (A2T_PREBUILT=1, see
+   # .github/workflows/arch-package.yml) rather than compiling them again.
+   if [ -n "${A2T_PREBUILT:-}" ] && [ -f src-tauri/target/release/a2tools-dps-meter ] \
+-     && [ -f src-tauri/target/release/a2tools-hotkeys ]; then
++     && [ -f src-tauri/target/release/a2tools-hotkeys ] && [ -f src-tauri/target/release/a2tools-game-watch ]; then
+     return 0
+   fi
+   # Files a clean checkout lacks (they are gitignored mirrors of src/data).
+@@ -71,6 +71,9 @@ build() {
+   # (platform/linux/hotkeys.rs); the .install script gives caps to the meter only.
+   cargo build --release --manifest-path src-tauri/Cargo.toml --bin a2tools-hotkeys \
+     --no-default-features --features desktop,net
++  # Clicktrough: the watcher that starts the meter with AION2 (platform/game_watch.rs).
++  cargo build --release --manifest-path src-tauri/Cargo.toml --bin a2tools-game-watch \
++    --no-default-features --features desktop,net
+ }
+ 
+ package() {
+@@ -78,6 +81,7 @@ package() {
+   root="$(_root)"
+   install -Dm755 "$root/src-tauri/target/release/a2tools-dps-meter" "$pkgdir/usr/bin/a2tools-dps-meter"
+   install -Dm755 "$root/src-tauri/target/release/a2tools-hotkeys" "$pkgdir/usr/bin/a2tools-hotkeys"
++  install -Dm755 "$root/src-tauri/target/release/a2tools-game-watch" "$pkgdir/usr/bin/a2tools-game-watch"
+ 
+   # Tauri resolves resources to /usr/lib/<name>; ship both spellings of the
+   # name so either resolution finds the data.
+diff --git a/public/src/js/core.js b/public/src/js/core.js
+index dfec46b..b6e9699 100644
+--- a/public/src/js/core.js
++++ b/public/src/js/core.js
+@@ -132,6 +132,7 @@ class DpsApp {
+       font: "dpsMeter.font",
+       autoHideMeter: "dpsMeter.autoHideMeter",
+       hideWhenGameClosed: "dpsMeter.hideWhenGameClosed",
++      startWithGame: "dpsMeter.startWithGame",
+       hideWhenSolo: "dpsMeter.hideWhenSolo",
+       hideOutOfCombat: "dpsMeter.hideOutOfCombat",
+       globalHotkeys: "dpsMeter.globalHotkeys",
+@@ -3263,6 +3264,15 @@ class DpsApp {
+         this.safeSetSetting(this.storageKeys.hideWhenGameClosed, String(!!event.target?.checked));
+       });
+     }
++    // Clicktrough: start and close with AION2 (on unless turned off; the
++    // backend keeps the watcher's autostart entry as it says).
++    this.startWithGameCheckbox = document.querySelector(".startWithGameCheckbox");
++    if (this.startWithGameCheckbox) {
++      this.startWithGameCheckbox.checked = this.safeGetSetting(this.storageKeys.startWithGame) !== "false";
++      this.startWithGameCheckbox.addEventListener("change", (event) => {
++        this.safeSetSetting(this.storageKeys.startWithGame, String(!!event.target?.checked));
++      });
++    }
+     // And while not in a party (the same loop).
+     this.hideWhenSoloCheckbox = document.querySelector(".hideWhenSoloCheckbox");
+     if (this.hideWhenSoloCheckbox) {
+@@ -5284,6 +5294,7 @@ class DpsApp {
+       [this.bossLogsCheckbox, "bossLogs", false],
+       [this.autoHideMeterCheckbox, "autoHideMeter", false],
+       [this.hideWhenGameClosedCheckbox, "hideWhenGameClosed", false],
++      [this.startWithGameCheckbox, "startWithGame", true],
+       [this.hideWhenSoloCheckbox, "hideWhenSolo", false],
+       [this.globalHotkeysCheckbox, "globalHotkeys", !document.documentElement?.classList?.contains?.("linux")],
+       [this.saveRawPacketsCheckbox, "saveRawPackets", false],
+diff --git a/src-tauri/Cargo.toml b/src-tauri/Cargo.toml
+index b45f7b0..7b3d3d5 100644
+--- a/src-tauri/Cargo.toml
++++ b/src-tauri/Cargo.toml
+@@ -87,6 +87,12 @@ name = "a2tools-hotkeys"
+ path = "tools/a2t_hotkeys.rs"
+ required-features = ["desktop"]
+ 
++# Clicktrough: starts the meter with AION2 (platform/game_watch.rs).
++[[bin]]
++name = "a2tools-game-watch"
++path = "tools/a2t_game_watch.rs"
++required-features = ["desktop"]
++
+ [[bin]]
+ name = "a2t-probe"
+ path = "tools/a2t_probe.rs"
+diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
+index 9ac4cae..93cb51b 100644
+--- a/src-tauri/src/app.rs
++++ b/src-tauri/src/app.rs
+@@ -375,6 +375,44 @@ fn pointer_over_window(window: &tauri::WebviewWindow) -> bool {
+ /// start and couldn't be used, Settings included ("Hide while AION2 is
+ /// closed" is the setting for that).
+ static GAME_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
++/// Clicktrough: started by the watcher as the game started (`--with-game`):
++/// closes once the game is gone. A start by hand meanwhile clears it.
++static WITH_GAME: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
++
++/// The setting "Start and close with AION2" (on unless turned off).
++const START_WITH_GAME_KEY: &str = "dpsMeter.startWithGame";
++
++/// Clicktrough: "Start and close with AION2". Keeps the watcher's autostart
++/// entry as the setting says (looked at every 3 s), and closes a meter the
++/// watcher started once the game has been gone a while.
++fn follow_the_game(app: tauri::AppHandle) {
++    use platform::game_watch::{WithGame, POLL};
++    let clock = std::time::Instant::now();
++    let mut with_game = WithGame::new(clock.elapsed());
++    let mut setting: Option<bool> = None;
++    loop {
++        if let Some(state) = app.try_state::<AppState>() {
++            let on = state.settings.get(START_WITH_GAME_KEY).as_deref() != Some("false");
++            if setting != Some(on) {
++                setting = Some(on);
++                platform::game_launch::set_autostart(on);
++            }
++        }
++        let now = clock.elapsed();
++        if WITH_GAME.load(std::sync::atomic::Ordering::Relaxed) {
++            if !with_game.waiting(now) {
++                tracing::info!("Started with AION2, but it didn't show: stays open as if started by hand");
++                WITH_GAME.store(false, std::sync::atomic::Ordering::Relaxed);
++            } else if with_game.step(platform::window_detector::find_aion2_window(), now) {
++                tracing::info!("AION2 closed: the meter it started closes too");
++                quit_app(app.clone());
++                return;
++            }
++        }
++        std::thread::sleep(POLL);
++    }
++}
++
+ /// Clicktrough: the meter hidden by "Hide when AION2 isn't focused", to come
+ /// back when that no longer applies (the game closed, the setting off).
+ static AUTO_HIDDEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+@@ -3645,6 +3683,10 @@ pub fn run() {
+         tracing::info!("{note}");
+     }
+     elevate_at_start();
++    if std::env::args().any(|a| a == platform::game_watch::WITH_GAME_ARG) {
++        tracing::info!("Started with AION2: closes when it does");
++        WITH_GAME.store(true, std::sync::atomic::Ordering::Relaxed);
++    }
+ 
+     let mut context = tauri::generate_context!();
+     if platform::window_startup::loads_hidden()
+@@ -3662,8 +3704,15 @@ pub fn run() {
+         // One meter at a time: a second start shows this one instead. Two
+         // ran side by side (a tester), each with its plugins, and every alert
+         // came twice. First, as the plugin asks.
+-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
++        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+             tracing::info!("A second start: showing this meter instead");
++            // Clicktrough: started by hand now, it no longer closes with the
++            // game (the watcher never starts a second one).
++            if !args.iter().any(|a| a == platform::game_watch::WITH_GAME_ARG)
++                && WITH_GAME.swap(false, std::sync::atomic::Ordering::Relaxed)
++            {
++                tracing::info!("Started by hand too: stays open after AION2 closes");
++            }
+             set_meter_wanted(app, true);
+         }))
+         .plugin(tauri_plugin_opener::init())
+@@ -4114,6 +4163,10 @@ pub fn run() {
+                 }
+             });
+ 
++            // Clicktrough: start and close with AION2.
++            let handle = app.handle().clone();
++            std::thread::spawn(move || follow_the_game(handle));
++
+             // Housekeeping every 500 ms: ping, auto-hide, window positions.
+             let handle = app.handle().clone();
+             tauri::async_runtime::spawn(async move {
+diff --git a/src-tauri/src/platform/game_watch.rs b/src-tauri/src/platform/game_watch.rs
+new file mode 100644
+index 0000000..d269a21
+--- /dev/null
++++ b/src-tauri/src/platform/game_watch.rs
+@@ -0,0 +1,197 @@
++//! Clicktrough: the meter starts with AION2 and closes with it.
++//!
++//! A small watcher (`a2tools-game-watch`, tools/a2t_game_watch.rs) runs from
++//! the desktop's autostart while "Start and close with AION2" is on. When the
++//! game starts and no meter runs, it starts one with `--with-game`; only such
++//! a meter closes again once the game is gone. A meter started by hand behaves
++//! as always. The decisions live here, plain and tested on every build; the
++//! watcher includes this file, so it needs nothing else of the meter.
++
++use std::time::Duration;
++
++/// The argument the watcher starts the meter with.
++pub const WITH_GAME_ARG: &str = "--with-game";
++
++/// The watcher's file name, next to the meter's.
++pub const WATCHER_NAME: &str = "a2tools-game-watch";
++
++/// The meter's file name.
++pub const METER_NAME: &str = "a2tools-dps-meter";
++
++/// The autostart entry's file name (in `~/.config/autostart/`).
++pub const AUTOSTART_FILE: &str = "a2tools-game-watch.desktop";
++
++/// How often the watcher, and a meter started with the game, look for it.
++pub const POLL: Duration = Duration::from_secs(3);
++
++/// How long the game must be gone before a meter started with it closes: a
++/// game restarted at once keeps its meter.
++pub const GONE_FOR: Duration = Duration::from_secs(10);
++
++/// How long a meter started with the game waits to see it at all. Not seen
++/// by then (the game closed at once), it stays, as one started by hand.
++pub const FIRST_SEEN_WITHIN: Duration = Duration::from_secs(60);
++
++/// Whether a process is a meter, from its `/proc/<pid>/comm` (the kernel
++/// keeps the first 15 bytes of the name).
++pub fn is_meter_comm(comm: &str) -> bool {
++    let comm = comm.trim();
++    !comm.is_empty() && METER_NAME.starts_with(comm) && comm.len() >= 15.min(METER_NAME.len())
++}
++
++/// Where the autostart entry lies: `$XDG_CONFIG_HOME/autostart`, or
++/// `~/.config/autostart`.
++pub fn autostart_path() -> Option<std::path::PathBuf> {
++    std::env::var_os("XDG_CONFIG_HOME")
++        .filter(|dir| !dir.is_empty())
++        .map(std::path::PathBuf::from)
++        .or_else(|| std::env::var_os("HOME").map(|home| std::path::PathBuf::from(home).join(".config")))
++        .map(|dir| dir.join("autostart").join(AUTOSTART_FILE))
++}
++
++/// The autostart entry that runs the watcher at each login.
++pub fn autostart_entry(watcher: &str) -> String {
++    format!(
++        "[Desktop Entry]\n\
++         Type=Application\n\
++         Name=A2Tools DPS Meter: start with AION2\n\
++         Comment=Starts the meter when AION2 starts. Turn it off in the meter's Settings.\n\
++         Exec=\"{watcher}\"\n\
++         Icon={METER_NAME}\n\
++         NoDisplay=true\n\
++         Terminal=false\n\
++         X-GNOME-Autostart-enabled=true\n"
++    )
++}
++
++/// The watcher's decision: start a meter at the moment the game appears, if
++/// none runs. Once per start of the game, so a meter closed by hand while
++/// the game runs stays closed.
++#[derive(Debug, Default)]
++pub struct Watcher {
++    game_was_running: bool,
++}
++
++impl Watcher {
++    /// `game` and `meter`: whether each runs now. True: start the meter.
++    pub fn step(&mut self, game: bool, meter: bool) -> bool {
++        let started = game && !self.game_was_running;
++        self.game_was_running = game;
++        started && !meter
++    }
++}
++
++/// A meter started with the game: whether to close now.
++#[derive(Debug)]
++pub struct WithGame {
++    started: Duration,
++    seen: bool,
++    gone_since: Option<Duration>,
++}
++
++impl WithGame {
++    /// `now`: time since some fixed moment (the meter's start, say).
++    pub fn new(now: Duration) -> Self {
++        WithGame { started: now, seen: false, gone_since: None }
++    }
++
++    /// Whether the game was seen at all, or there is still time to.
++    pub fn waiting(&self, now: Duration) -> bool {
++        self.seen || now.saturating_sub(self.started) < FIRST_SEEN_WITHIN
++    }
++
++    /// `game`: whether it runs now. True: close the meter.
++    pub fn step(&mut self, game: bool, now: Duration) -> bool {
++        if game {
++            self.seen = true;
++            self.gone_since = None;
++            return false;
++        }
++        if !self.seen {
++            return false;
++        }
++        let since = *self.gone_since.get_or_insert(now);
++        now.saturating_sub(since) >= GONE_FOR
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    fn s(secs: u64) -> Duration {
++        Duration::from_secs(secs)
++    }
++
++    #[test]
++    fn the_meter_s_process_name() {
++        assert!(is_meter_comm("a2tools-dps-met\n"));
++        assert!(is_meter_comm("a2tools-dps-meter"));
++        assert!(!is_meter_comm("a2tools-game-wa"));
++        assert!(!is_meter_comm("a2tools-hotkeys"));
++        assert!(!is_meter_comm("a2tools"));
++        assert!(!is_meter_comm(""));
++    }
++
++    #[test]
++    fn the_watcher_starts_a_meter_once_per_game_start() {
++        let mut w = Watcher::default();
++        assert!(!w.step(false, false));
++        assert!(w.step(true, false), "the game started, no meter");
++        assert!(!w.step(true, false), "closed by hand meanwhile: not again");
++        assert!(!w.step(false, false));
++        assert!(w.step(true, false), "the next start of the game");
++    }
++
++    #[test]
++    fn a_running_meter_is_left_alone() {
++        let mut w = Watcher::default();
++        assert!(!w.step(true, true));
++        assert!(!w.step(true, false));
++    }
++
++    #[test]
++    fn running_at_the_watcher_s_start_counts_as_a_start() {
++        // Turned on in Settings while playing: the meter runs, so nothing.
++        let mut w = Watcher::default();
++        assert!(!w.step(true, true));
++    }
++
++    #[test]
++    fn closes_ten_seconds_after_the_game() {
++        let mut g = WithGame::new(s(0));
++        assert!(!g.step(true, s(3)));
++        assert!(!g.step(false, s(6)));
++        assert!(!g.step(false, s(12)));
++        assert!(g.step(false, s(16)));
++    }
++
++    #[test]
++    fn a_quick_restart_of_the_game_keeps_the_meter() {
++        let mut g = WithGame::new(s(0));
++        g.step(true, s(3));
++        assert!(!g.step(false, s(6)));
++        assert!(!g.step(true, s(12)));
++        assert!(!g.step(false, s(15)));
++        assert!(!g.step(false, s(24)));
++        assert!(g.step(false, s(25)));
++    }
++
++    #[test]
++    fn never_seen_it_stays() {
++        let mut g = WithGame::new(s(0));
++        for t in (0..300).step_by(3) {
++            assert!(!g.step(false, s(t)));
++        }
++        assert!(!g.waiting(s(61)));
++        assert!(g.waiting(s(59)));
++    }
++
++    #[test]
++    fn the_autostart_entry() {
++        let entry = autostart_entry("/usr/bin/a2tools-game-watch");
++        assert!(entry.starts_with("[Desktop Entry]\n"));
++        assert!(entry.contains("\nExec=\"/usr/bin/a2tools-game-watch\"\n"));
++        assert!(entry.contains("\nType=Application\n"));
++    }
++}
+diff --git a/src-tauri/src/platform/linux/game_launch.rs b/src-tauri/src/platform/linux/game_launch.rs
+new file mode 100644
+index 0000000..606a2c5
+--- /dev/null
++++ b/src-tauri/src/platform/linux/game_launch.rs
+@@ -0,0 +1,60 @@
++//! Starting the meter with the game (see `platform::game_watch`): the
++//! watcher's autostart entry, and the watcher started at once.
++
++use crate::platform::game_watch::{autostart_entry, autostart_path, WATCHER_NAME};
++use std::os::unix::process::CommandExt;
++
++/// Turn the watcher on (autostart entry, and running now) or off (entry
++/// removed: the watcher sees it gone and stops by itself).
++pub fn set_autostart(on: bool) {
++    let Some(entry) = autostart_path() else {
++        tracing::warn!("Start with AION2: no home folder to put the autostart entry in");
++        return;
++    };
++    if !on {
++        match std::fs::remove_file(&entry) {
++            Ok(()) => tracing::info!("Start with AION2: off, autostart entry removed"),
++            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
++            Err(error) => tracing::warn!("Start with AION2: {} not removed: {error}", entry.display()),
++        }
++        return;
++    }
++    let Some(watcher) = std::env::current_exe()
++        .ok()
++        .and_then(|exe| Some(exe.parent()?.join(WATCHER_NAME)))
++        .filter(|path| path.is_file())
++    else {
++        tracing::info!("Start with AION2: no {WATCHER_NAME} next to the meter (a build without it)");
++        return;
++    };
++    let text = autostart_entry(&watcher.to_string_lossy());
++    if std::fs::read_to_string(&entry).ok().as_deref() != Some(text.as_str()) {
++        let written = entry
++            .parent()
++            .map_or(Ok(()), std::fs::create_dir_all)
++            .and_then(|()| std::fs::write(&entry, &text));
++        match written {
++            Ok(()) => tracing::info!("Start with AION2: on, autostart entry {}", entry.display()),
++            Err(error) => {
++                tracing::warn!("Start with AION2: {} not written: {error}", entry.display());
++                return;
++            }
++        }
++    }
++    // Running now too, not only from the next login. A second one stops at
++    // once (it holds a lock), so starting it each time is harmless.
++    let spawned = std::process::Command::new(&watcher)
++        .stdin(std::process::Stdio::null())
++        .stdout(std::process::Stdio::null())
++        .stderr(std::process::Stdio::null())
++        .process_group(0)
++        .spawn();
++    match spawned {
++        Ok(mut child) => {
++            std::thread::spawn(move || {
++                let _ = child.wait();
++            });
++        }
++        Err(error) => tracing::warn!("Start with AION2: {} not started: {error}", watcher.display()),
++    }
++}
+diff --git a/src-tauri/src/platform/linux/mod.rs b/src-tauri/src/platform/linux/mod.rs
+index 7b27a56..1eaf93c 100644
+--- a/src-tauri/src/platform/linux/mod.rs
++++ b/src-tauri/src/platform/linux/mod.rs
+@@ -13,6 +13,7 @@ pub mod atomic_file;
+ pub mod clock;
+ pub mod dialog;
+ pub mod discord_ipc;
++pub mod game_launch;
+ /// No frame record to read: under Proton the frames go through Vulkan.
+ #[path = "../unsupported/fps.rs"]
+ pub mod fps;
+diff --git a/src-tauri/src/platform/mod.rs b/src-tauri/src/platform/mod.rs
+index bacc397..2d0bdd1 100644
+--- a/src-tauri/src/platform/mod.rs
++++ b/src-tauri/src/platform/mod.rs
+@@ -32,13 +32,14 @@ mod os;
+ #[path = "unsupported/mod.rs"]
+ mod os;
+ 
++pub mod game_watch;
+ pub mod hotkeys;
+ pub mod kwin_rules;
+ pub mod procfs;
+ pub mod screenshot;
+ 
+ pub use os::{
+-    admin, clock, dialog, discord_ipc, fps, pcap, process, secret, shell, updater, window, window_detector, window_rules, window_startup,
++    admin, clock, dialog, discord_ipc, fps, game_launch, pcap, process, secret, shell, updater, window, window_detector, window_rules, window_startup,
+ };
+ 
+ pub use os::atomic_file;
+diff --git a/src-tauri/src/platform/unsupported/game_launch.rs b/src-tauri/src/platform/unsupported/game_launch.rs
+new file mode 100644
+index 0000000..9ea04ef
+--- /dev/null
++++ b/src-tauri/src/platform/unsupported/game_launch.rs
+@@ -0,0 +1,5 @@
++//! Starting the meter with the game (see `platform::game_watch`): Linux only
++//! so far. Elsewhere the setting does nothing.
++
++/// Turn the watcher on (autostart entry, and running now) or off.
++pub fn set_autostart(_on: bool) {}
+diff --git a/src-tauri/src/platform/unsupported/mod.rs b/src-tauri/src/platform/unsupported/mod.rs
+index d63a791..be92e8f 100644
+--- a/src-tauri/src/platform/unsupported/mod.rs
++++ b/src-tauri/src/platform/unsupported/mod.rs
+@@ -9,6 +9,7 @@ pub mod clock;
+ pub mod dialog;
+ pub mod discord_ipc;
+ pub mod fps;
++pub mod game_launch;
+ pub mod hotkeys;
+ pub mod pcap;
+ pub mod process;
+diff --git a/src-tauri/src/platform/win32/mod.rs b/src-tauri/src/platform/win32/mod.rs
+index 27f7e93..ce369d7 100644
+--- a/src-tauri/src/platform/win32/mod.rs
++++ b/src-tauri/src/platform/win32/mod.rs
+@@ -10,6 +10,8 @@ pub mod clock;
+ pub mod dialog;
+ pub mod discord_ipc;
+ pub mod fps;
++#[path = "../unsupported/game_launch.rs"]
++pub mod game_launch;
+ pub mod hotkeys;
+ pub mod pcap;
+ pub mod process;
+diff --git a/src-tauri/tools/a2t_game_watch.rs b/src-tauri/tools/a2t_game_watch.rs
+new file mode 100644
+index 0000000..c2213d6
+--- /dev/null
++++ b/src-tauri/tools/a2t_game_watch.rs
+@@ -0,0 +1,108 @@
++//! Clicktrough: `a2tools-game-watch`, the meter started with AION2.
++//!
++//! Runs from the desktop's autostart while Settings' "Start and close with
++//! AION2" is on (the meter writes and removes the entry). Every 3 s it looks
++//! through `/proc` for the game; when the game starts and no meter runs, it
++//! starts one with `--with-game`, and that meter closes once the game is gone.
++//! It opens no window, sends nothing, and stops when the entry is removed.
++//! One runs at a time (a lock in the runtime folder).
++//!
++//! Only plain std: the decisions and the game's name come from the meter's
++//! own files, included here.
++
++#[allow(dead_code)]
++#[path = "../src/platform/game_watch.rs"]
++mod game_watch;
++#[allow(dead_code)]
++#[path = "../src/platform/procfs.rs"]
++mod procfs;
++
++use game_watch::{autostart_path, is_meter_comm, Watcher, METER_NAME, POLL, WITH_GAME_ARG};
++use std::path::{Path, PathBuf};
++
++fn main() {
++    let Some(entry) = autostart_path() else { return };
++    // One watcher: the lock holds while this process lives.
++    let lock_dir = std::env::var_os("XDG_RUNTIME_DIR")
++        .filter(|dir| !dir.is_empty())
++        .map(PathBuf::from)
++        .unwrap_or_else(std::env::temp_dir);
++    let Ok(lock) = std::fs::OpenOptions::new()
++        .create(true)
++        .truncate(false)
++        .write(true)
++        .open(lock_dir.join("a2tools-game-watch.lock"))
++    else {
++        return;
++    };
++    if lock.try_lock().is_err() {
++        return;
++    }
++    let meter = std::env::current_exe()
++        .ok()
++        .and_then(|exe| Some(exe.parent()?.join(METER_NAME)))
++        .filter(|path| path.is_file())
++        .unwrap_or_else(|| PathBuf::from(METER_NAME));
++    let mut watcher = Watcher::default();
++    loop {
++        // Turned off in Settings (or the entry deleted): stop.
++        if !entry.exists() {
++            return;
++        }
++        let (game, meter_runs) = look();
++        if watcher.step(game, meter_runs) {
++            start(&meter);
++        }
++        std::thread::sleep(POLL);
++    }
++}
++
++/// Whether the game runs, and whether a meter does.
++fn look() -> (bool, bool) {
++    let (mut game, mut meter) = (false, false);
++    let Ok(entries) = std::fs::read_dir("/proc") else { return (false, false) };
++    for entry in entries.flatten() {
++        let dir = entry.path();
++        let is_pid = dir
++            .file_name()
++            .and_then(|n| n.to_str())
++            .is_some_and(|n| n.bytes().all(|b| b.is_ascii_digit()));
++        if !is_pid {
++            continue;
++        }
++        let comm = std::fs::read_to_string(dir.join("comm")).unwrap_or_default();
++        if is_meter_comm(&comm) {
++            meter = true;
++        } else if !game && is_game(&dir, &comm) {
++            game = true;
++        }
++        if game && meter {
++            break;
++        }
++    }
++    (game, meter)
++}
++
++/// As the meter finds it (platform/linux/window_detector.rs).
++fn is_game(dir: &Path, comm: &str) -> bool {
++    let cmdline = std::fs::read(dir.join("cmdline")).unwrap_or_default();
++    procfs::is_aion2_process(comm, &cmdline)
++}
++
++/// Start the meter, on its own: it outlives this watcher's checks.
++fn start(meter: &Path) {
++    use std::os::unix::process::CommandExt;
++    let spawned = std::process::Command::new(meter)
++        .arg(WITH_GAME_ARG)
++        .stdin(std::process::Stdio::null())
++        .stdout(std::process::Stdio::null())
++        .stderr(std::process::Stdio::null())
++        .process_group(0)
++        .spawn();
++    if let Ok(mut child) = spawned {
++        // Reaped when it ends, so it leaves no zombie behind.
++        std::thread::spawn(move || {
++            let _ = child.wait();
++        });
++    }
++}
+diff --git a/src/data/i18n/ui/de.json b/src/data/i18n/ui/de.json
+index 5960b04..9edfb54 100644
+--- a/src/data/i18n/ui/de.json
++++ b/src/data/i18n/ui/de.json
+@@ -309,6 +309,7 @@
+     "showDpsSuffix": "/s an DPS anhängen",
+     "autoHideMeter": "Ausblenden, wenn AION2 nicht im Vordergrund ist",
+     "hideWhenGameClosed": "Ausblenden, wenn AION2 geschlossen ist",
++    "startWithGame": "Mit AION2 starten und schließen",
+     "hideWhenSolo": "Nur in einer Gruppe anzeigen",
+     "hideOutOfCombat": {
+       "label": "Außerhalb des Kampfes ausblenden",
+@@ -597,6 +598,7 @@
+       "showMeter": "Aus: Nur deine Plugins sind zu sehen. Das Meter liest im Hintergrund weiter Kämpfe mit und lädt hoch. Zurückholen kannst du es hier, mit dem Ein-/Ausblenden-Hotkey oder mit dem Meter-Knopf an einem Plugin-Fenster.",
+       "clearOnZone": "Wann der letzte Kampf nach einem Zonenwechsel aus dem Meter verschwindet. Jeder Kampf bleibt so oder so im Verlauf.",
+       "hideWhenGameClosed": "Das Meter wird ausgeblendet, solange das Spiel nicht läuft, und erscheint wieder, wenn es startet.",
++      "startWithGame": "Das Meter startet, wenn AION2 startet, und schließt sich mit dem Spiel. Ein Meter, das du selbst startest, bleibt wie gewohnt offen.",
+       "hideWhenSolo": "Das Meter wird ausgeblendet, solange du in keiner Gruppe bist, und erscheint wieder, wenn du einer beitrittst. Die Tastenkombination zum Ein-/Ausblenden holt es trotzdem hervor.",
+       "hideOutOfCombat": "Das Meter wird ausgeblendet, wenn du so lange nicht im Kampf warst, und erscheint mit dem nächsten Treffer wieder. Solange Einstellungen, Verlauf oder Details offen sind oder die Maus darüber ist, bleibt es sichtbar.",
+       "runAsAdmin": "Nötig, um die Bildrate des Spiels anzuzeigen. Windows fragt bei jedem Start des Meters nach.",
+diff --git a/src/data/i18n/ui/en.json b/src/data/i18n/ui/en.json
+index 0b7b1eb..6ea2cf3 100644
+--- a/src/data/i18n/ui/en.json
++++ b/src/data/i18n/ui/en.json
+@@ -319,6 +319,7 @@
+     "showDpsSuffix": "Add /s to DPS",
+     "autoHideMeter": "Hide when AION2 isn't focused",
+     "hideWhenGameClosed": "Hide while AION2 is closed",
++    "startWithGame": "Start and close with AION2",
+     "hideWhenSolo": "Show only in a party",
+     "hideOutOfCombat": {
+       "label": "Hide out of combat",
+@@ -609,6 +610,7 @@
+       "showMeter": "Off: only your plugins show. The meter keeps reading combat and uploading in the background. Bring it back here, with the show/hide hotkey, or with the meter button on a plugin window.",
+       "clearOnZone": "When the last fight leaves the meter after the zone changes. Every fight stays in History either way.",
+       "hideWhenGameClosed": "The meter hides while the game isn't running, and comes back when it starts.",
++      "startWithGame": "The meter starts when AION2 starts, and closes when it closes. A meter you start yourself stays open as always.",
+       "hideWhenSolo": "The meter hides while you're not in a party, and comes back when you join one. The Show/Hide keybind still brings it up.",
+       "hideOutOfCombat": "The meter hides once you've been out of combat this long, and comes back with the next hit. It stays up while Settings, History or Details is open, or the mouse is over it.",
+       "runAsAdmin": "Needed to show the game's frame rate. Windows asks each time the meter starts.",
+-- 
+2.43.0
+
