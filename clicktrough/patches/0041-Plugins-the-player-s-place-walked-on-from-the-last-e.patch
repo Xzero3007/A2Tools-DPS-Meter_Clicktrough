@@ -1,4 +1,4 @@
-From 578f3e81f030272362d2b731869614f0affc2d77 Mon Sep 17 00:00:00 2001
+From e7c8d5282e88d5483b704160e27dae027fc6e86d Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Tue, 10 Nov 2026 19:53:52 +0000
 Subject: [PATCH] Plugins: the player's place walked on from the last exact one
@@ -13,9 +13,9 @@ between exact reports before, 2.1 m now.
 ---
  src-tauri/src/combat/capture_dispatcher.rs |   6 +-
  src-tauri/src/plugins/a2.js                |  12 +-
- src-tauri/src/plugins/mod.rs               |   8 ++
- src-tauri/src/plugins/world.rs             | 155 ++++++++++++++++++++-
- 4 files changed, 171 insertions(+), 10 deletions(-)
+ src-tauri/src/plugins/mod.rs               |   8 +
+ src-tauri/src/plugins/world.rs             | 212 +++++++++++++++++++--
+ 4 files changed, 219 insertions(+), 19 deletions(-)
 
 diff --git a/src-tauri/src/combat/capture_dispatcher.rs b/src-tauri/src/combat/capture_dispatcher.rs
 index 15f4fc0..f430499 100644
@@ -78,18 +78,21 @@ index 639fbfa..9d498b8 100644
      let mut slot = WORLD.lock().unwrap_or_else(|p| p.into_inner());
      f(slot.get_or_insert_with(world::World::default))
 diff --git a/src-tauri/src/plugins/world.rs b/src-tauri/src/plugins/world.rs
-index 75fb83b..482017b 100644
+index 75fb83b..5091724 100644
 --- a/src-tauri/src/plugins/world.rs
 +++ b/src-tauri/src/plugins/world.rs
-@@ -58,6 +58,24 @@ const MAX_NPCS: usize = 1000;
+@@ -58,6 +58,27 @@ const MAX_NPCS: usize = 1000;
  const MAX_ENV: usize = 3000;
  /// An object never reported gone is dropped after this long.
  const ENV_STALE: Duration = Duration::from_secs(15 * 60);
 +/// Clicktrough: walking on from the last exact place. The client sends its
 +/// movement about 10 times a second while the player moves (encrypted, so
-+/// only that it moves is known, not where): a segment of this many bytes, or
-+/// two together.
-+const STEP_BYTES: [usize; 2] = [31, 62];
++/// only that it moves is known, not where): segments of 29 to 31 bytes on
++/// foot, 40 to 43 mounted or flying, two of them together. Smaller ones are
++/// its heartbeat (11 bytes, 20 a second) and acknowledgements; an action
++/// counted as a step only walks on a little, a step missed would leave the
++/// player standing where he was.
++const STEP_BYTES: std::ops::RangeInclusive<usize> = 28..=96;
 +/// Moving while a step came this shortly before.
 +const STEP_GAP: Duration = Duration::from_millis(400);
 +/// At most this much of a gap between steps counts as moving time.
@@ -106,7 +109,7 @@ index 75fb83b..482017b 100644
  
  #[derive(Debug, Clone, Copy, PartialEq)]
  struct Fix {
-@@ -84,6 +102,11 @@ pub struct World {
+@@ -84,6 +105,11 @@ pub struct World {
      env: HashMap<i64, Placed>,
      changed: bool,
      sent: Option<Instant>,
@@ -118,7 +121,7 @@ index 75fb83b..482017b 100644
  }
  
  fn varint(b: &[u8], p: &mut usize) -> Option<i64> {
-@@ -147,6 +170,45 @@ impl World {
+@@ -147,6 +173,50 @@ impl World {
          }
      }
  
@@ -142,6 +145,11 @@ index 75fb83b..482017b 100644
 +    /// A new exact place; `walked` when it follows the last one on foot (or
 +    /// mounted), so the speed between them counts.
 +    fn set_fix(&mut self, fix: Fix, walked: bool) {
++        // The same place again (an effect renewed reports where it was cast):
++        // nothing new, and the player may have walked on since.
++        if walked && self.fix.is_some_and(|old| old.x == fix.x && old.y == fix.y) {
++            return;
++        }
 +        if let (true, Some(old)) = (walked, self.fix) {
 +            let dt = fix.at.saturating_duration_since(old.at);
 +            if dt < SPEED_FROM {
@@ -164,7 +172,7 @@ index 75fb83b..482017b 100644
      fn zone_frame(&mut self, b: &[u8], now: Instant) {
          let Some(zone) = u32_at(b, 4).filter(|z| *z > 0) else { return };
          if zone != self.zone {
-@@ -156,7 +218,7 @@ impl World {
+@@ -156,7 +226,7 @@ impl World {
          // Where the frame puts the player (a teleport, a loading screen): an
          // exact place, and what was around belongs to the place he left.
          if let Some((x, y)) = place_at(b, 16, 100.0, 500_000.0) {
@@ -173,7 +181,7 @@ index 75fb83b..482017b 100644
              self.around.clear();
              self.npcs.clear();
              self.env.clear();
-@@ -172,7 +234,7 @@ impl World {
+@@ -172,7 +242,7 @@ impl World {
          if !f32_at(b, 14).is_some_and(|z| z.is_finite() && z.abs() < 50_000.0) {
              return;
          }
@@ -182,7 +190,7 @@ index 75fb83b..482017b 100644
          // What was around belongs to the place left, but for what came with
          // the teleport.
          let fresh = |at: Instant| now.saturating_duration_since(at) <= TELEPORT_KEEP;
-@@ -246,7 +308,7 @@ impl World {
+@@ -246,7 +316,7 @@ impl World {
          }
          if Some(entity) == me {
              if let Some((x, y)) = place_at(b, p + 1, 0.0, 1_000_000.0) {
@@ -191,7 +199,7 @@ index 75fb83b..482017b 100644
                  self.changed = true;
              }
          } else if let Some((x, y)) = place_at(b, p + 1, 1.0, 200_000.0) {
-@@ -281,7 +343,7 @@ impl World {
+@@ -281,7 +351,7 @@ impl World {
          let end = b.len() - 12;
          let Some((x, y)) = place_at(b, end, 100.0, 500_000.0) else { return };
          if f32_at(b, end + 8).is_some_and(|z| z.is_finite() && z.abs() < 50_000.0) {
@@ -200,7 +208,7 @@ index 75fb83b..482017b 100644
              self.changed = true;
          }
      }
-@@ -330,6 +392,23 @@ impl World {
+@@ -330,23 +400,47 @@ impl World {
      /// The best guess of where the player is: (x, y, exact, how, when).
      fn position(&self, now: Instant) -> Option<(f32, f32, bool, &'static str, Instant)> {
          if let Some(fix) = self.fix {
@@ -217,6 +225,8 @@ index 75fb83b..482017b 100644
 +                        return Some((fix.x + vx * s, fix.y + vy * s, false, "reckoned", fix.at));
 +                    }
 +                }
++                // Moved since, with no speed to go on: not there any more.
++                return self.around_or(fix, now);
 +            } else if let (Some((vx, vy)), true) = (self.velocity, now.saturating_duration_since(fix.at) <= FIX_TRUST) {
 +                let s = now.saturating_duration_since(fix.at).as_secs_f32();
 +                return Some((fix.x + vx * s, fix.y + vy * s, false, "reckoned", fix.at));
@@ -224,7 +234,38 @@ index 75fb83b..482017b 100644
              if now.saturating_duration_since(fix.at) <= FIX_TRUST {
                  return Some((fix.x, fix.y, true, fix.how, fix.at));
              }
-@@ -377,6 +456,7 @@ impl World {
+         }
++        match self.fix {
++            Some(fix) => self.around_or(fix, now),
++            None => self.middle(now, AROUND_FRESH).or_else(|| self.middle(now, AROUND_OLD)).map(|(x, y, _)| (x, y, false, "around", now)),
++        }
++    }
++
++    /// The middle of what is around, unless further from the last exact
++    /// place than the player could have walked since (10 m/s plus 30 m, for
++    /// at most 12 s: a group announced far away, not where he is); else that
++    /// place, not exact.
++    fn around_or(&self, fix: Fix, now: Instant) -> Option<(f32, f32, bool, &'static str, Instant)> {
+         if let Some((x, y, _)) = self.middle(now, AROUND_FRESH).or_else(|| self.middle(now, AROUND_OLD)) {
+-            // A guess further from the last exact place than the player could
+-            // have walked since (10 m/s plus 30 m, for at most 12 s) is a group
+-            // announced far away, not where he is.
+-            let plausible = self.fix.is_none_or(|fix| {
+-                let secs = now.saturating_duration_since(fix.at).as_secs_f32().min(12.0);
+-                ((x - fix.x).powi(2) + (y - fix.y).powi(2)).sqrt() <= 3000.0 + 1000.0 * secs
+-            });
+-            if plausible {
++            let secs = now.saturating_duration_since(fix.at).as_secs_f32().min(12.0);
++            if ((x - fix.x).powi(2) + (y - fix.y).powi(2)).sqrt() <= 3000.0 + 1000.0 * secs {
+                 return Some((x, y, false, "around", now));
+             }
+         }
+-        self.fix.map(|fix| (fix.x, fix.y, false, fix.how, fix.at))
++        Some((fix.x, fix.y, false, fix.how, fix.at))
+     }
+ 
+     /// Whether plugins should hear the world now.
+@@ -377,6 +471,7 @@ impl World {
              "zone": (self.zone > 0).then_some(self.zone),
              "me": me,
              "fix": fix,
@@ -232,7 +273,7 @@ index 75fb83b..482017b 100644
              "npcs": list(&self.npcs),
              "objects": list(&self.env),
          })
-@@ -446,6 +526,73 @@ mod tests {
+@@ -446,6 +541,97 @@ mod tests {
          assert!(!exact);
      }
  
@@ -289,6 +330,30 @@ index 75fb83b..482017b 100644
 +        }
 +        let (.., how, _) = w.position(t + Duration::from_millis(7200)).unwrap();
 +        assert_eq!(how, "around");
++    }
++
++    #[test]
++    fn mounted_steps_count_and_the_same_place_again_is_nothing_new() {
++        let mut w = World::default();
++        let t = Instant::now();
++        pose_at(&mut w, 0.0, 0.0, t);
++        pose_at(&mut w, 1000.0, 0.0, t + Duration::from_secs(1));
++        // Mounted: bigger steps.
++        for i in 0..=10 {
++            w.client_sent(41, t + Duration::from_millis(1100 + i * 100));
++        }
++        // An effect renewed, with the place it was cast at.
++        pose_at(&mut w, 1000.0, 0.0, t + Duration::from_millis(1600));
++        let (x, _, exact, how, _) = w.position(t + Duration::from_millis(2100)).unwrap();
++        assert_eq!((exact, how), (false, "reckoned"));
++        assert!(x > 1700.0, "{x}");
++        // The heartbeat is no step.
++        let mut still = World::default();
++        pose_at(&mut still, 5.0, 5.0, t);
++        for i in 0..20 {
++            still.client_sent(11, t + Duration::from_millis(i * 50));
++        }
++        assert!(still.last_step.is_none());
 +    }
 +
 +    #[test]
