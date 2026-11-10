@@ -1,0 +1,82 @@
+From adeae154bfd5e2720e491d1a9e324e5ef7fcdfb9 Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Tue, 10 Nov 2026 18:23:51 +0000
+Subject: [PATCH] Meter: no hover on a player's row
+
+Hovering a player's row tinted it, ran a ripple over its bar and opened a
+tooltip (DPS, total damage, top five skills). On Linux, WebKitGTK keeps
+the pointer's last spot over the meter after the pointer went to the
+game, and as the rows re-sort during a fight it moved the hover to
+whichever player slid under that spot: rows lit up one after another,
+as if someone hovered them. The tooltip shows nothing Details doesn't.
+
+A player's row now takes no hover: no tint, no ripple, no tooltip. A
+click still opens Details.
+---
+ public/src/js/meter.js | 35 ++++-------------------------------
+ src/styles.css         |  1 -
+ 2 files changed, 4 insertions(+), 32 deletions(-)
+
+diff --git a/public/src/js/meter.js b/public/src/js/meter.js
+index 9f3c3ae..b4ede70 100644
+--- a/public/src/js/meter.js
++++ b/public/src/js/meter.js
+@@ -194,39 +194,12 @@ const createMeterUI = ({
+       lastClassIconSrc: "",
+       lastIsUser: false,
+       lastIsIdentifying: false,
+-      hoverRipplePlayed: false,
+-      hoverRippleTimer: null,
+     };
+ 
+-    rowEl.addEventListener("mouseenter", (event) => {
+-      if (!view.hoverRipplePlayed) {
+-        view.rowEl.classList.add("hoverRippleOnce");
+-        view.hoverRipplePlayed = true;
+-        if (view.hoverRippleTimer) {
+-          clearTimeout(view.hoverRippleTimer);
+-        }
+-        view.hoverRippleTimer = setTimeout(() => {
+-          view.rowEl.classList.remove("hoverRippleOnce");
+-          view.hoverRippleTimer = null;
+-        }, 950);
+-      }
+-      onHoverUserRow?.(view.currentRow, event);
+-    });
+-
+-
+-    rowEl.addEventListener("mousemove", (event) => {
+-      // The tooltip coalesces pointer events into one update per display frame.
+-      onHoverUserRow?.(view.currentRow, event);
+-    });
+-    rowEl.addEventListener("mouseleave", () => {
+-      view.hoverRipplePlayed = false;
+-      if (view.hoverRippleTimer) {
+-        clearTimeout(view.hoverRippleTimer);
+-        view.hoverRippleTimer = null;
+-      }
+-      view.rowEl.classList.remove("hoverRippleOnce");
+-      onLeaveUserRow?.(view.currentRow);
+-    });
++    // No hover on a player's row: no tint, no ripple, no tooltip. On Linux
++    // WebKitGTK kept the pointer's last spot after it went to the game, and as
++    // the rows re-sorted in a fight it lit up whichever player slid under it.
++    // A click still opens Details.
+ 
+     rowEl.addEventListener("click", () => {
+       // if (view.currentRow?.isUser)
+diff --git a/src/styles.css b/src/styles.css
+index aa6559a..e4b6903 100644
+--- a/src/styles.css
++++ b/src/styles.css
+@@ -655,7 +655,6 @@ body.linuxOverlay .meter {
+   cursor: pointer;
+   transition: background 120ms ease;
+ }
+-html:not(.hoverStale) .list .item:hover { background: rgba(255, 255, 255, 0.075); }
+ .list.dragInteracting .item { pointer-events: none; }
+ 
+ /* The bar spans the whole row: at 100% it has to look 100% full, and a
+-- 
+2.43.0
+
