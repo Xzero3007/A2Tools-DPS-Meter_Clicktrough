@@ -1,0 +1,300 @@
+From 8fc7a3f3e3d7b5cc1a73d4898c4d029571ae5bfb Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Tue, 10 Nov 2026 23:02:32 +0000
+Subject: [PATCH 46/46] Plugins: overlays only in the open world, and away at
+ shops
+
+A plugin overlay (the Map's, the Limits) now shows only in the open world:
+every zone that isn't one of its regions, the Abyss's layers or the
+legions' airships counts as a dungeon (quest scenes, new zones). And it
+goes at a shop: a merchant's list (91 56, the Black Cloud Merchant's as
+the Closet plugin reads it) hides it until the player walks, rides or
+flies off (eight movement steps of the client within 2 s) or the zone
+changes; the game sends nothing when a shop closes. A fourth switch per
+plugin in Settings -> Plugins: "Hide its overlay at shops".
+---
+ public/src/js/pluginSettings.js |   3 +-
+ src-tauri/src/plugins/mod.rs    |  13 ++--
+ src-tauri/src/plugins/zones.rs  | 124 +++++++++++++++++++++++++++-----
+ 3 files changed, 116 insertions(+), 24 deletions(-)
+
+diff --git a/public/src/js/pluginSettings.js b/public/src/js/pluginSettings.js
+index ebb5fe8..9cdfd15 100644
+--- a/public/src/js/pluginSettings.js
++++ b/public/src/js/pluginSettings.js
+@@ -524,9 +524,10 @@
+           // Shugo festival's games and Incursions, arenas (plugins/zones.rs).
+           if ((view.overlays || []).includes(p.id)) {
+             for (const [place, text] of [
+-              ["dungeon", "Hide its overlay in dungeons"],
++              ["dungeon", "Hide its overlay in dungeons and every zone outside the open world"],
+               ["games", "Hide its overlay in Shugo games and Incursions"],
+               ["arena", "Hide its overlay in arenas"],
++              ["shop", "Hide its overlay at shops (back when you move on)"],
+             ]) {
+               const hides = (view.overlayHide?.[place] || []).includes(p.id);
+               options.append(option(text, hides, (hide) => run(invoke("plugin_set_overlay_hide", { id: p.id, place, hide }))));
+diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
+index 478af57..39260e4 100644
+--- a/src-tauri/src/plugins/mod.rs
++++ b/src-tauri/src/plugins/mod.rs
+@@ -544,13 +544,13 @@ pub fn plugin_set_hide(app: tauri::AppHandle, id: String, when: String, hide: bo
+ }
+ 
+ /// Clicktrough: plugin `id`'s overlay hides in zones of kind `place`
+-/// ("dungeon", "games", "arena"), or not.
++/// ("dungeon", "games", "arena", "shop"), or not.
+ #[tauri::command]
+ pub fn plugin_set_overlay_hide(app: tauri::AppHandle, id: String, place: String, hide: bool) -> Result<PluginsView, String> {
+     if !valid_id(&id) {
+         return Err("not a plugin id".into());
+     }
+-    let kind = zones::Kind::from_name(&place).ok_or("dungeon, games or arena")?;
++    let kind = zones::Kind::from_name(&place).ok_or("dungeon, games, arena or shop")?;
+     zones::set_hides_in(&app, &id, kind, hide);
+     let host = host(&app)?;
+     Ok(view(&app, &host))
+@@ -686,6 +686,7 @@ pub fn plugin_file(window: tauri::WebviewWindow, plugin: Option<String>, path: S
+ /// Clicktrough: a segment the game client sent to the server (only its
+ /// length: what it holds is encrypted), for the world's walking on.
+ pub fn client_sent(len: usize) {
++    zones::client_sent(len);
+     if WORLD_WANTED.load(Ordering::Relaxed) {
+         with_world(|w| w.client_sent(len, Instant::now()));
+     }
+@@ -1137,8 +1138,12 @@ impl PluginHost {
+         let at = len as usize;
+         let Some(opcode) = packet.get(at..at + 2) else { return };
+         let body = &packet[at + 2..];
+-        if opcode == [0x21, 0x36] && OVERLAY_ZONES.load(Ordering::Relaxed) {
+-            zones::saw_frame(app, body);
++        if OVERLAY_ZONES.load(Ordering::Relaxed) {
++            match opcode {
++                [0x21, 0x36] => zones::saw_frame(app, body),
++                [0x91, 0x56] => zones::saw_shop(app),
++                _ => {}
++            }
+         }
+         if WORLD_WANTED.load(Ordering::Relaxed) {
+             let me = app.try_state::<AppState>().and_then(|s| s.data_storage.local_player_id());
+diff --git a/src-tauri/src/plugins/zones.rs b/src-tauri/src/plugins/zones.rs
+index 01f1a8a..9cec35b 100644
+--- a/src-tauri/src/plugins/zones.rs
++++ b/src-tauri/src/plugins/zones.rs
+@@ -6,12 +6,20 @@
+ //! world.rs reads it), which comes with every loading screen; nothing is
+ //! sent.
+ //!
++//! Only the open world shows them (its regions, the Abyss, the airships):
++//! every other zone counts as a dungeon, a new one too. And at a shop: the
++//! game sends a merchant's list as a tab of the shop opens (`91 56`, the
++//! Black Cloud Merchant's as the Closet plugin reads it) and nothing as it
++//! closes, so the overlays come back as the player walks, rides or flies
++//! off (the client's movement, `client_sent`), or at the next zone.
++//!
+ //! Per plugin, in Settings → Plugins (an overlay's plugin only); every
+-//! overlay hides in all three until the player turns one off. In such a
+-//! zone, the overlay's header button shows it anyway, until the next zone.
++//! overlay hides in all four until the player turns one off. There, the
++//! overlay's header button shows it anyway, until the next zone or shop.
+ 
+ use std::collections::HashSet;
+-use std::sync::atomic::{AtomicU32, Ordering};
++use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
++use std::time::{Duration, Instant};
+ use std::sync::{Mutex, OnceLock};
+ 
+ use tauri::Manager;
+@@ -21,24 +29,28 @@ use crate::app::AppState;
+ /// The kinds of zone an overlay can hide in.
+ #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+ pub enum Kind {
+-    /// Dungeons and other instances (the Nightmare Altar's, the Abyss
+-    /// Corridor's ...).
++    /// Dungeons and every other zone that isn't the open world (the
++    /// Nightmare Altar, the Abyss Corridor, quest scenes ...).
+     Dungeon,
+     /// The Shugo festival's games (Jump Jump, Defend Shugo Merchants ...) and
+     /// the Incursion of the Spirits.
+     Games,
+     /// The arenas.
+     Arena,
++    /// A shop's window (no zone: from a merchant's list until the player
++    /// moves on).
++    Shop,
+ }
+ 
+ impl Kind {
+-    pub const ALL: [Kind; 3] = [Kind::Dungeon, Kind::Games, Kind::Arena];
++    pub const ALL: [Kind; 4] = [Kind::Dungeon, Kind::Games, Kind::Arena, Kind::Shop];
+ 
+     pub fn name(self) -> &'static str {
+         match self {
+             Kind::Dungeon => "dungeon",
+             Kind::Games => "games",
+             Kind::Arena => "arena",
++            Kind::Shop => "shop",
+         }
+     }
+ 
+@@ -53,15 +65,20 @@ impl Kind {
+             Kind::Dungeon => "ct.overlayShownInDungeons",
+             Kind::Games => "ct.overlayShownInGames",
+             Kind::Arena => "ct.overlayShownInArenas",
++            Kind::Shop => "ct.overlayShownAtShops",
+         }
+     }
+ }
+ 
+ /// What kind of zone a zone id is, by the game's numbering (the zone names
+-/// the Map's data has). The open world, its towns, airships, the Abyss and
+-/// the small quest scenes are none of them.
++/// the Map's data has): None for the open world (its regions, the Abyss's
++/// layers, the legions' airships), a dungeon for every zone not named here.
+ pub fn kind(zone: u32) -> Option<Kind> {
+     match zone {
++        0 => None,
++        // Verteron, Eltnen, Ishalgen, Altgard, Morheim, Poeta (two numbers
++        // each), the Abyss's three layers, the legions' airships.
++        1010 | 1011 | 1100 | 1110 | 1111 | 100_001 | 100_002 | 110_001 | 20 | 22 | 23 | 901..=905 => None,
+         // Fire Temple Arena, Impetusium Arena, Odyle Shard Cradle,
+         // Stormslumber Snowfield, Sandstorm Temple (two numbers each).
+         7 | 8 | 10 | 12 | 14 | 60..=64 => Some(Kind::Arena),
+@@ -72,13 +89,8 @@ pub fn kind(zone: u32) -> Option<Kind> {
+         // Beritra Air Raid, Jump Jump, Hidden Lugi, Nyerk Shooter, Incursion
+         // of the Spirits, Defend Shugo Merchants ...
+         500_000..=519_999 => Some(Kind::Games),
+-        // Dream and illusion instances, quest dungeons, caves.
+-        200_000..=499_999 => Some(Kind::Dungeon),
+-        // The dungeons (Fire Temple, Draupnir, Deus Research Base ...).
+-        600_000..=699_999 => Some(Kind::Dungeon),
+-        // Daeva Bio-Research Base, Nightmare Altar, Tyrant's Hideout ...
+-        900_000..=999_999 => Some(Kind::Dungeon),
+-        _ => None,
++        // Dungeons, instances, quest scenes, and zones still to come.
++        _ => Some(Kind::Dungeon),
+     }
+ }
+ 
+@@ -145,9 +157,10 @@ pub fn hides(app: &tauri::AppHandle, label: &str) -> bool {
+ 
+ /// Whether the zone's kind hides overlay `label`, whatever its button did.
+ fn hides_ignoring_button(app: &tauri::AppHandle, label: &str) -> bool {
+-    let Some(kind) = kind(ZONE.load(Ordering::Relaxed)) else { return false };
+     let Some((id, _)) = super::widgets::parse_label(label) else { return false };
+-    super::overlays::is_overlay(app, label) && hides_in(app, &id, kind)
++    let by_zone = kind(ZONE.load(Ordering::Relaxed)).is_some_and(|k| hides_in(app, &id, k));
++    let by_shop = AT_SHOP.load(Ordering::Relaxed) && hides_in(app, &id, Kind::Shop);
++    (by_zone || by_shop) && super::overlays::is_overlay(app, label)
+ }
+ 
+ /// Whether overlay `label` is hidden for the zone now.
+@@ -170,12 +183,70 @@ pub fn saw_frame(app: &tauri::AppHandle, body: &[u8]) {
+         return;
+     }
+     tracing::debug!("Plugins: zone {zone} ({:?}): the overlays as it says", kind(zone));
++    AT_SHOP.store(false, Ordering::Relaxed);
+     lock(shown_anyway()).clear();
++    sync_soon(app);
++}
++
++/// Sync on the main thread (the frames come on the capture's).
++fn sync_soon(app: &tauri::AppHandle) {
+     let app = app.clone();
+     let main = app.clone();
+     let _ = main.run_on_main_thread(move || sync(&app));
+ }
+ 
++/// At a shop: from a merchant's list until the player moves on.
++static AT_SHOP: AtomicBool = AtomicBool::new(false);
++/// The app, for the client's movement (`client_sent`), which comes without it.
++static APP: OnceLock<tauri::AppHandle> = OnceLock::new();
++/// The client's movement steps heard since the shop opened.
++fn steps() -> &'static Mutex<std::collections::VecDeque<Instant>> {
++    static STEPS: OnceLock<Mutex<std::collections::VecDeque<Instant>>> = OnceLock::new();
++    STEPS.get_or_init(Mutex::default)
++}
++/// Moving on: this many steps within `MOVED_WITHIN`. The client sends its
++/// movement about 10 times a second while the player moves (segments of 28
++/// to 96 bytes, world.rs); a click in the shop's window is one now and then.
++const MOVED_STEPS: usize = 8;
++const MOVED_WITHIN: Duration = Duration::from_millis(2000);
++
++/// A merchant's list (`91 56`): a tab of a shop opened.
++pub fn saw_shop(app: &tauri::AppHandle) {
++    let _ = APP.set(app.clone());
++    lock(steps()).clear();
++    if AT_SHOP.swap(true, Ordering::Relaxed) {
++        return;
++    }
++    tracing::debug!("Plugins: a shop opened: the overlays as it says");
++    lock(shown_anyway()).clear();
++    sync_soon(app);
++}
++
++/// A segment the client sent, by its length: the player walking, riding or
++/// flying off ends the shop.
++pub fn client_sent(len: usize) {
++    if !AT_SHOP.load(Ordering::Relaxed) || !(28..=96).contains(&len) {
++        return;
++    }
++    let now = Instant::now();
++    let moved = {
++        let mut q = lock(steps());
++        q.push_back(now);
++        while q.front().is_some_and(|t| now.duration_since(*t) > MOVED_WITHIN) {
++            q.pop_front();
++        }
++        q.len() >= MOVED_STEPS
++    };
++    if moved && AT_SHOP.swap(false, Ordering::Relaxed) {
++        tracing::debug!("Plugins: moving on from the shop: the overlays back");
++        lock(steps()).clear();
++        lock(shown_anyway()).clear();
++        if let Some(app) = APP.get() {
++            sync_soon(app);
++        }
++    }
++}
++
+ /// The header button of overlay `label`, in a zone that hides it: shown
+ /// anyway, or hidden again. False when the zone doesn't hide it (the button
+ /// does as it always does then).
+@@ -226,10 +297,10 @@ mod tests {
+ 
+     #[test]
+     fn zones_by_kind() {
+-        for open in [1010, 1011, 1100, 1110, 1111, 100_001, 110_001, 20, 22, 23, 901, 905, 141_005, 800_013, 870_040, 0] {
++        for open in [1010, 1011, 1100, 1110, 1111, 100_001, 100_002, 110_001, 20, 22, 23, 901, 905, 0] {
+             assert_eq!(kind(open), None, "{open}");
+         }
+-        for dungeon in [600_021, 610_013, 620_022, 690_046, 910_067, 220_022, 310_001, 400_001, 503_001, 504_006, 900_001] {
++        for dungeon in [600_021, 610_013, 620_022, 690_046, 910_067, 220_022, 310_001, 400_001, 503_001, 504_006, 900_001, 141_005, 800_013, 870_040, 46, 101_041, 1_234_567] {
+             assert_eq!(kind(dungeon), Some(Kind::Dungeon), "{dungeon}");
+         }
+         for game in [500_005, 500_011, 500_043, 502_001, 510_015, 510_038, 76, 77, 78] {
+@@ -240,6 +311,21 @@ mod tests {
+         }
+     }
+ 
++    #[test]
++    fn moving_on_ends_the_shop() {
++        use std::sync::atomic::Ordering;
++        super::AT_SHOP.store(true, Ordering::Relaxed);
++        // Clicks in the shop's window and big frames: still there.
++        for len in [11, 200, 30, 30, 30, 500] {
++            super::client_sent(len);
++        }
++        assert!(super::AT_SHOP.load(Ordering::Relaxed));
++        for _ in 0..super::MOVED_STEPS {
++            super::client_sent(30);
++        }
++        assert!(!super::AT_SHOP.load(Ordering::Relaxed));
++    }
++
+     #[test]
+     fn kinds_by_name() {
+         for k in Kind::ALL {
+-- 
+2.43.0
+
