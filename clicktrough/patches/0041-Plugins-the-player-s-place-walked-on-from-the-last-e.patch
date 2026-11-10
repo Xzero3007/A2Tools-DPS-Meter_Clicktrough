@@ -1,7 +1,8 @@
-From e7c8d5282e88d5483b704160e27dae027fc6e86d Mon Sep 17 00:00:00 2001
+From bd3fd8cbae0b21d3cb58a6c117d06e6468e5911e Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Tue, 10 Nov 2026 19:53:52 +0000
-Subject: [PATCH] Plugins: the player's place walked on from the last exact one
+Subject: [PATCH 41/41] Plugins: the player's place walked on from the last
+ exact one
 
 The client's movement to the server is encrypted, but its steps (a
 31-byte segment about ten times a second) say whether the player moves.
@@ -11,30 +12,28 @@ moving), before the middle of what is around takes over again. The world
 event says `moving`. Measured on a capture: 5.2 m off in the median
 between exact reports before, 2.1 m now.
 ---
- src-tauri/src/combat/capture_dispatcher.rs |   6 +-
+ src-tauri/src/combat/capture_dispatcher.rs |   5 +
  src-tauri/src/plugins/a2.js                |  12 +-
  src-tauri/src/plugins/mod.rs               |   8 +
  src-tauri/src/plugins/world.rs             | 212 +++++++++++++++++++--
- 4 files changed, 219 insertions(+), 19 deletions(-)
+ 4 files changed, 220 insertions(+), 17 deletions(-)
 
 diff --git a/src-tauri/src/combat/capture_dispatcher.rs b/src-tauri/src/combat/capture_dispatcher.rs
-index 15f4fc0..f430499 100644
+index 57b51a8..f1c5417 100644
 --- a/src-tauri/src/combat/capture_dispatcher.rs
 +++ b/src-tauri/src/combat/capture_dispatcher.rs
-@@ -416,9 +416,11 @@ impl CaptureDispatcher {
+@@ -416,6 +416,11 @@ impl CaptureDispatcher {
              // Only parse server->client (src == locked port)
              if let Some(port) = current_port {
                  if cap.src_port != port {
--                    // Clicktrough: what the client sent is not read, but
--                    // written to the packet log while that is on.
 +                    // Clicktrough: what the client sends is encrypted; its
-+                    // length alone tells whether the player is moving. Written
-+                    // to the packet log while that is on.
-                     if cap.dst_port == port && !cap.data.is_empty() {
++                    // length alone tells whether the player is moving.
++                    if cap.dst_port == port && !cap.data.is_empty() {
 +                        crate::plugins::client_sent(cap.data.len());
-                         crate::logging::logger::log_sent_packet(&cap);
-                     }
++                    }
                      continue;
+                 }
+                 if cap.src_ip.is_some() && cap.src_ip != last_game_host {
 diff --git a/src-tauri/src/plugins/a2.js b/src-tauri/src/plugins/a2.js
 index 720ae2f..160ecdd 100644
 --- a/src-tauri/src/plugins/a2.js

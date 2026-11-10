@@ -1,7 +1,7 @@
-From 1439180e85215069324d906499129b03544b39a5 Mon Sep 17 00:00:00 2001
+From 8820586ec868ac537755a38e1e84d406ca0ef84e Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Tue, 10 Nov 2026 19:23:07 +0000
-Subject: [PATCH] Updates: the green button installs without the password
+Subject: [PATCH 40/41] Updates: the green button installs without the password
 
 The Arch package brings /usr/lib/a2tools-dps-meter-update and a polkit
 action that runs it as root without the password, only for the person at
