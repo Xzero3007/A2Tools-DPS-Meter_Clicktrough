@@ -1,0 +1,543 @@
+From eb084b9565b18b31d357552437b272b504af47fc Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Tue, 10 Nov 2026 21:45:26 +0000
+Subject: [PATCH] Plugins: overlays hidden in dungeons, the Shugo games, arenas
+
+A plugin overlay (ui.overlay: the Map's overlay, the Inventory's limits)
+hides while the player is in a dungeon, one of the Shugo festival's games
+or an Incursion, or an arena, and comes back as it was on leaving. The
+kind of zone comes from the game's zone frame (21 36), which every loading
+screen brings; nothing is sent. Per plugin in Settings -> Plugins: "Hide
+its overlay in dungeons", "... in Shugo games and Incursions", "... in
+arenas", all on until turned off. In such a zone the overlay's header
+button shows it anyway, until the next zone.
+---
+ public/src/js/pluginSettings.js   |  12 ++
+ src-tauri/src/app.rs              |   5 +-
+ src-tauri/src/plugins/mod.rs      |  49 +++++-
+ src-tauri/src/plugins/overlays.rs |  11 ++
+ src-tauri/src/plugins/widgets.rs  |  18 ++-
+ src-tauri/src/plugins/zones.rs    | 250 ++++++++++++++++++++++++++++++
+ 6 files changed, 338 insertions(+), 7 deletions(-)
+ create mode 100644 src-tauri/src/plugins/zones.rs
+
+diff --git a/public/src/js/pluginSettings.js b/public/src/js/pluginSettings.js
+index 4e347f1..ebb5fe8 100644
+--- a/public/src/js/pluginSettings.js
++++ b/public/src/js/pluginSettings.js
+@@ -520,6 +520,18 @@
+           ]) {
+             options.append(option(t(key, text), (ids || []).includes(p.id), (hide) => run(invoke("plugin_set_hide", { id: p.id, when, hide }))));
+           }
++          // Clicktrough: its overlay hidden by the zone: in dungeons, the
++          // Shugo festival's games and Incursions, arenas (plugins/zones.rs).
++          if ((view.overlays || []).includes(p.id)) {
++            for (const [place, text] of [
++              ["dungeon", "Hide its overlay in dungeons"],
++              ["games", "Hide its overlay in Shugo games and Incursions"],
++              ["arena", "Hide its overlay in arenas"],
++            ]) {
++              const hides = (view.overlayHide?.[place] || []).includes(p.id);
++              options.append(option(text, hides, (hide) => run(invoke("plugin_set_overlay_hide", { id: p.id, place, hide }))));
++            }
++          }
+           // In the plugin dock with the others, or a window of its own.
+           options.append(option(
+             t("settings.plugins.inDock", "In the plugin dock (off: its own window)"),
+diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
+index 93cb51b..dc25542 100644
+--- a/src-tauri/src/app.rs
++++ b/src-tauri/src/app.rs
+@@ -225,8 +225,8 @@ fn show_with_meter(app: &tauri::AppHandle, hidden: &mut std::collections::HashSe
+     for label in hidden.drain() {
+         let Some(window) = app.get_webview_window(&label) else { continue };
+         // A widget its plugin closed meanwhile stays hidden, and so do the
+-        // widgets the plugins button hid (Clicktrough).
+-        if crate::plugins::widgets::is_closed(&label) || crate::plugins::widgets::held_by_button(&label) {
++        // widgets the plugins button or the zone hid (Clicktrough).
++        if crate::plugins::widgets::is_closed(&label) || crate::plugins::widgets::kept_hidden(&label) {
+             continue;
+         }
+         if !platform::window::reveal_in_place(&window) {
+@@ -4545,6 +4545,7 @@ pub fn run() {
+             crate::plugins::plugin_open,
+             crate::plugins::plugin_set_enabled,
+             crate::plugins::plugin_set_hide,
++            crate::plugins::plugin_set_overlay_hide,
+             crate::plugins::plugin_hello,
+             crate::plugins::plugin_share,
+             crate::plugins::plugin_file,
+diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
+index 557d8d3..478af57 100644
+--- a/src-tauri/src/plugins/mod.rs
++++ b/src-tauri/src/plugins/mod.rs
+@@ -21,6 +21,7 @@ pub mod overlays;
+ pub mod widgets;
+ // Clicktrough: the world around the player (`events:world`).
+ pub mod world;
++pub mod zones;
+ #[cfg(feature = "online")]
+ pub mod boss_live;
+ /// Without the network there is nothing to follow.
+@@ -190,6 +191,20 @@ pub fn hold_for_game(window: &tauri::WebviewWindow) {
+     hidden_for_game().lock().unwrap_or_else(|p| p.into_inner()).insert(window.label().to_string());
+ }
+ 
++/// Clicktrough: show window `window` again (an overlay the zone hid), unless
++/// its plugin closed it, the plugins button or the zone keeps it hidden, or
++/// AION2 is closed and the plugin hides then.
++pub fn reveal_if_free(app: &tauri::AppHandle, window: &tauri::WebviewWindow) {
++    let label = window.label();
++    if widgets::is_closed(label) || widgets::kept_hidden(label) || hidden_for_game().lock().unwrap_or_else(|p| p.into_inner()).contains(label) {
++        return;
++    }
++    if !crate::platform::window::reveal_in_place(window) {
++        crate::platform::window::show_on_top_without_focus(window);
++    }
++    widgets::relock(app, window);
++}
++
+ /// Hide the windows of the plugins set to hide while AION2 is closed, or
+ /// show again the ones hidden so: on the game opening or closing, and on
+ /// the setting changing. Windows the player brings back meanwhile stay.
+@@ -210,8 +225,9 @@ pub fn sync_game_hiding(app: &tauri::AppHandle) {
+             }
+         } else if hidden.remove(&label) {
+             // Closed by its plugin meanwhile, or the plugins turned off
+-            // (Clicktrough, the plugins button): it stays hidden.
+-            if widgets::is_closed(&label) || widgets::held_by_button(&label) {
++            // (Clicktrough, the plugins button), or an overlay hidden for the
++            // zone (Clicktrough): it stays hidden.
++            if widgets::is_closed(&label) || widgets::kept_hidden(&label) {
+                 continue;
+             }
+             if !crate::platform::window::reveal_in_place(&window) {
+@@ -309,6 +325,10 @@ pub struct PluginsView {
+     /// Clicktrough: the plugins' order as the player set it (ids; the ones
+     /// not in it after, by name): the dock's tabs and Settings' list.
+     pub order: Vec<String>,
++    /// Clicktrough: the plugins with an overlay (`ui.overlay`), and per kind
++    /// of zone (dungeon, games, arena) the ones whose overlay hides there.
++    pub overlays: Vec<String>,
++    pub overlay_hide: Value,
+ }
+ 
+ fn view(app: &tauri::AppHandle, host: &PluginHost) -> PluginsView {
+@@ -325,6 +345,8 @@ fn view(app: &tauri::AppHandle, host: &PluginHost) -> PluginsView {
+         own_window: listed(app, dock::OWN_WINDOW_KEY),
+         offered_bundled: offered_bundled(app, host),
+         order: order(app),
++        overlays: overlays::ids(app),
++        overlay_hide: zones::view(app, &overlays::ids(app)),
+     }
+ }
+ 
+@@ -521,6 +543,19 @@ pub fn plugin_set_hide(app: tauri::AppHandle, id: String, when: String, hide: bo
+     Ok(view(&app, &host))
+ }
+ 
++/// Clicktrough: plugin `id`'s overlay hides in zones of kind `place`
++/// ("dungeon", "games", "arena"), or not.
++#[tauri::command]
++pub fn plugin_set_overlay_hide(app: tauri::AppHandle, id: String, place: String, hide: bool) -> Result<PluginsView, String> {
++    if !valid_id(&id) {
++        return Err("not a plugin id".into());
++    }
++    let kind = zones::Kind::from_name(&place).ok_or("dungeon, games or arena")?;
++    zones::set_hides_in(&app, &id, kind, hide);
++    let host = host(&app)?;
++    Ok(view(&app, &host))
++}
++
+ /// Where reviewed plugins are installed.
+ fn plugins_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+     let state = app.try_state::<AppState>().ok_or("no app state")?;
+@@ -566,6 +601,8 @@ pub struct PluginHost {
+ /// `events:world` (world.rs), fed by the frame tap while one is loaded.
+ static WORLD: Mutex<Option<world::World>> = Mutex::new(None);
+ static WORLD_WANTED: AtomicBool = AtomicBool::new(false);
++/// Clicktrough: a plugin has an overlay, which hides by the zone (zones.rs).
++static OVERLAY_ZONES: AtomicBool = AtomicBool::new(false);
+ 
+ /// Clicktrough: what plugins with "share" shared (`a2.share`), by plugin, for
+ /// plugins with "events:shared" (a map showing the pets a tracker follows).
+@@ -950,6 +987,9 @@ impl PluginHost {
+         let any_decoders = loaded.iter().any(|l| !l.decoders.is_empty());
+         let any_world = loaded.iter().any(|l| l.manifest.permissions.iter().any(|p| p == "events:world"));
+         WORLD_WANTED.store(any_world, Ordering::Relaxed);
++        // Clicktrough: a plugin overlay hides by the zone (zones.rs).
++        let any_overlay = loaded.iter().any(|l| l.manifest.ui.as_ref().and_then(|u| u.get("overlay")).is_some());
++        OVERLAY_ZONES.store(any_overlay, Ordering::Relaxed);
+         // What a plugin no longer loaded shared is gone with it.
+         if let Some(map) = SHARED.lock().unwrap_or_else(|p| p.into_inner()).as_mut() {
+             map.retain(|id, _| loaded.iter().any(|l| &l.manifest.id == id));
+@@ -1080,7 +1120,7 @@ impl PluginHost {
+ 
+         // The tap is set only while some plugin has a decoder (or, Clicktrough,
+         // wants the world around the player).
+-        if any_decoders || any_world {
++        if any_decoders || any_world || any_overlay {
+             let host = Arc::clone(self);
+             let app = app.clone();
+             crate::capture::frame_tap::set(Some(Arc::new(move |packet: &[u8]| host.on_frame(&app, packet))));
+@@ -1097,6 +1137,9 @@ impl PluginHost {
+         let at = len as usize;
+         let Some(opcode) = packet.get(at..at + 2) else { return };
+         let body = &packet[at + 2..];
++        if opcode == [0x21, 0x36] && OVERLAY_ZONES.load(Ordering::Relaxed) {
++            zones::saw_frame(app, body);
++        }
+         if WORLD_WANTED.load(Ordering::Relaxed) {
+             let me = app.try_state::<AppState>().and_then(|s| s.data_storage.local_player_id());
+             let due = with_world(|w| {
+diff --git a/src-tauri/src/plugins/overlays.rs b/src-tauri/src/plugins/overlays.rs
+index dfa28d6..ad0a2bb 100644
+--- a/src-tauri/src/plugins/overlays.rs
++++ b/src-tauri/src/plugins/overlays.rs
+@@ -51,6 +51,11 @@ fn declared(app: &tauri::AppHandle) -> Vec<Overlay> {
+     out
+ }
+ 
++/// The plugins with an overlay, in the plugins' order (Settings).
++pub fn ids(app: &tauri::AppHandle) -> Vec<String> {
++    declared(app).into_iter().map(|o| o.id).collect()
++}
++
+ /// Whether an overlay is on: open, not closed by its plugin, not held off
+ /// by the plugins button.
+ fn is_on(app: &tauri::AppHandle, label: &str) -> bool {
+@@ -58,6 +63,7 @@ fn is_on(app: &tauri::AppHandle, label: &str) -> bool {
+     app.get_webview_window(label).is_some()
+         && !super::widgets::is_closed(label)
+         && !super::widgets::held_by_button(label)
++        && !super::zones::holds(label)
+ }
+ 
+ /// Whether widget `label` is a plugin overlay with a header button.
+@@ -89,6 +95,11 @@ pub fn plugin_overlays(app: tauri::AppHandle) -> Value {
+ pub fn plugin_overlay_toggle(app: tauri::AppHandle, id: String) -> Value {
+     let Some(o) = declared(&app).into_iter().find(|o| o.id == id) else { return listed(&app) };
+     let label = super::widgets::label(&o.id, &o.widget);
++    // Clicktrough: in a zone that hides it (a dungeon), the button shows it
++    // anyway, or hides it again, the plugin keeping it open.
++    if super::zones::button(&app, &label) {
++        return listed(&app);
++    }
+     let show = !is_on(&app, &label);
+     if show {
+         super::widgets::release_overlay(&app, &label);
+diff --git a/src-tauri/src/plugins/widgets.rs b/src-tauri/src/plugins/widgets.rs
+index 9e02805..2170bb8 100644
+--- a/src-tauri/src/plugins/widgets.rs
++++ b/src-tauri/src/plugins/widgets.rs
+@@ -162,6 +162,13 @@ pub fn held_by_button(label: &str) -> bool {
+     held_by_button_set().lock().unwrap_or_else(|p| p.into_inner()).contains(label)
+ }
+ 
++/// Clicktrough: whether something keeps widget `label` hidden that a
++/// window shown again must leave so: the plugins button, or the zone
++/// (zones.rs: an overlay in a dungeon).
++pub fn kept_hidden(label: &str) -> bool {
++    held_by_button(label) || super::zones::holds(label)
++}
++
+ /// Hide one widget for the plugins button.
+ fn hold_by_button(window: &tauri::WebviewWindow) {
+     if window.is_visible().unwrap_or(false) && !crate::platform::window::is_hidden_in_place(window) {
+@@ -335,6 +342,9 @@ pub async fn plugin_widget_open(
+             // Clicktrough: the plugins are off (the meter's plugins button),
+             // unless it is an overlay with a header button of its own.
+             hold_by_button(&widget);
++        } else if super::zones::hides(&app, widget.label()) {
++            // Clicktrough: an overlay in a zone that hides it (a dungeon).
++            super::zones::hold(&widget);
+         } else if !crate::platform::window::reveal_in_place(&widget) {
+             crate::platform::window::show_on_top_without_focus(&widget);
+         }
+@@ -415,6 +425,10 @@ pub async fn plugin_widget_open(
+     if plugins_button_holds(&app, widget.label()) {
+         hold_by_button(&widget);
+     }
++    // Clicktrough: an overlay in a zone that hides it (a dungeon).
++    if super::zones::hides(&app, widget.label()) {
++        super::zones::hold(&widget);
++    }
+     super::overlays::notify(&app);
+     Ok(())
+ }
+@@ -564,14 +578,14 @@ pub fn plugin_widget_place(app: tauri::AppHandle, window: tauri::WebviewWindow,
+         // shown one goes and comes back there.
+         Some(widget) if crate::platform::window::kwin_places_windows() => {
+             moving().lock().unwrap_or_else(|p| p.into_inner()).insert(widget_label.clone(), (x, y, std::time::Instant::now()));
+-            let shown = widget.is_visible().unwrap_or(false) && !is_closed(&widget_label) && !held_by_button(&widget_label);
++            let shown = widget.is_visible().unwrap_or(false) && !is_closed(&widget_label) && !kept_hidden(&widget_label);
+             if shown {
+                 crate::platform::window::hide_without_focus(&widget);
+                 let app = app.clone();
+                 tauri::async_runtime::spawn(async move {
+                     tokio::time::sleep(Duration::from_millis(150)).await;
+                     let Some(widget) = app.get_webview_window(&widget_label) else { return };
+-                    if !is_closed(&widget_label) && !held_by_button(&widget_label) {
++                    if !is_closed(&widget_label) && !kept_hidden(&widget_label) {
+                         crate::platform::window::show_on_top_without_focus(&widget);
+                         relock(&app, &widget);
+                     }
+diff --git a/src-tauri/src/plugins/zones.rs b/src-tauri/src/plugins/zones.rs
+new file mode 100644
+index 0000000..01f1a8a
+--- /dev/null
++++ b/src-tauri/src/plugins/zones.rs
+@@ -0,0 +1,250 @@
++//! Clicktrough: plugin overlays (the Map's overlay, the Inventory's limits:
++//! `ui.overlay`, overlays.rs) hidden where the player has no use for them,
++//! by the kind of zone the game says he is in: dungeons, the Shugo
++//! festival's games and the Incursions, arenas. Leaving such a zone brings
++//! them back as they were. Read from the game's zone frame (`21 36`, as
++//! world.rs reads it), which comes with every loading screen; nothing is
++//! sent.
++//!
++//! Per plugin, in Settings → Plugins (an overlay's plugin only); every
++//! overlay hides in all three until the player turns one off. In such a
++//! zone, the overlay's header button shows it anyway, until the next zone.
++
++use std::collections::HashSet;
++use std::sync::atomic::{AtomicU32, Ordering};
++use std::sync::{Mutex, OnceLock};
++
++use tauri::Manager;
++
++use crate::app::AppState;
++
++/// The kinds of zone an overlay can hide in.
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++pub enum Kind {
++    /// Dungeons and other instances (the Nightmare Altar's, the Abyss
++    /// Corridor's ...).
++    Dungeon,
++    /// The Shugo festival's games (Jump Jump, Defend Shugo Merchants ...) and
++    /// the Incursion of the Spirits.
++    Games,
++    /// The arenas.
++    Arena,
++}
++
++impl Kind {
++    pub const ALL: [Kind; 3] = [Kind::Dungeon, Kind::Games, Kind::Arena];
++
++    pub fn name(self) -> &'static str {
++        match self {
++            Kind::Dungeon => "dungeon",
++            Kind::Games => "games",
++            Kind::Arena => "arena",
++        }
++    }
++
++    pub fn from_name(name: &str) -> Option<Kind> {
++        Kind::ALL.into_iter().find(|k| k.name() == name)
++    }
++
++    /// The setting: the plugins whose overlay doesn't hide in this kind of
++    /// zone (every overlay hides until the player turns it off).
++    fn key(self) -> &'static str {
++        match self {
++            Kind::Dungeon => "ct.overlayShownInDungeons",
++            Kind::Games => "ct.overlayShownInGames",
++            Kind::Arena => "ct.overlayShownInArenas",
++        }
++    }
++}
++
++/// What kind of zone a zone id is, by the game's numbering (the zone names
++/// the Map's data has). The open world, its towns, airships, the Abyss and
++/// the small quest scenes are none of them.
++pub fn kind(zone: u32) -> Option<Kind> {
++    match zone {
++        // Fire Temple Arena, Impetusium Arena, Odyle Shard Cradle,
++        // Stormslumber Snowfield, Sandstorm Temple (two numbers each).
++        7 | 8 | 10 | 12 | 14 | 60..=64 => Some(Kind::Arena),
++        // The Incursion of the Spirits, the Shugo festival's protection.
++        76..=78 => Some(Kind::Games),
++        // The Abyss Corridor sits among the games' numbers.
++        503_000..=504_999 => Some(Kind::Dungeon),
++        // Beritra Air Raid, Jump Jump, Hidden Lugi, Nyerk Shooter, Incursion
++        // of the Spirits, Defend Shugo Merchants ...
++        500_000..=519_999 => Some(Kind::Games),
++        // Dream and illusion instances, quest dungeons, caves.
++        200_000..=499_999 => Some(Kind::Dungeon),
++        // The dungeons (Fire Temple, Draupnir, Deus Research Base ...).
++        600_000..=699_999 => Some(Kind::Dungeon),
++        // Daeva Bio-Research Base, Nightmare Altar, Tyrant's Hideout ...
++        900_000..=999_999 => Some(Kind::Dungeon),
++        _ => None,
++    }
++}
++
++/// The zone the game last said, 0 before it said one.
++static ZONE: AtomicU32 = AtomicU32::new(0);
++
++/// The overlays hidden for the zone, by window label.
++fn held() -> &'static Mutex<HashSet<String>> {
++    static HELD: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
++    HELD.get_or_init(Mutex::default)
++}
++
++/// The overlays the player showed anyway in this zone (their header
++/// button), by window label; forgotten at the next zone.
++fn shown_anyway() -> &'static Mutex<HashSet<String>> {
++    static SHOWN: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
++    SHOWN.get_or_init(Mutex::default)
++}
++
++fn lock<T>(m: &'static Mutex<T>) -> std::sync::MutexGuard<'static, T> {
++    m.lock().unwrap_or_else(|p| p.into_inner())
++}
++
++/// The plugins whose overlay stays in zones of `kind`.
++fn shown_in(app: &tauri::AppHandle, kind: Kind) -> Vec<String> {
++    app.try_state::<AppState>()
++        .and_then(|s| s.settings.get(kind.key()))
++        .and_then(|s| serde_json::from_str(&s).ok())
++        .unwrap_or_default()
++}
++
++/// Whether plugin `id`'s overlay hides in zones of `kind`.
++pub fn hides_in(app: &tauri::AppHandle, id: &str, kind: Kind) -> bool {
++    !shown_in(app, kind).iter().any(|x| x == id)
++}
++
++/// For Settings: per kind, the plugins whose overlay hides there.
++pub fn view(app: &tauri::AppHandle, ids: &[String]) -> serde_json::Value {
++    let mut out = serde_json::Map::new();
++    for kind in Kind::ALL {
++        let list: Vec<&String> = ids.iter().filter(|id| hides_in(app, id, kind)).collect();
++        out.insert(kind.name().to_string(), serde_json::json!(list));
++    }
++    serde_json::Value::Object(out)
++}
++
++/// Settings: plugin `id`'s overlay hides in zones of `kind`, or not.
++pub fn set_hides_in(app: &tauri::AppHandle, id: &str, kind: Kind, hide: bool) {
++    let Some(state) = app.try_state::<AppState>() else { return };
++    let mut ids = shown_in(app, kind);
++    ids.retain(|x| x != id);
++    if !hide {
++        ids.push(id.to_string());
++    }
++    state.settings.set(kind.key(), &serde_json::to_string(&ids).unwrap_or_default());
++    sync(app);
++}
++
++/// Whether the zone now hides overlay `label` (an overlay's window label),
++/// unless the player showed it anyway.
++pub fn hides(app: &tauri::AppHandle, label: &str) -> bool {
++    hides_ignoring_button(app, label) && !lock(shown_anyway()).contains(label)
++}
++
++/// Whether the zone's kind hides overlay `label`, whatever its button did.
++fn hides_ignoring_button(app: &tauri::AppHandle, label: &str) -> bool {
++    let Some(kind) = kind(ZONE.load(Ordering::Relaxed)) else { return false };
++    let Some((id, _)) = super::widgets::parse_label(label) else { return false };
++    super::overlays::is_overlay(app, label) && hides_in(app, &id, kind)
++}
++
++/// Whether overlay `label` is hidden for the zone now.
++pub fn holds(label: &str) -> bool {
++    lock(held()).contains(label)
++}
++
++/// Hide overlay `window` for the zone (its plugin keeps it open).
++pub fn hold(window: &tauri::WebviewWindow) {
++    if window.is_visible().unwrap_or(false) && !crate::platform::window::is_hidden_in_place(window) {
++        crate::platform::window::hide_in_place(window);
++    }
++    lock(held()).insert(window.label().to_string());
++}
++
++/// The game's zone frame (`21 36`): counter u32 | zone id u32 | ...
++pub fn saw_frame(app: &tauri::AppHandle, body: &[u8]) {
++    let Some(zone) = body.get(4..8).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]])) else { return };
++    if zone == 0 || ZONE.swap(zone, Ordering::Relaxed) == zone {
++        return;
++    }
++    tracing::debug!("Plugins: zone {zone} ({:?}): the overlays as it says", kind(zone));
++    lock(shown_anyway()).clear();
++    let app = app.clone();
++    let main = app.clone();
++    let _ = main.run_on_main_thread(move || sync(&app));
++}
++
++/// The header button of overlay `label`, in a zone that hides it: shown
++/// anyway, or hidden again. False when the zone doesn't hide it (the button
++/// does as it always does then).
++pub fn button(app: &tauri::AppHandle, label: &str) -> bool {
++    if !hides_ignoring_button(app, label) {
++        return false;
++    }
++    let anyway = lock(shown_anyway()).contains(label);
++    if anyway {
++        // Shown anyway and open: hidden again for the zone; closed by its
++        // plugin meanwhile: the button opens it as always.
++        if super::widgets::is_closed(label) || app.get_webview_window(label).is_none() {
++            return false;
++        }
++        lock(shown_anyway()).remove(label);
++    } else {
++        lock(shown_anyway()).insert(label.to_string());
++        // Closed by its plugin: the button opens it as always.
++        if !holds(label) {
++            return false;
++        }
++    }
++    sync(app);
++    true
++}
++
++/// Hide the overlays the zone hides, or show again the ones it hid: on a
++/// new zone, a setting changed, a header button.
++pub fn sync(app: &tauri::AppHandle) {
++    for (label, window) in app.webview_windows() {
++        if super::widgets::parse_label(&label).is_none() {
++            continue;
++        }
++        if hides(app, &label) {
++            if !super::widgets::is_closed(&label) {
++                hold(&window);
++            }
++        } else if lock(held()).remove(&label) {
++            super::reveal_if_free(app, &window);
++        }
++    }
++    super::overlays::notify(app);
++}
++
++#[cfg(test)]
++mod tests {
++    use super::{kind, Kind};
++
++    #[test]
++    fn zones_by_kind() {
++        for open in [1010, 1011, 1100, 1110, 1111, 100_001, 110_001, 20, 22, 23, 901, 905, 141_005, 800_013, 870_040, 0] {
++            assert_eq!(kind(open), None, "{open}");
++        }
++        for dungeon in [600_021, 610_013, 620_022, 690_046, 910_067, 220_022, 310_001, 400_001, 503_001, 504_006, 900_001] {
++            assert_eq!(kind(dungeon), Some(Kind::Dungeon), "{dungeon}");
++        }
++        for game in [500_005, 500_011, 500_043, 502_001, 510_015, 510_038, 76, 77, 78] {
++            assert_eq!(kind(game), Some(Kind::Games), "{game}");
++        }
++        for arena in [7, 8, 10, 12, 14, 60, 64] {
++            assert_eq!(kind(arena), Some(Kind::Arena), "{arena}");
++        }
++    }
++
++    #[test]
++    fn kinds_by_name() {
++        for k in Kind::ALL {
++            assert_eq!(Kind::from_name(k.name()), Some(k));
++        }
++        assert_eq!(Kind::from_name("town"), None);
++    }
++}
+-- 
+2.43.0
+
