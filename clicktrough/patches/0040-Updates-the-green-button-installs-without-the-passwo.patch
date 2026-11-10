@@ -1,0 +1,227 @@
+From 1439180e85215069324d906499129b03544b39a5 Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Tue, 10 Nov 2026 19:23:07 +0000
+Subject: [PATCH] Updates: the green button installs without the password
+
+The Arch package brings /usr/lib/a2tools-dps-meter-update and a polkit
+action that runs it as root without the password, only for the person at
+the desktop's active local session (any other session: no). The meter
+gives it the package on stdin and nothing else; the script installs it only
+when the meter is pacman's a2tools-dps-meter, the package's SHA-256 is the
+one the script reads itself from the fork's latest release manifest over
+HTTPS, and the package names itself a2tools-dps-meter. Whatever runs as the
+player can at most have the newest official release installed. If the
+script is missing or refuses, the password prompt comes as before.
+---
+ packaging/arch/PKGBUILD                       |  8 +++
+ packaging/arch/a2tools-dps-meter-update       | 64 +++++++++++++++++++
+ .../arch/a2tools-dps-meter-update.policy      | 25 ++++++++
+ src-tauri/src/platform/linux/updater.rs       | 51 ++++++++++++---
+ 4 files changed, 139 insertions(+), 9 deletions(-)
+ create mode 100644 packaging/arch/a2tools-dps-meter-update
+ create mode 100644 packaging/arch/a2tools-dps-meter-update.policy
+
+diff --git a/packaging/arch/PKGBUILD b/packaging/arch/PKGBUILD
+index 6234ed5..81fa7ca 100644
+--- a/packaging/arch/PKGBUILD
++++ b/packaging/arch/PKGBUILD
+@@ -101,4 +101,12 @@ Icon=a2tools-dps-meter
+ Categories=Game;Utility;
+ DESKTOP
+   install -Dm644 "$root/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
++
++  # Clicktrough: the green button's update without a password. The script runs
++  # as root through pkexec, and the policy allows only it, only to the person at
++  # the desktop; it installs nothing but the latest release, checked against its
++  # checksum on GitHub (see a2tools-dps-meter-update).
++  install -Dm755 "$startdir/a2tools-dps-meter-update" "$pkgdir/usr/lib/a2tools-dps-meter-update"
++  install -Dm644 "$startdir/a2tools-dps-meter-update.policy" \
++    "$pkgdir/usr/share/polkit-1/actions/app.a2tools.clicktrough.update.policy"
+ }
+diff --git a/packaging/arch/a2tools-dps-meter-update b/packaging/arch/a2tools-dps-meter-update
+new file mode 100644
+index 0000000..7b3ce27
+--- /dev/null
++++ b/packaging/arch/a2tools-dps-meter-update
+@@ -0,0 +1,64 @@
++#!/bin/sh
++# Clicktrough: installs an update of the meter as root, through pkexec, without
++# asking for the password (a2tools-dps-meter-update.policy allows it to the
++# person at the desktop's active session only).
++#
++# It trusts nothing it is given. It takes no arguments and no environment
++# (pkexec passes none); the package comes on stdin and is installed only when:
++#   - the installed meter is pacman's package a2tools-dps-meter,
++#   - its SHA-256 is the one this script reads itself, as root and over HTTPS,
++#     from the latest release of the Clicktrough fork on GitHub,
++#   - the package file names itself a2tools-dps-meter.
++# So whatever runs as the player can at most have the newest official release
++# installed, which the player could install anyway; no other package, file or
++# command. Anything else: nothing is installed, and the meter asks for the
++# password as before.
++set -eu
++umask 077
++PATH=/usr/bin
++LC_ALL=C
++export PATH LC_ALL
++
++MANIFEST=https://github.com/Xzero3007/A2Tools-DPS-Meter_Clicktrough/releases/latest/download/latest-v2.json
++PACKAGE=a2tools-dps-meter
++MAX_BYTES=536870912 # 512 MiB; a package is about a tenth of it
++
++fail() {
++  echo "a2tools-dps-meter-update: $*" >&2
++  exit 1
++}
++
++[ "$(id -u)" = 0 ] || fail "must run as root (through pkexec)"
++[ "$#" -eq 0 ] || fail "takes no arguments"
++pacman -Qqo /usr/bin/a2tools-dps-meter 2>/dev/null | grep -qx "$PACKAGE" \
++  || fail "the meter is not pacman's package $PACKAGE"
++
++# One update at a time.
++exec 9>/run/a2tools-dps-meter-update.lock
++flock -n 9 || fail "another update is running"
++
++dir=$(mktemp -d /var/tmp/a2tools-dps-meter-update.XXXXXXXX)
++trap 'rm -rf -- "$dir"' EXIT HUP INT TERM
++pkg="$dir/$PACKAGE.pkg.tar.zst"
++
++# The package, from stdin into root's own folder: no path of the player's is
++# ever opened. At most MAX_BYTES, within two minutes.
++timeout 120 head -c "$((MAX_BYTES + 1))" >"$pkg" || fail "could not read the package"
++size=$(stat -c %s -- "$pkg")
++[ "$size" -gt 0 ] && [ "$size" -le "$MAX_BYTES" ] || fail "the package is empty or too large"
++
++# The checksum, read by root itself from the fork's releases (HTTPS only,
++# redirects too, a small answer within a minute).
++curl --fail --silent --show-error --location \
++  --proto =https --proto-redir =https --tlsv1.2 \
++  --max-time 60 --max-filesize 65536 --max-redirs 5 \
++  --output "$dir/manifest.json" -- "$MANIFEST" || fail "could not read the release manifest"
++sha=$(sed -n 's/.*"archSha256":"\([0-9a-f]\{64\}\)".*/\1/p' "$dir/manifest.json" | head -n1)
++[ "${#sha}" -eq 64 ] || fail "the release manifest has no checksum"
++printf '%s  %s\n' "$sha" "$pkg" | sha256sum -c --status \
++  || fail "the package is not the latest Clicktrough release"
++
++name=$(pacman -Qqp -- "$pkg" 2>/dev/null) || fail "not a pacman package"
++[ "$name" = "$PACKAGE" ] || fail "the package is not $PACKAGE"
++
++pacman -U --noconfirm -- "$pkg"
+diff --git a/packaging/arch/a2tools-dps-meter-update.policy b/packaging/arch/a2tools-dps-meter-update.policy
+new file mode 100644
+index 0000000..3859832
+--- /dev/null
++++ b/packaging/arch/a2tools-dps-meter-update.policy
+@@ -0,0 +1,25 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<!DOCTYPE policyconfig PUBLIC
++ "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
++ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
++<!--
++  Clicktrough: the meter's green button installs its update without a password,
++  through /usr/lib/a2tools-dps-meter-update only (pkexec runs nothing else under
++  this action). That script installs nothing but the latest Clicktrough release,
++  checked against its checksum on GitHub (see the script). Allowed to the person
++  at the desktop's active local session; any other session, remote or inactive,
++  gets nothing.
++-->
++<policyconfig>
++  <vendor>A2Tools DPS Meter (Clicktrough)</vendor>
++  <action id="app.a2tools.clicktrough.update">
++    <description>Update the A2Tools DPS Meter</description>
++    <message>Installing the latest A2Tools DPS Meter release</message>
++    <defaults>
++      <allow_any>no</allow_any>
++      <allow_inactive>no</allow_inactive>
++      <allow_active>yes</allow_active>
++    </defaults>
++    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/a2tools-dps-meter-update</annotate>
++  </action>
++</policyconfig>
+diff --git a/src-tauri/src/platform/linux/updater.rs b/src-tauri/src/platform/linux/updater.rs
+index c3f8f5c..cbc9cb3 100644
+--- a/src-tauri/src/platform/linux/updater.rs
++++ b/src-tauri/src/platform/linux/updater.rs
+@@ -11,6 +11,12 @@ use crate::platform::UpdatePackages;
+ 
+ const INSTALLED_BINARY: &str = "/usr/bin/a2tools-dps-meter";
+ 
++/// Clicktrough: the Arch package's update script, which polkit runs as root
++/// without a password (packaging/arch/a2tools-dps-meter-update and its
++/// policy). It reads the package from stdin and installs it only when it is
++/// the latest Clicktrough release, by the checksum it reads itself on GitHub.
++const UPDATE_HELPER: &str = "/usr/lib/a2tools-dps-meter-update";
++
+ /// The package manager that owns the installed meter, and how it installs a
+ /// downloaded package file.
+ #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+@@ -118,6 +124,24 @@ exit $s"#
+     )
+ }
+ 
++/// The script that waits for the meter to exit, installs, and starts it again
++/// (`$1` the package, `$2` the meter's pid, `$3` its SHA-256).
++fn installer_script(root: &str, helper: bool) -> String {
++    let fast = if helper {
++        format!("/usr/bin/pkexec {UPDATE_HELPER} <\"$1\" ||\n        ")
++    } else {
++        String::new()
++    };
++    format!(
++        r#"
++        while kill -0 "$2" 2>/dev/null; do sleep 0.2; done
++        {fast}pkexec /bin/sh -c '{root}' a2tools-update "$1" "$3"
++        rm -f "$1"
++        exec {INSTALLED_BINARY}
++    "#
++    )
++}
++
+ /// Hand the package to its package manager once the meter has exited, then
+ /// start the meter again: the new one, or the old one if the password prompt
+ /// was cancelled, so a refused update never leaves the player without a meter.
+@@ -127,15 +151,10 @@ pub fn run_installer(package: &Path, sha256: &str, _install_dir: &str) -> Result
+     if sha256.len() != 64 || !sha256.bytes().all(|b| b.is_ascii_hexdigit()) {
+         return Err("no checksum for the package".into());
+     }
+-    let script = format!(
+-        r#"
+-        while kill -0 "$2" 2>/dev/null; do sleep 0.2; done
+-        pkexec /bin/sh -c '{root}' a2tools-update "$1" "$3"
+-        rm -f "$1"
+-        exec {INSTALLED_BINARY}
+-    "#,
+-        root = root_script(manager.install_command()),
+-    );
++    // Clicktrough: the Arch package's own update script first (no password);
++    // if it is missing, refuses or fails, the password prompt as before.
++    let helper = manager == Manager::Pacman && Path::new(UPDATE_HELPER).exists();
++    let script = installer_script(&root_script(manager.install_command()), helper);
+     tracing::info!("Updating through {:?}: {}", manager, package.display());
+     Command::new("/bin/sh")
+         .arg("-c")
+@@ -179,6 +198,20 @@ mod tests {
+         assert!(script.contains(r#"&& /usr/bin/pacman -U --noconfirm "$f""#));
+     }
+ 
++    #[test]
++    fn the_update_script_goes_first_and_the_password_prompt_is_the_fallback() {
++        let root = root_script(Manager::Pacman.install_command());
++        let with = installer_script(&root, true);
++        let helper = with.find("/usr/bin/pkexec /usr/lib/a2tools-dps-meter-update <\"$1\" ||").unwrap();
++        let prompt = with.find("pkexec /bin/sh -c").unwrap();
++        assert!(helper < prompt);
++        // Nothing but the package on stdin: no argument the script could trust.
++        assert!(!with.contains("a2tools-dps-meter-update \""));
++        let without = installer_script(&root, false);
++        assert!(!without.contains(UPDATE_HELPER));
++        assert!(without.contains("pkexec /bin/sh -c"));
++    }
++
+     #[test]
+     fn a_test_run_is_not_an_installed_meter() {
+         // The test binary is not /usr/bin/a2tools-dps-meter.
+-- 
+2.43.0
+
