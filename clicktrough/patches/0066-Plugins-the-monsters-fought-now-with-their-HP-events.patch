@@ -1,0 +1,285 @@
+From 325803d16923eb7baf9dcf859d9a373499d1060a Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Wed, 11 Nov 2026 19:19:23 +0000
+Subject: [PATCH] Plugins: the monsters fought now with their HP
+ (events:combat)
+
+A plugin with the new permission events:combat hears "combat": the
+monsters hit in the last 20 s and alive, with their NPC code, name, HP
+and max HP as the meter reads them for its boss bar, bosses first. At
+most four times a second while it changes, every two seconds during a
+fight, once empty when it is over. For the Boss Notes plugin: its
+phases by the boss's HP.
+---
+ public/src/js/pluginFrame.js         |  2 +
+ public/src/js/pluginSettings.js      |  3 ++
+ src-tauri/src/combat/data_storage.rs | 77 ++++++++++++++++++++++++++++
+ src-tauri/src/plugins/a2.js          |  6 +++
+ src-tauri/src/plugins/mod.rs         | 63 ++++++++++++++++++++++-
+ 5 files changed, 150 insertions(+), 1 deletion(-)
+
+diff --git a/public/src/js/pluginFrame.js b/public/src/js/pluginFrame.js
+index 6e21c45..c449279 100644
+--- a/public/src/js/pluginFrame.js
++++ b/public/src/js/pluginFrame.js
+@@ -66,6 +66,8 @@
+       if (event === "shared" && !allowed("events:shared")) return;
+       // Clicktrough: the player's items (capture/items.rs).
+       if (event === "items" && !allowed("events:items")) return;
++      // Clicktrough: the monsters fought now (plugins/mod.rs, combat_event).
++      if (event === "combat" && !allowed("events:combat")) return;
+       const msg = { event, data, ...extra };
+       if (ready) send(msg);
+       else queue.push(msg);
+diff --git a/public/src/js/pluginSettings.js b/public/src/js/pluginSettings.js
+index b51867b..c9c7c35 100644
+--- a/public/src/js/pluginSettings.js
++++ b/public/src/js/pluginSettings.js
+@@ -66,6 +66,9 @@
+       if (permission === "events:shared") {
+         return t("settings.plugins.permShared", "See what other plugins share (e.g. the pets they track)");
+       }
++      if (permission === "events:combat") {
++        return t("settings.plugins.permCombat", "See the monsters you fight and their HP (from the game data)");
++      }
+       if (permission === "events:items") {
+         return t("settings.plugins.permItems", "See your inventory and storages, and the items you get (from the game data)");
+       }
+diff --git a/src-tauri/src/combat/data_storage.rs b/src-tauri/src/combat/data_storage.rs
+index 93c4277..d2fe8dd 100644
+--- a/src-tauri/src/combat/data_storage.rs
++++ b/src-tauri/src/combat/data_storage.rs
+@@ -487,6 +487,22 @@ const BOSS_HP_KEEP_ALIVE_MS: i64 = 60_000;
+ /// out of range, or left alone until it recovered).
+ const RESET_RISE: u8 = 5;
+ 
++/// Clicktrough: a monster being fought, for plugins (`fought_now`).
++#[derive(Debug, Clone, PartialEq, Eq)]
++pub struct Fought {
++    pub entity: i32,
++    /// Its NPC code.
++    pub npc: i32,
++    /// Its HP as last read; none before the first reading.
++    pub hp: Option<i32>,
++    pub max_hp: Option<i32>,
++    /// A boss in the NPC table.
++    pub boss: bool,
++    /// When this fight with it began and when it was last hit (ms).
++    pub first_hit: i64,
++    pub last_hit: i64,
++}
++
+ /// A field boss's HP for the sender (`take_boss_hp`).
+ #[derive(Debug, Clone, PartialEq, Eq)]
+ pub struct BossHp {
+@@ -2788,6 +2804,36 @@ impl DataStorage {
+         self.inner.read().mob_current_hp.get(&id).copied()
+     }
+ 
++    /// Clicktrough: the monsters fought now, for plugins (`events:combat`):
++    /// each that took damage in the last `within_ms`, not dead, with its NPC
++    /// code, HP as the meter last read it and max HP (from its spawn, else the
++    /// highest reading). Bosses (the NPC table's) first, then the most recently
++    /// hit; at most `limit`.
++    pub fn fought_now(&self, now_ms: i64, within_ms: i64, limit: usize) -> Vec<Fought> {
++        let inner = self.inner.read();
++        let mut out: Vec<Fought> = inner
++            .target_combat
++            .values()
++            .filter(|t| now_ms - t.last_damage_time <= within_ms)
++            .filter(|t| is_mob(&inner, t.target_id) && !inner.dead_entity_ids.contains(&t.target_id))
++            .filter_map(|t| {
++                let id = t.target_id;
++                Some(Fought {
++                    entity: id,
++                    npc: *inner.mob_storage.get(&id)?,
++                    hp: inner.mob_current_hp.get(&id).copied(),
++                    max_hp: inner.mob_hp_data.get(&id).copied().filter(|&m| m > 0),
++                    boss: inner.boss_entity_ids.contains(&id),
++                    first_hit: t.first_damage_time,
++                    last_hit: t.last_damage_time,
++                })
++            })
++            .collect();
++        out.sort_by(|a, b| b.boss.cmp(&a.boss).then(b.last_hit.cmp(&a.last_hit)));
++        out.truncate(limit);
++        out
++    }
++
+     /// Record a heal tick done by `actor_id` with `skill_code` (is_hot marks a HoT).
+     /// Keyed by the healer so "healing done" can be shown per player. Self-heals count.
+     pub fn append_heal(&self, actor_id: i32, skill_code: i32, amount: i64, is_hot: bool, timestamp: i64) {
+@@ -3670,6 +3716,37 @@ fn is_mob(inner: &Inner, id: i32) -> bool {
+ mod tests {
+     use super::*;
+ 
++    #[test]
++    fn the_monsters_fought_now_bosses_first_with_their_hp() {
++        let s = DataStorage::new();
++        let hit = |target: i32, at: i64| {
++            let mut p = ParsedDamagePacket::new();
++            p.set_actor_id(1792);
++            p.set_target_id(target);
++            p.set_skill_code(16_010_000);
++            p.set_damage(100);
++            p.set_timestamp(at);
++            s.append_damage(p);
++        };
++        s.append_mob(500, 2_100_079);
++        s.register_boss(500);
++        s.append_mob_hp(500, 1_000_000);
++        s.set_mob_current_hp(500, 640_000);
++        s.append_mob(501, 2_000_123);
++        s.append_mob(502, 2_000_124);
++        s.mark_entity_dead(502);
++        hit(500, 10_000);
++        hit(501, 12_000);
++        hit(502, 12_000);
++        hit(1792, 12_000); // a player: not a monster
++        let now = s.fought_now(13_000, 10_000, 8);
++        assert_eq!(now.iter().map(|f| f.entity).collect::<Vec<_>>(), vec![500, 501]);
++        assert_eq!((now[0].npc, now[0].hp, now[0].max_hp, now[0].boss), (2_100_079, Some(640_000), Some(1_000_000), true));
++        assert_eq!((now[1].hp, now[1].max_hp, now[1].boss), (None, None, false));
++        // Not hit for longer than the window: no longer fought.
++        assert_eq!(s.fought_now(21_000, 10_000, 8).iter().map(|f| f.entity).collect::<Vec<_>>(), vec![501]);
++    }
++
+     #[test]
+     fn your_own_and_a_known_players_hp_log_deaths_and_a_strangers_does_not() {
+         let storage = DataStorage::new();
+diff --git a/src-tauri/src/plugins/a2.js b/src-tauri/src/plugins/a2.js
+index 184aa79..52b6825 100644
+--- a/src-tauri/src/plugins/a2.js
++++ b/src-tauri/src/plugins/a2.js
+@@ -78,6 +78,12 @@
+ //   a2.widgets.place(name, { x, y })           moves a widget (on KDE's native Wayland it goes and comes
+ //                                              back at the place, KWin placing it); a2.widgets.where(name)
+ //                                              says where it is (there: as KWin last reported it)
++//   a2.on("combat", ({ at, fought }) => ...)   Clicktrough: the monsters fought now (permission "events:combat"):
++//                                              fought: [{ entity, npc, name, boss, hp, maxHp, since, lastHit }],
++//                                              each hit in the last 20 s and alive, bosses (the NPC table's)
++//                                              first; hp and maxHp null until read (maxHp from the spawn, else
++//                                              the highest reading); times in ms. At most 4 a second while it
++//                                              changes, every 2 s during a fight, once empty when it is over
+ //   a2.on("items", (it) => ...)                Clicktrough: the player's items (permission "events:items"),
+ //                                              at start and on each change: { owner, snapshotAt, listedAt,
+ //                                              containers: { "1" inventory, "15" character storage, "2" account
+diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
+index 0db0241..95efbf4 100644
+--- a/src-tauri/src/plugins/mod.rs
++++ b/src-tauri/src/plugins/mod.rs
+@@ -612,6 +612,9 @@ pub struct PluginHost {
+ /// `events:world` (world.rs), fed by the frame tap while one is loaded.
+ static WORLD: Mutex<Option<world::World>> = Mutex::new(None);
+ static WORLD_WANTED: AtomicBool = AtomicBool::new(false);
++/// Clicktrough: some loaded plugin has `events:combat` (the monsters fought
++/// now, `combat_event`).
++static COMBAT_WANTED: AtomicBool = AtomicBool::new(false);
+ /// Clicktrough: a plugin has an overlay, which hides by the zone (zones.rs).
+ static OVERLAY_ZONES: AtomicBool = AtomicBool::new(false);
+ 
+@@ -742,6 +745,38 @@ fn abyss_event(state: &crate::capture::abyss_artifacts::ArtifactState, seen_ms:
+     serde_json::json!({ "observedAt": seen_ms / 1000, "wars": wars, "artifacts": artifacts })
+ }
+ 
++/// Clicktrough: how often `events:combat` looks, and its heartbeat.
++const COMBAT_EVERY: Duration = Duration::from_millis(250);
++const COMBAT_BEAT: Duration = Duration::from_secs(2);
++/// A monster not hit for this long is no longer fought; long enough for a
++/// boss's phase it can't be hit in.
++const COMBAT_WITHIN_MS: i64 = 20_000;
++
++/// Clicktrough: the `combat` event: `{ at, fought: [{ entity, npc, name, boss,
++/// hp, maxHp, since, lastHit }] }`, bosses first (`DataStorage::fought_now`).
++fn combat_event(app: &tauri::AppHandle) -> Option<Value> {
++    let state = app.try_state::<AppState>()?;
++    let now = crate::clock::now_ms();
++    let fought: Vec<Value> = state
++        .data_storage
++        .fought_now(now, COMBAT_WITHIN_MS, 8)
++        .into_iter()
++        .map(|f| {
++            serde_json::json!({
++                "entity": f.entity,
++                "npc": f.npc,
++                "name": state.npc_lookup.get_npc_name(f.npc),
++                "boss": f.boss,
++                "hp": f.hp,
++                "maxHp": f.max_hp,
++                "since": f.first_hit,
++                "lastHit": f.last_hit,
++            })
++        })
++        .collect();
++    Some(serde_json::json!({ "at": now, "fought": fought }))
++}
++
+ /// A map the player opened, as a2.on("bossMap") hands it on: the feed's
+ /// shape (times in unix seconds), each boss stamped with when it was read.
+ fn boss_map_event(map: &crate::capture::boss_map::BossMap) -> Value {
+@@ -999,6 +1034,8 @@ impl PluginHost {
+         let any_decoders = loaded.iter().any(|l| !l.decoders.is_empty());
+         let any_world = loaded.iter().any(|l| l.manifest.permissions.iter().any(|p| p == "events:world"));
+         WORLD_WANTED.store(any_world, Ordering::Relaxed);
++        let any_combat = loaded.iter().any(|l| l.manifest.permissions.iter().any(|p| p == "events:combat"));
++        COMBAT_WANTED.store(any_combat, Ordering::Relaxed);
+         // Clicktrough: a plugin overlay hides by the zone (zones.rs).
+         let any_overlay = loaded.iter().any(|l| l.manifest.ui.as_ref().and_then(|u| u.get("overlay")).is_some());
+         OVERLAY_ZONES.store(any_overlay, Ordering::Relaxed);
+@@ -1026,6 +1063,7 @@ impl PluginHost {
+                 let mut map_seq = 0u64;
+                 let mut abyss_seq = 0u64;
+                 let mut items_seq = 0u64;
++                let mut combat_told: (Value, Option<Instant>) = (Value::Null, None);
+                 loop {
+                     // Woken by each queued event; the timeout lets settling
+                     // events go once their wait is over.
+@@ -1033,7 +1071,10 @@ impl PluginHost {
+                         let mut pending = host.pending.lock().unwrap_or_else(|p| p.into_inner());
+                         let mut ready = take_ready(&mut pending, Instant::now());
+                         if ready.is_empty() {
+-                            let wait = if pending.is_empty() { Duration::from_secs(1) } else { Duration::from_millis(50) };
++                            // Clicktrough: a plugin following the fight looks
++                            // four times a second (`events:combat`).
++                            let idle = if COMBAT_WANTED.load(Ordering::Relaxed) { COMBAT_EVERY } else { Duration::from_secs(1) };
++                            let wait = if pending.is_empty() { idle } else { Duration::from_millis(50) };
+                             pending = host.queued.wait_timeout(pending, wait).unwrap_or_else(|p| p.into_inner()).0;
+                             ready = take_ready(&mut pending, Instant::now());
+                         }
+@@ -1063,6 +1104,25 @@ impl PluginHost {
+                             host.tell_permitted(&app, "events:world", "world", snapshot);
+                         }
+                     }
++                    // Clicktrough: the monsters fought now with their HP, at
++                    // most four times a second when it changed, every two
++                    // seconds while there is a fight, once when it is over.
++                    if COMBAT_WANTED.load(Ordering::Relaxed) {
++                        let now = Instant::now();
++                        let since = combat_told.1.map(|at| now.duration_since(at));
++                        if since.is_none_or(|d| d >= COMBAT_EVERY) {
++                            if let Some(fought) = combat_event(&app) {
++                                let list = fought.get("fought").cloned().unwrap_or(Value::Null);
++                                let empty = list.as_array().is_none_or(|a| a.is_empty());
++                                let changed = list != combat_told.0;
++                                let beat = !empty && since.is_none_or(|d| d >= COMBAT_BEAT);
++                                if changed || beat {
++                                    host.tell_permitted(&app, "events:combat", "combat", fought);
++                                    combat_told = (list, Some(now));
++                                }
++                            }
++                        }
++                    }
+                     // The character as the meter learns it (a login, a switch,
+                     // or the meter starting mid-game): open plugins hear it then,
+                     // not only when their window opens.
+@@ -1593,6 +1653,7 @@ fn describe_permission(t: &PromptTexts, permission: &str) -> String {
+         "share" => "Share what it follows with other plugins (e.g. the pets it tracks, for a map)".into(),
+         "events:shared" => "See what other plugins share (e.g. the pets they track)".into(),
+         "events:items" => "See your inventory and storages, and the items you get (from the game data)".into(),
++        "events:combat" => "See the monsters you fight and their HP (from the game data)".into(),
+         "radio" => "Play internet radio stations (listening only, from the stations this build lists)".into(),
+         "video" => "Play Twitch and YouTube videos and your own Jellyfin server's (home network only) with mpv, and list them (Twitch, YouTube, FreeTube's subscriptions, Jellyfin)".into(),
+         "media" => "Show what it plays, with its controls, in a row under the meter's header".into(),
+-- 
+2.43.0
+
