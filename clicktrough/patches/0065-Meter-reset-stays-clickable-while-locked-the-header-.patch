@@ -1,0 +1,395 @@
+From c3f91d3d1f3e4d6752d0feb4050474bf1151d4cb Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Wed, 11 Nov 2026 18:43:06 +0000
+Subject: [PATCH] Meter: reset stays clickable while locked; the header's
+ buttons in the plugins' order
+
+- Locked, the meter's reset button stays clickable with the other header
+  buttons; only the capture switch is still left out (lockedButtons.js,
+  Settings' tip).
+- The header's plugin buttons follow the plugins' order (the dock's tabs)
+  at once when it changes, and the player row's TV button stands where the
+  Streams plugin stands in it (its overlay, without a button of its own,
+  leaves a hidden slot), no longer before all of them.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_012bGvDmLJG8nVqKXAfDMRub
+---
+ index.html                        |  2 +-
+ public/src/js/lockedButtons.js    |  6 +++---
+ public/src/js/mediaRow.js         |  4 +++-
+ public/src/js/overlayButtons.js   | 23 ++++++++++++++++++++---
+ src-tauri/src/plugins/mod.rs      |  2 ++
+ src-tauri/src/plugins/overlays.rs | 12 +++++++++---
+ src/data/i18n/ui/de.json          |  2 +-
+ src/data/i18n/ui/en.json          |  2 +-
+ src/data/i18n/ui/es.json          |  2 +-
+ src/data/i18n/ui/fr.json          |  2 +-
+ src/data/i18n/ui/ja.json          |  2 +-
+ src/data/i18n/ui/ko.json          |  2 +-
+ src/data/i18n/ui/pt.json          |  2 +-
+ src/data/i18n/ui/ru.json          |  2 +-
+ src/data/i18n/ui/zh-Hans.json     |  2 +-
+ src/data/i18n/ui/zh-Hant.json     |  2 +-
+ tests/locked-buttons.test.mjs     |  5 +++--
+ tests/overlay-buttons.test.mjs    | 24 +++++++++++++++++++++---
+ 18 files changed, 72 insertions(+), 26 deletions(-)
+
+diff --git a/index.html b/index.html
+index ee89bfb..a819ebf 100644
+--- a/index.html
++++ b/index.html
+@@ -789,7 +789,7 @@
+                     </span>
+                   </label>
+                   <label class="settingsToggle lockSetting" style="display:none">
+-                    <span class="settingsToggleLabel settingsLabel" data-i18n="settings.lockButtons" title="While locked, the windows' buttons stay clickable: the meter's header and footer buttons (not reset and capture), Details' and Battle History's headers, the plugin dock's tabs and plugins' bars. Everywhere else clicks go to the game." data-i18n-title="settings.tips.lockButtons">Locked: buttons stay clickable</span>
++                    <span class="settingsToggleLabel settingsLabel" data-i18n="settings.lockButtons" title="While locked, the windows' buttons stay clickable: the meter's header and footer buttons (not capture), Details' and Battle History's headers, the plugin dock's tabs and plugins' bars. Everywhere else clicks go to the game." data-i18n-title="settings.tips.lockButtons">Locked: buttons stay clickable</span>
+                     <span class="settingsToggleControl">
+                       <input type="checkbox" class="lockButtonsCheckbox" />
+                       <span class="settingsToggleTrack" aria-hidden="true"></span>
+diff --git a/public/src/js/lockedButtons.js b/public/src/js/lockedButtons.js
+index ed9e2e7..5336469 100644
+--- a/public/src/js/lockedButtons.js
++++ b/public/src/js/lockedButtons.js
+@@ -16,10 +16,10 @@
+     : window.A2_VIEW || window.__A2_VIEW__ || "main";
+ 
+   // What stays clickable in each window: the controls that open, close and
+-  // switch windows, views and tabs, and the menus they open. Not the meter's
+-  // reset and capture switch, so a stray click can't end a fight's numbers.
++  // switch windows, views and tabs, and the menus they open, and the meter's
++  // reset. Not its capture switch, so a stray click can't stop the recording.
+   const BUTTONS = {
+-    main: ".headerBtns .headerBtn:not(.resetBtn):not(.suspendBtn), .footerBtns .footerBtn, .mediaRow button, .mediaRow input, .mediaRow select",
++    main: ".headerBtns .headerBtn:not(.suspendBtn), .footerBtns .footerBtn, .mediaRow button, .mediaRow input, .mediaRow select",
+     details: ".detailsHeader button, .detailsHeader .closeX, .detailsSettingsMenu",
+     history: ".historyHeader button, .historyHeader .closeX, .historyFilters select,"
+       + " .historyFilters .historyClassDropdownTrigger, .historyFilters .historyClassDropdownMenu",
+diff --git a/public/src/js/mediaRow.js b/public/src/js/mediaRow.js
+index 20d0d54..819d328 100644
+--- a/public/src/js/mediaRow.js
++++ b/public/src/js/mediaRow.js
+@@ -79,7 +79,9 @@
+     const bar = header.querySelector(".headerBtns");
+     const placeBtn = () => {
+       if (!bar || rowBtn.parentNode === bar) return;
+-      const before = bar.querySelector(".overlayBtn, .pluginsBtn");
++      // Where the Streams plugin stands in the plugins' order (its overlay's
++      // slot, overlayButtons.js), else before the overlay buttons.
++      const before = bar.querySelector(".overlaySlot") || bar.querySelector(".overlayBtn, .pluginsBtn");
+       bar.insertBefore(rowBtn, before && before.parentNode === bar ? before : null);
+       try { window.lucide?.createIcons?.({ root: rowBtn }); } catch {}
+     };
+diff --git a/public/src/js/overlayButtons.js b/public/src/js/overlayButtons.js
+index 65b93be..c9255b5 100644
+--- a/public/src/js/overlayButtons.js
++++ b/public/src/js/overlayButtons.js
+@@ -4,6 +4,10 @@
+ // overlay alone, the plugin window staying as it is. Gold while the overlay
+ // is on. While the meter is locked it stays clickable with the other header
+ // buttons (lockedButtons.js). The backend: plugins/overlays.rs.
++//
++// The buttons follow the plugins' order (the dock's tabs). An overlay without
++// a button of its own (the Streams plugin's video) leaves a hidden slot, and
++// the player row's TV button (mediaRow.js) stands there.
+ (() => {
+   const view = window.A2_VIEW || window.__A2_VIEW__ || "main";
+   const invoke = window.__TAURI__?.core?.invoke;
+@@ -17,11 +21,20 @@
+     let shownKey = "";
+     const render = (list) => {
+       if (!Array.isArray(list)) return;
+-      const key = JSON.stringify(list.map((o) => [o.id, o.icon, o.title]));
++      const key = JSON.stringify(list.map((o) => [o.id, o.icon, o.title, o.button !== false]));
+       if (key !== shownKey) {
+         shownKey = key;
+-        for (const old of bar.querySelectorAll(".overlayBtn")) old.remove();
++        for (const old of bar.querySelectorAll(".overlayBtn, .overlaySlot")) old.remove();
++        const at = before && before.parentNode === bar ? before : null;
+         for (const o of list) {
++          if (o.button === false) {
++            const slot = document.createElement("span");
++            slot.className = "overlaySlot";
++            slot.dataset.plugin = o.id;
++            slot.hidden = true;
++            bar.insertBefore(slot, at);
++            continue;
++          }
+           const btn = document.createElement("div");
+           btn.className = "headerBtn overlayBtn";
+           btn.dataset.plugin = o.id;
+@@ -41,8 +54,12 @@
+             event.preventDefault();
+             toggle();
+           });
+-          bar.insertBefore(btn, before && before.parentNode === bar ? before : null);
++          bar.insertBefore(btn, at);
+         }
++        // The player row's TV button in the first slot.
++        const slot = bar.querySelector(".overlaySlot");
++        const tv = bar.querySelector(".mediaRowBtn");
++        if (slot && tv) bar.insertBefore(tv, slot);
+         try { window.lucide?.createIcons?.({ root: bar }); } catch {}
+         // The header's buttons moved: the lock button's place is sent again.
+         requestAnimationFrame(() => window._dpsApp?._sendLockBtnRect?.());
+diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
+index 695ac40..0db0241 100644
+--- a/src-tauri/src/plugins/mod.rs
++++ b/src-tauri/src/plugins/mod.rs
+@@ -384,6 +384,8 @@ pub fn plugin_set_order(app: tauri::AppHandle, window: tauri::WebviewWindow, ord
+     let state = app.try_state::<AppState>().ok_or("no app state")?;
+     state.settings.set(ORDER_KEY, &serde_json::to_string(&ids).unwrap_or_default());
+     dock::sync(&app, None);
++    // Clicktrough: the meter's header buttons follow the new order at once.
++    overlays::notify(&app);
+     if window.label() != "settings" {
+         let _ = app.emit_to("settings", "plugins-changed", ());
+     }
+diff --git a/src-tauri/src/plugins/overlays.rs b/src-tauri/src/plugins/overlays.rs
+index 071441e..6e57d30 100644
+--- a/src-tauri/src/plugins/overlays.rs
++++ b/src-tauri/src/plugins/overlays.rs
+@@ -14,6 +14,11 @@
+ //! `"button": false` leaves the header button out (the Streams plugin's
+ //! video: the meter's player row has its own button), the overlay keeping
+ //! the rest (Settings' places to hide it, the plugins button leaving it).
++//!
++//! The header's buttons follow the plugins' order (the dock's tabs, Settings).
++//! An overlay without a button of its own is still listed (`"button":
++//! false`): the header puts the player row's TV button in its place, so the
++//! TV stands where the Streams plugin stands in that order.
+ 
+ use serde_json::Value;
+ use tauri::Emitter;
+@@ -96,16 +101,17 @@ pub fn is_overlay(app: &tauri::AppHandle, label: &str) -> bool {
+ fn listed(app: &tauri::AppHandle) -> Value {
+     let list: Vec<Value> = declared(app)
+         .into_iter()
+-        .filter(|o| o.button)
+         .map(|o| {
+             let on = is_on(app, &super::widgets::label(&o.id, &o.widget));
+-            serde_json::json!({ "id": o.id, "name": o.name, "title": o.title, "icon": o.icon, "on": on })
++            serde_json::json!({ "id": o.id, "name": o.name, "title": o.title, "icon": o.icon, "on": on, "button": o.button })
+         })
+         .collect();
+     Value::Array(list)
+ }
+ 
+-/// The header's overlay buttons: `[{ id, name, title, icon, on }]`.
++/// The header's overlay buttons, in the plugins' order: `[{ id, name,
++/// title, icon, on, button }]` (`button: false`: no button of its own, the
++/// player row's TV button takes its place).
+ #[tauri::command]
+ pub fn plugin_overlays(app: tauri::AppHandle) -> Value {
+     listed(&app)
+diff --git a/src/data/i18n/ui/de.json b/src/data/i18n/ui/de.json
+index 7a0e290..b27ef8c 100644
+--- a/src/data/i18n/ui/de.json
++++ b/src/data/i18n/ui/de.json
+@@ -578,7 +578,7 @@
+       "showLockBtn": "Eine Taste, mit der das Meter die Maus ignoriert, sodass Klicks im Spiel ankommen.",
+       "lockAllWindows": "Solange das Meter gesperrt ist, lassen auch Details, Kampfverlauf und Plugin-Fenster Klicks durch. Entsperren mit der Sperr-Taste oder ihrem Tastenkürzel.",
+       "lockScrollEdge": "Solange gesperrt ist, nehmen Details, Kampfverlauf und Plugin-Fenster die Maus noch in einem schmalen Streifen an ihrem rechten Rand an, wo die Bildlaufleiste ist: Dort scrollt das Mausrad sie.",
+-      "lockButtons": "Solange gesperrt ist, bleiben die Knöpfe der Fenster klickbar: Kopf- und Fußleiste des Meters (außer Zurücksetzen und Aufzeichnung), die Köpfe von Details und Kampfverlauf, die Tabs des Plugin-Docks und die Leisten der Plugins. Überall sonst gehen Klicks ins Spiel.",
++      "lockButtons": "Solange gesperrt ist, bleiben die Knöpfe der Fenster klickbar: Kopf- und Fußleiste des Meters (außer Aufzeichnung), die Köpfe von Details und Kampfverlauf, die Tabs des Plugin-Docks und die Leisten der Plugins. Überall sonst gehen Klicks ins Spiel.",
+       "windowOpacity": "Wie durchsichtig der Hintergrund des Meters ist. Balken und Text bleiben, wie sie sind.",
+       "titleOpacity": "Wie durchsichtig die Titelleiste des Meters ist, getrennt vom Hintergrund darunter. Bis du ihn bewegst, folgt er dem Hintergrund.",
+       "meterOpacity": "Wie deckend die farbigen Schadensbalken sind.",
+diff --git a/src/data/i18n/ui/en.json b/src/data/i18n/ui/en.json
+index cb95073..bb3a130 100644
+--- a/src/data/i18n/ui/en.json
++++ b/src/data/i18n/ui/en.json
+@@ -590,7 +590,7 @@
+       "showLockBtn": "A button that makes the meter ignore the mouse, so clicks go through to the game.",
+       "lockAllWindows": "While the meter is locked, Details, Battle History and plugin windows let clicks through too. Unlock with the lock button or its keybind.",
+       "lockScrollEdge": "While locked, Details, Battle History and plugin windows still take the mouse in a thin strip at their right edge, where the scrollbar is, so the wheel there scrolls them.",
+-      "lockButtons": "While locked, the windows' buttons stay clickable: the meter's header and footer buttons (not reset and capture), Details' and Battle History's headers, the plugin dock's tabs and plugins' bars. Everywhere else clicks go to the game.",
++      "lockButtons": "While locked, the windows' buttons stay clickable: the meter's header and footer buttons (not capture), Details' and Battle History's headers, the plugin dock's tabs and plugins' bars. Everywhere else clicks go to the game.",
+       "windowOpacity": "How see-through the meter's background is. Bars and text stay as they are.",
+       "titleOpacity": "How see-through the meter's title bar is, apart from the background under it. Until you move it, it follows the background.",
+       "meterOpacity": "How solid the coloured damage bars are.",
+diff --git a/src/data/i18n/ui/es.json b/src/data/i18n/ui/es.json
+index 01bd5cc..f103413 100644
+--- a/src/data/i18n/ui/es.json
++++ b/src/data/i18n/ui/es.json
+@@ -577,7 +577,7 @@
+       "showLockBtn": "Un botón que hace que el medidor ignore el ratón, para que los clics lleguen al juego.",
+       "lockAllWindows": "Mientras el medidor está bloqueado, Detalles, el historial de combates y las ventanas de plugins también dejan pasar los clics. Desbloquea con el botón de bloqueo o su atajo.",
+       "lockScrollEdge": "Mientras está bloqueado, Detalles, el historial de combates y las ventanas de plugins siguen recibiendo el ratón en una franja estrecha de su borde derecho, donde está la barra de desplazamiento: ahí la rueda las desplaza.",
+-      "lockButtons": "Mientras está bloqueado, los botones de las ventanas siguen siendo clicables: los de la cabecera y el pie del medidor (salvo reiniciar y captura), las cabeceras de Detalles y del historial de combates, las pestañas del dock de plugins y las barras de los plugins. En el resto, los clics van al juego.",
++      "lockButtons": "Mientras está bloqueado, los botones de las ventanas siguen siendo clicables: los de la cabecera y el pie del medidor (salvo captura), las cabeceras de Detalles y del historial de combates, las pestañas del dock de plugins y las barras de los plugins. En el resto, los clics van al juego.",
+       "windowOpacity": "Cuán transparente es el fondo del medidor. Las barras y el texto no cambian.",
+       "titleOpacity": "Qué tan transparente es la barra de título del medidor, aparte del fondo de debajo. Hasta que lo muevas, sigue al fondo.",
+       "meterOpacity": "Cuán sólidas son las barras de daño de color.",
+diff --git a/src/data/i18n/ui/fr.json b/src/data/i18n/ui/fr.json
+index e75e1bf..bc4c2e1 100644
+--- a/src/data/i18n/ui/fr.json
++++ b/src/data/i18n/ui/fr.json
+@@ -577,7 +577,7 @@
+       "showLockBtn": "Un bouton qui fait ignorer la souris au compteur, pour que les clics passent au jeu.",
+       "lockAllWindows": "Tant que le compteur est verrouillé, Détails, l'historique des combats et les fenêtres des plugins laissent aussi passer les clics. Déverrouillez avec le bouton de verrouillage ou son raccourci.",
+       "lockScrollEdge": "Tant que c'est verrouillé, Détails, l'historique des combats et les fenêtres des plugins prennent encore la souris dans une fine bande sur leur bord droit, là où est la barre de défilement : la molette les y fait défiler.",
+-      "lockButtons": "Tant que c'est verrouillé, les boutons des fenêtres restent cliquables : ceux de l'en-tête et du pied du compteur (sauf réinitialiser et capture), les en-têtes de Détails et de l'historique des combats, les onglets du dock des plugins et les barres des plugins. Partout ailleurs, les clics vont au jeu.",
++      "lockButtons": "Tant que c'est verrouillé, les boutons des fenêtres restent cliquables : ceux de l'en-tête et du pied du compteur (sauf capture), les en-têtes de Détails et de l'historique des combats, les onglets du dock des plugins et les barres des plugins. Partout ailleurs, les clics vont au jeu.",
+       "windowOpacity": "La transparence du fond du compteur. Les barres et le texte ne changent pas.",
+       "titleOpacity": "La transparence de la barre de titre du meter, à part du fond en dessous. Tant que vous ne le bougez pas, il suit le fond.",
+       "meterOpacity": "L'opacité des barres de dégâts colorées.",
+diff --git a/src/data/i18n/ui/ja.json b/src/data/i18n/ui/ja.json
+index ca013e9..8b04074 100644
+--- a/src/data/i18n/ui/ja.json
++++ b/src/data/i18n/ui/ja.json
+@@ -577,7 +577,7 @@
+       "showLockBtn": "メーターがマウスを無視し、クリックがゲームに届くようにするボタンです。",
+       "lockAllWindows": "メーターのロック中は、詳細・戦闘履歴・プラグインのウィンドウもクリックを透過します。ロックボタンかそのショートカットで解除します。",
+       "lockScrollEdge": "ロック中も、詳細・戦闘履歴・プラグインのウィンドウは右端の細い帯（スクロールバーの位置）だけマウスを受け付け、そこでホイールを回すとスクロールできます。",
+-      "lockButtons": "ロック中も、ウィンドウのボタンはクリックできます：メーターのヘッダーとフッターのボタン（リセットとキャプチャを除く）、詳細と戦闘履歴のヘッダー、プラグインドックのタブ、プラグインのバー。それ以外のクリックはゲームに届きます。",
++      "lockButtons": "ロック中も、ウィンドウのボタンはクリックできます：メーターのヘッダーとフッターのボタン（キャプチャを除く）、詳細と戦闘履歴のヘッダー、プラグインドックのタブ、プラグインのバー。それ以外のクリックはゲームに届きます。",
+       "windowOpacity": "メーター背景の透け具合です。バーと文字はそのままです。",
+       "titleOpacity": "メーターのタイトルバーの透け具合を、下の背景とは別に設定します。動かすまでは背景の不透明度に合わせます。",
+       "meterOpacity": "色付きのダメージバーの不透明度です。",
+diff --git a/src/data/i18n/ui/ko.json b/src/data/i18n/ui/ko.json
+index 5bdeb11..986475f 100644
+--- a/src/data/i18n/ui/ko.json
++++ b/src/data/i18n/ui/ko.json
+@@ -584,7 +584,7 @@
+       "showLockBtn": "미터가 마우스를 무시하게 하여 클릭이 게임으로 전달되도록 하는 버튼입니다.",
+       "lockAllWindows": "미터가 잠겨 있는 동안 상세 정보, 전투 기록, 플러그인 창도 클릭을 통과시킵니다. 잠금 버튼이나 단축키로 해제하세요.",
+       "lockScrollEdge": "잠겨 있는 동안에도 상세 정보, 전투 기록, 플러그인 창은 스크롤바가 있는 오른쪽 가장자리의 좁은 띠에서 마우스를 받으므로, 그곳에서 휠로 스크롤할 수 있습니다.",
+-      "lockButtons": "잠겨 있는 동안에도 창의 버튼은 클릭할 수 있습니다: 미터의 머리글과 바닥글 버튼(초기화와 캡처 제외), 상세 정보와 전투 기록의 머리글, 플러그인 도크의 탭, 플러그인의 막대. 그 밖의 클릭은 게임으로 전달됩니다.",
++      "lockButtons": "잠겨 있는 동안에도 창의 버튼은 클릭할 수 있습니다: 미터의 머리글과 바닥글 버튼(캡처 제외), 상세 정보와 전투 기록의 머리글, 플러그인 도크의 탭, 플러그인의 막대. 그 밖의 클릭은 게임으로 전달됩니다.",
+       "windowOpacity": "미터 배경의 투명도입니다. 막대와 글자는 그대로입니다.",
+       "titleOpacity": "미터 제목 표시줄의 투명도를 아래 배경과 따로 정합니다. 움직이기 전까지는 배경 불투명도를 따릅니다.",
+       "meterOpacity": "색이 있는 피해량 막대의 불투명도입니다.",
+diff --git a/src/data/i18n/ui/pt.json b/src/data/i18n/ui/pt.json
+index f57d3ec..5bcdb49 100644
+--- a/src/data/i18n/ui/pt.json
++++ b/src/data/i18n/ui/pt.json
+@@ -577,7 +577,7 @@
+       "showLockBtn": "Um botão que faz o medidor ignorar o mouse, para os cliques irem ao jogo.",
+       "lockAllWindows": "Enquanto o medidor está bloqueado, Detalhes, o histórico de batalhas e as janelas de plugins também deixam os cliques passar. Desbloqueie com o botão de bloqueio ou o seu atalho.",
+       "lockScrollEdge": "Enquanto bloqueado, Detalhes, o histórico de combates e as janelas de plugins ainda recebem o mouse numa faixa estreita da borda direita, onde fica a barra de rolagem: ali a roda as rola.",
+-      "lockButtons": "Enquanto bloqueado, os botões das janelas continuam clicáveis: os do cabeçalho e do rodapé do medidor (exceto reiniciar e captura), os cabeçalhos de Detalhes e do histórico de combates, as abas do dock de plugins e as barras dos plugins. Em todo o resto, os cliques vão para o jogo.",
++      "lockButtons": "Enquanto bloqueado, os botões das janelas continuam clicáveis: os do cabeçalho e do rodapé do medidor (exceto captura), os cabeçalhos de Detalhes e do histórico de combates, as abas do dock de plugins e as barras dos plugins. Em todo o resto, os cliques vão para o jogo.",
+       "windowOpacity": "Quão transparente é o fundo do medidor. Barras e texto não mudam.",
+       "titleOpacity": "O quanto a barra de título do medidor é transparente, separada do fundo abaixo. Até você mexer, ela segue o fundo.",
+       "meterOpacity": "Quão sólidas são as barras coloridas de dano.",
+diff --git a/src/data/i18n/ui/ru.json b/src/data/i18n/ui/ru.json
+index 0878073..7c3cf6e 100644
+--- a/src/data/i18n/ui/ru.json
++++ b/src/data/i18n/ui/ru.json
+@@ -582,7 +582,7 @@
+       "showLockBtn": "Кнопка, после которой счётчик игнорирует мышь и клики проходят в игру.",
+       "lockAllWindows": "Пока метр заблокирован, окна «Подробности», истории боёв и плагинов тоже пропускают клики. Разблокировать — кнопкой блокировки или её сочетанием клавиш.",
+       "lockScrollEdge": "Пока окна заблокированы, «Подробности», история боёв и окна плагинов всё ещё принимают мышь в узкой полосе у правого края, где полоса прокрутки: там их можно прокручивать колесом.",
+-      "lockButtons": "Пока окна заблокированы, их кнопки остаются нажимаемыми: кнопки в шапке и подвале счётчика (кроме сброса и захвата), шапки «Подробностей» и истории боёв, вкладки дока плагинов и панели плагинов. Все остальные клики уходят в игру.",
++      "lockButtons": "Пока окна заблокированы, их кнопки остаются нажимаемыми: кнопки в шапке и подвале счётчика (кроме захвата), шапки «Подробностей» и истории боёв, вкладки дока плагинов и панели плагинов. Все остальные клики уходят в игру.",
+       "windowOpacity": "Насколько прозрачен фон счётчика. Полосы и текст не меняются.",
+       "titleOpacity": "Насколько прозрачна строка заголовка метра, отдельно от фона под ней. Пока вы его не сдвинете, он следует за фоном.",
+       "meterOpacity": "Насколько плотные цветные полосы урона.",
+diff --git a/src/data/i18n/ui/zh-Hans.json b/src/data/i18n/ui/zh-Hans.json
+index 25eeaa1..c447674 100644
+--- a/src/data/i18n/ui/zh-Hans.json
++++ b/src/data/i18n/ui/zh-Hans.json
+@@ -584,7 +584,7 @@
+       "showLockBtn": "让计量器忽略鼠标、点击直接作用于游戏的按钮。",
+       "lockAllWindows": "统计锁定期间，详情、战斗记录和插件窗口也会让点击穿透。用锁定按钮或其快捷键解锁。",
+       "lockScrollEdge": "锁定时，详情、战斗记录和插件窗口仍在右边缘（滚动条所在处）的一条细带内响应鼠标，在那里滚动滚轮即可滚动它们。",
+-      "lockButtons": "锁定时，窗口的按钮仍可点击：计量器顶栏和底栏的按钮（重置和捕获除外）、详情和战斗记录的顶栏、插件停靠栏的标签页以及插件的工具栏。其他地方的点击都会传到游戏。",
++      "lockButtons": "锁定时，窗口的按钮仍可点击：计量器顶栏和底栏的按钮（捕获除外）、详情和战斗记录的顶栏、插件停靠栏的标签页以及插件的工具栏。其他地方的点击都会传到游戏。",
+       "windowOpacity": "计量器背景的透明程度。条形和文字不受影响。",
+       "titleOpacity": "统计窗口标题栏的透明程度，与下方背景分开设置。移动它之前，它跟随背景不透明度。",
+       "meterOpacity": "彩色伤害条的不透明程度。",
+diff --git a/src/data/i18n/ui/zh-Hant.json b/src/data/i18n/ui/zh-Hant.json
+index de8ac52..75549af 100644
+--- a/src/data/i18n/ui/zh-Hant.json
++++ b/src/data/i18n/ui/zh-Hant.json
+@@ -584,7 +584,7 @@
+       "showLockBtn": "讓計量器忽略滑鼠、點擊直接作用於遊戲的按鈕。",
+       "lockAllWindows": "統計鎖定期間，詳情、戰鬥紀錄與外掛視窗也會讓點擊穿透。以鎖定按鈕或其快捷鍵解鎖。",
+       "lockScrollEdge": "鎖定時，詳細資料、戰鬥紀錄和外掛視窗仍在右邊緣（捲軸所在處）的一條細帶內回應滑鼠，在那裡轉動滾輪即可捲動它們。",
+-      "lockButtons": "鎖定時，視窗的按鈕仍可點擊：計量器頂欄和底欄的按鈕（重設和擷取除外）、詳細資料和戰鬥紀錄的頂欄、外掛停靠欄的分頁以及外掛的工具列。其他地方的點擊都會傳到遊戲。",
++      "lockButtons": "鎖定時，視窗的按鈕仍可點擊：計量器頂欄和底欄的按鈕（擷取除外）、詳細資料和戰鬥紀錄的頂欄、外掛停靠欄的分頁以及外掛的工具列。其他地方的點擊都會傳到遊戲。",
+       "windowOpacity": "計量器背景的透明程度。條形和文字不受影響。",
+       "titleOpacity": "統計視窗標題列的透明程度，與下方背景分開設定。移動它之前，它跟隨背景不透明度。",
+       "meterOpacity": "彩色傷害條的不透明程度。",
+diff --git a/tests/locked-buttons.test.mjs b/tests/locked-buttons.test.mjs
+index cbcf3ac..c22e64a 100644
+--- a/tests/locked-buttons.test.mjs
++++ b/tests/locked-buttons.test.mjs
+@@ -76,9 +76,9 @@ test("an unchanged layout is not sent again; a moved button is", async () => {
+   assert.deepEqual(JSON.parse(JSON.stringify(app.calls[1].args.rects)), [[48, 3, 24, 24]]);
+ });
+ 
+-test("each window keeps its own buttons; the meter not its reset and capture switch", async () => {
++test("each window keeps its own buttons; the meter not its capture switch", async () => {
+   const expected = {
+-    main: [".headerBtns .headerBtn:not(.resetBtn):not(.suspendBtn)", ".footerBtns .footerBtn"],
++    main: [".headerBtns .headerBtn:not(.suspendBtn)", ".footerBtns .footerBtn"],
+     details: [".detailsHeader button", ".detailsSettingsMenu"],
+     history: [".historyHeader button", ".historyFilters select", ".historyClassDropdownMenu"],
+   };
+@@ -86,6 +86,7 @@ test("each window keeps its own buttons; the meter not its reset and capture swi
+     const app = setup({ view });
+     await tick();
+     for (const part of parts) assert.ok(app.selectors[0].includes(part), `${view}: ${part}`);
++    if (view === "main") assert.ok(!app.selectors[0].includes("resetBtn"), "main: reset stays clickable");
+   }
+   const dock = setup({ view: undefined, path: "/plugin-dock.html" });
+   await tick();
+diff --git a/tests/overlay-buttons.test.mjs b/tests/overlay-buttons.test.mjs
+index 015d363..90df743 100644
+--- a/tests/overlay-buttons.test.mjs
++++ b/tests/overlay-buttons.test.mjs
+@@ -27,7 +27,7 @@ function element(tag) {
+   return el;
+ }
+ 
+-function setup(list, toggled) {
++function setup(list, toggled, tv = false) {
+   const calls = [];
+   const listeners = {};
+   const bar = element("div");
+@@ -35,15 +35,23 @@ function setup(list, toggled) {
+   plugins.className = "headerBtn pluginsBtn";
+   bar.append(plugins);
+   bar.insertBefore = (node, ref) => {
++    if (node.parentNode === bar) bar.children = bar.children.filter((c) => c !== node); // a move
+     node.parentNode = bar;
+     const i = ref ? bar.children.indexOf(ref) : bar.children.length;
+     bar.children.splice(i, 0, node);
+   };
+-  bar.querySelectorAll = (s) => (s === ".overlayBtn" ? bar.children.filter((c) => c.classList.contains("overlayBtn")) : []);
++  const classes = (s) => s.split(",").map((part) => part.trim().replace(/^\./, ""));
++  bar.querySelectorAll = (s) => bar.children.filter((c) => classes(s).some((n) => c.classList.contains(n)));
+   bar.querySelector = (s) => {
+     const m = /data-plugin="([^"]+)"/.exec(s);
+-    return m ? bar.children.find((c) => c.dataset.plugin === m[1]) || null : null;
++    if (m) return bar.children.find((c) => c.dataset.plugin === m[1]) || null;
++    return bar.querySelectorAll(s)[0] || null;
+   };
++  if (tv) {
++    const btn = element("div");
++    btn.className = "headerBtn mediaRowBtn";
++    bar.insertBefore(btn, bar.children[0]);
++  }
+   const window = {
+     A2_VIEW: "main",
+     lucide: { createIcons: () => calls.push("icons") },
+@@ -92,3 +100,13 @@ test("follows overlays-changed: a plugin turned off loses its button", async ()
+   app.listeners["overlays-changed"]({ payload: [LIMITS] });
+   assert.deepEqual(app.bar.children.map((b) => b.dataset.plugin ?? "plugins"), ["inventory", "plugins"]);
+ });
++
++test("the plugins' order, the TV button where the Streams plugin stands", async () => {
++  const STREAMS = { id: "streams", name: "Streams", title: "Video overlay", icon: "tv", on: false, button: false };
++  const app = setup([MAP, STREAMS, LIMITS], undefined, true);
++  await tick();
++  const names = () => app.bar.children.map((b) => (b.classList.contains("mediaRowBtn") ? "tv" : b.classList.contains("overlaySlot") ? "slot" : b.dataset.plugin ?? "plugins"));
++  assert.deepEqual(names(), ["map", "tv", "slot", "inventory", "plugins"]);
++  app.listeners["overlays-changed"]({ payload: [STREAMS, LIMITS, MAP] });
++  assert.deepEqual(names(), ["tv", "slot", "inventory", "map", "plugins"]);
++});
+-- 
+2.43.0
+
