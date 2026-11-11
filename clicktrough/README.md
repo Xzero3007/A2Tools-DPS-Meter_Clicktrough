@@ -72,6 +72,7 @@ patches).
 | 0061 | **Twitch without the ad breaks, and your followed channels**: when Streamlink is installed (`sudo pacman -S streamlink`, as Streamlink Twitch GUI uses it), the Streams plugin plays Twitch through it, and Streamlink leaves Twitch's ad breaks out (a short pause instead). Signed in with twitch.tv's auth-token (Streams → Twitch → Followed; kept in `twitch.json` in the meter's own folder, sent to Twitch alone), the followed channels show there, and Streamlink sends it along (no ads at all with Turbo or a subscription). The person's decision, 2026-11-11. |
 | 0062 | **Videos louder**: Twitch, YouTube and Jellyfin streams are often mixed quiet; the Streams plugin's volume at 100 is now one and a half times as loud (mpv amplifies up to 150), and every step of the slider with it. |
 | 0063 | **Video volume as in a browser**: mpv's volume is cubic, so the Streams plugin's 70 played at a third of the sound (-9 dB). The slider is now linear like a browser's or FreeTube's (70 is 70 % of the sound), and 100 is the stream as it is, never amplified, so nothing distorts; 0062's boost is gone with it. |
+| 0064 | **A widget that scrolls while locked**: a plugin can open a widget with `unlocked`, and that widget keeps taking the mouse while the meter is locked, so its list scrolls. It still stays put (no moving or resizing) and a screenshot tool still lets clicks through. Closet uses it for its window at the Black Cloud shop and the closet (the person's wish, 2026-11-11). |
 
 ### Taken early from the original
 

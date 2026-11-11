@@ -1,0 +1,101 @@
+From bd98f84844ae071fb482a816754959ea9e70ff10 Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Wed, 11 Nov 2026 19:03:23 +0000
+Subject: [PATCH] Plugins: a widget that scrolls with the meter locked
+
+a2.widgets.open(name, { unlocked: true }): the widget's area keeps the
+mouse while the meter is locked, so a list in it scrolls (the Closet's
+window at the shop). It still doesn't move or resize then; a screenshot
+tool in front still lets clicks through.
+---
+ public/src/js/pluginFrame.js     |  2 +-
+ src-tauri/src/plugins/a2.js      |  3 +++
+ src-tauri/src/plugins/widgets.rs | 28 +++++++++++++++++++++++++++-
+ 3 files changed, 31 insertions(+), 2 deletions(-)
+
+diff --git a/public/src/js/pluginFrame.js b/public/src/js/pluginFrame.js
+index 2fd2081..6e21c45 100644
+--- a/public/src/js/pluginFrame.js
++++ b/public/src/js/pluginFrame.js
+@@ -147,7 +147,7 @@
+       // (plugin widgets, #77; permission "widgets").
+       "widgets.open": ([name, size]) => {
+         if (!allowed("widgets")) throw new Error('the plugin lacks the "widgets" permission');
+-        return call("plugin_widget_open", { name: String(name), width: Number(size?.width) || 64, height: Number(size?.height) || 64 });
++        return call("plugin_widget_open", { name: String(name), width: Number(size?.width) || 64, height: Number(size?.height) || 64, unlocked: size?.unlocked === true });
+       },
+       "widgets.close": ([name]) => {
+         if (!allowed("widgets")) throw new Error('the plugin lacks the "widgets" permission');
+diff --git a/src-tauri/src/plugins/a2.js b/src-tauri/src/plugins/a2.js
+index f9aa92b..184aa79 100644
+--- a/src-tauri/src/plugins/a2.js
++++ b/src-tauri/src/plugins/a2.js
+@@ -166,6 +166,9 @@
+ //   showing its widget.html (?name=<name>), which the player can drag anywhere and lock in place.
+ //   From the plugin's page:
+ //   await a2.widgets.open("name", { width, height })  open one, or show it again; at most 16
++//                                              Clicktrough: { unlocked: true } keeps its area taking the
++//                                              mouse while the meter is locked (a list that scrolls); it
++//                                              still doesn't move then
+ //   await a2.widgets.close("name")
+ //   await a2.widgets.send("name", data)        the widget hears it: a2.on("widget", (data) => ...)
+ //   await a2.widgets.lock(true / false)        locked, clicks go through them and they stay put (Clicktrough:
+diff --git a/src-tauri/src/plugins/widgets.rs b/src-tauri/src/plugins/widgets.rs
+index 488d55a..26fa6fd 100644
+--- a/src-tauri/src/plugins/widgets.rs
++++ b/src-tauri/src/plugins/widgets.rs
+@@ -58,6 +58,27 @@ fn is_locked(_app: &tauri::AppHandle, _id: &str) -> bool {
+     crate::app::all_windows_locked()
+ }
+ 
++/// Clicktrough: widgets their plugin opened with `unlocked` (a2.widgets.open
++/// with `{ unlocked: true }`): their area keeps the mouse while the meter is
++/// locked, so a list in them scrolls (Closet's shop window, the person's
++/// wish, 2026-11-11). They still don't move or resize then: their page hears
++/// "locked" as every widget does. A screenshot tool in front still wins.
++fn stay_unlocked() -> &'static Mutex<std::collections::HashSet<String>> {
++    static SET: std::sync::OnceLock<Mutex<std::collections::HashSet<String>>> = std::sync::OnceLock::new();
++    SET.get_or_init(Mutex::default)
++}
++fn set_stay_unlocked(label: &str, on: bool) {
++    let mut set = stay_unlocked().lock().unwrap_or_else(|p| p.into_inner());
++    if on {
++        set.insert(label.to_string());
++    } else {
++        set.remove(label);
++    }
++}
++fn stays_unlocked(label: &str) -> bool {
++    stay_unlocked().lock().unwrap_or_else(|p| p.into_inner()).contains(label)
++}
++
+ /// The calling window's widget: its plugin and name.
+ fn widget_of(window: &tauri::WebviewWindow) -> Result<(String, String), String> {
+     parse_label(window.label()).ok_or_else(|| "not a widget window".to_string())
+@@ -266,7 +287,8 @@ fn areas() -> &'static Mutex<HashMap<String, Area>> {
+ fn apply_lock(window: &tauri::WebviewWindow, locked: bool) {
+     // A screenshot tool in front, or every meter window locked with the
+     // overlay: clicks go through, whatever the widget's own lock.
+-    let locked = locked || crate::app::screenshot_tool_in_front() || crate::app::all_windows_locked();
++    let locked = ((locked || crate::app::all_windows_locked()) && !stays_unlocked(window.label()))
++        || crate::app::screenshot_tool_in_front();
+     let area = areas().lock().unwrap_or_else(|p| p.into_inner()).get(window.label()).cloned();
+     let applied = match (locked, &area) {
+         (true, _) => crate::platform::window::widget_click_through(window, true, None),
+@@ -328,9 +350,13 @@ pub async fn plugin_widget_open(
+     name: String,
+     width: f64,
+     height: f64,
++    unlocked: Option<bool>,
+ ) -> Result<(), String> {
+     let id = window_plugin(&window, plugin.as_deref())?;
+     require(&app, &id, "widgets")?;
++    if valid_name(&name) {
++        set_stay_unlocked(&label(&id, &name), unlocked.unwrap_or(false));
++    }
+     tracing::debug!("Widgets: {id} opens {name:?} (from {})", window.label());
+     if !valid_name(&name) {
+         return Err("a widget name is 1 to 32 lowercase letters, digits and '-'".into());
+-- 
+2.43.0
+
