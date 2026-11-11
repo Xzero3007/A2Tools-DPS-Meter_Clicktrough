@@ -1,0 +1,544 @@
+From e714538ee7cb9a0235449d0bfd4e84796dda5797 Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Wed, 11 Nov 2026 00:31:19 +0000
+Subject: [PATCH] Meter: a player row under the header for plugins that play
+ (permission media)
+
+---
+ index.html                      |   1 +
+ public/src/js/lockedButtons.js  |   4 +-
+ public/src/js/mediaRow.js       | 149 +++++++++++++++++++++++++++++
+ public/src/js/pluginFrame.js    |   6 ++
+ public/src/js/pluginSettings.js |   3 +
+ src-tauri/src/app.rs            |   3 +
+ src-tauri/src/plugins/a2.js     |  10 ++
+ src-tauri/src/plugins/media.rs  | 164 ++++++++++++++++++++++++++++++++
+ src-tauri/src/plugins/mod.rs    |   5 +
+ src/styles.css                  |  43 +++++++++
+ 10 files changed, 386 insertions(+), 2 deletions(-)
+ create mode 100644 public/src/js/mediaRow.js
+ create mode 100644 src-tauri/src/plugins/media.rs
+
+diff --git a/index.html b/index.html
+index c3ffa46..791e0f7 100644
+--- a/index.html
++++ b/index.html
+@@ -1571,6 +1571,7 @@
+     <script src="/src/js/lockedButtons.js"></script>
+     <script src="/src/js/pluginsButton.js"></script>
+     <script src="/src/js/overlayButtons.js"></script>
++    <script src="/src/js/mediaRow.js"></script>
+     <script src="/src/js/pluginIcons.js"></script>
+     <script src="/src/js/pluginSettings.js"></script>
+   </body>
+diff --git a/public/src/js/lockedButtons.js b/public/src/js/lockedButtons.js
+index b64d7b2..d18a656 100644
+--- a/public/src/js/lockedButtons.js
++++ b/public/src/js/lockedButtons.js
+@@ -19,7 +19,7 @@
+   // switch windows, views and tabs, and the menus they open. Not the meter's
+   // reset and capture switch, so a stray click can't end a fight's numbers.
+   const BUTTONS = {
+-    main: ".headerBtns .headerBtn:not(.resetBtn):not(.suspendBtn), .footerBtns .footerBtn",
++    main: ".headerBtns .headerBtn:not(.resetBtn):not(.suspendBtn), .footerBtns .footerBtn, .mediaRow button, .mediaRow input",
+     details: ".detailsHeader button, .detailsHeader .closeX, .detailsSettingsMenu",
+     history: ".historyHeader button, .historyHeader .closeX, .historyFilters select,"
+       + " .historyFilters .historyClassDropdownTrigger, .historyFilters .historyClassDropdownMenu",
+@@ -76,7 +76,7 @@
+     // Where the buttons live, so the meter's rows updating don't count; the
+     // meter's own size does (its footer moves as rows come and go).
+     const ROOTS = {
+-      main: [".header", ".meterFooter"],
++      main: [".header", ".meterFooter", ".mediaRow"],
+       details: [".detailsHeader"],
+       history: [".historyHeader", ".historyFilters"],
+       dock: ["body"],
+diff --git a/public/src/js/mediaRow.js b/public/src/js/mediaRow.js
+new file mode 100644
+index 0000000..49e37fd
+--- /dev/null
++++ b/public/src/js/mediaRow.js
+@@ -0,0 +1,149 @@
++// Clicktrough: the player row under the meter's header (plugins/media.rs).
++// While a plugin plays something (the Streams plugin's video, the Radio
++// plugin's station) the row shows: on the left a button per playing plugin,
++// on the right the chosen one's title and controls. A control goes to the
++// plugin (media_control), which plays on as with its own buttons and tells
++// the meter its new state. Nothing plays: the row goes, and the meter's
++// rows move back up. Locked, its buttons stay clickable (lockedButtons.js).
++(() => {
++  const view = window.A2_VIEW || window.__A2_VIEW__ || "main";
++  const invoke = window.__TAURI__?.core?.invoke;
++  const listen = window.__TAURI__?.event?.listen;
++  if (view !== "main" || typeof invoke !== "function") return;
++
++  const PICK_KEY = "a2.mediaRow.pick";
++  let picked = "";
++  try { picked = localStorage.getItem(PICK_KEY) || ""; } catch {}
++
++  const ICONS = {
++    prev: "skip-back", next: "skip-forward", stop: "square", favourite: "star",
++  };
++  const NAMES = {
++    prev: "Previous", next: "Next", stop: "Stop", favourite: "Favourite", playStop: "Play or stop",
++    pause: "Pause or play", mute: "Mute", volume: "Volume", opacity: "Video opacity",
++  };
++
++  const el = (tag, cls) => {
++    const e = document.createElement(tag);
++    if (cls) e.className = cls;
++    return e;
++  };
++  const icon = (name) => {
++    const i = document.createElement("i");
++    i.setAttribute("data-lucide", name);
++    return i;
++  };
++
++  const start = () => {
++    const header = document.querySelector(".meter > .header");
++    if (!header) return;
++    const row = el("div", "mediaRow");
++    row.hidden = true;
++    const tabs = el("div", "mediaTabs");
++    const now = el("div", "mediaNow");
++    const title = el("span", "mediaTitle");
++    const sub = el("span", "mediaSub");
++    now.append(title, sub);
++    const ctl = el("div", "mediaCtl");
++    row.append(tabs, now, ctl);
++    header.after(row);
++
++    let list = [];
++    let shownKey = "";
++    const send = (id, action, value) => Promise.resolve(invoke("media_control", { id, action, value: value ?? null })).catch(() => {});
++
++    const button = (id, action, iconName, label, pressed) => {
++      const b = el("button", `mediaBtn mediaBtn-${action}`);
++      b.type = "button";
++      b.title = label;
++      b.setAttribute("aria-label", label);
++      if (pressed != null) b.setAttribute("aria-pressed", String(!!pressed));
++      b.append(icon(iconName));
++      b.addEventListener("click", (event) => {
++        event.stopPropagation();
++        send(id, action, action === "pause" || action === "mute" ? !pressed : null);
++      });
++      return b;
++    };
++    const slider = (id, action, value, min, labelIcon) => {
++      const box = el("label", `mediaSlider mediaSlider-${action}`);
++      box.title = NAMES[action];
++      if (labelIcon) box.append(icon(labelIcon));
++      const input = el("input");
++      input.type = "range";
++      input.min = String(min);
++      input.max = "100";
++      input.step = action === "opacity" ? "5" : "1";
++      input.value = String(Math.round((value ?? 1) * 100));
++      input.setAttribute("aria-label", NAMES[action]);
++      input.dataset.action = action;
++      input.addEventListener("input", () => send(id, action, Number(input.value) / 100));
++      box.append(input);
++      return box;
++    };
++
++    const render = () => {
++      const playing = list.filter((p) => p && p.state);
++      row.hidden = !playing.length;
++      document.body.classList.toggle("hasMediaRow", !!playing.length);
++      if (!playing.length) {
++        shownKey = "";
++        return;
++      }
++      if (!playing.some((p) => p.id === picked)) picked = playing[0].id;
++      const cur = playing.find((p) => p.id === picked);
++      const s = cur.state;
++      title.textContent = s.title || cur.name;
++      sub.textContent = s.sub || "";
++      now.title = [s.title, s.sub].filter(Boolean).join(" · ");
++      // Rebuilt only when what is shown changes; a slider being dragged keeps its place.
++      const key = JSON.stringify([playing.map((p) => [p.id, p.state.icon, p.name]), picked, s.controls, s.paused, s.muted, s.playing, s.favourite]);
++      if (key !== shownKey) {
++        shownKey = key;
++        tabs.replaceChildren(...playing.map((p) => {
++          const b = el("button", "mediaTab");
++          b.type = "button";
++          b.title = p.name;
++          b.setAttribute("aria-label", p.name);
++          b.setAttribute("aria-pressed", String(p.id === picked));
++          b.append(icon(p.state.icon || "music"));
++          b.addEventListener("click", (event) => {
++            event.stopPropagation();
++            picked = p.id;
++            try { localStorage.setItem(PICK_KEY, picked); } catch {}
++            render();
++          });
++          return b;
++        }));
++        const parts = [];
++        for (const c of s.controls || []) {
++          if (c === "volume") parts.push(slider(cur.id, c, s.volume, 0, null));
++          else if (c === "opacity") parts.push(slider(cur.id, c, s.opacity, 20, "contrast"));
++          else if (c === "pause") parts.push(button(cur.id, c, s.paused ? "play" : "pause", NAMES[c], s.paused));
++          else if (c === "playStop") parts.push(button(cur.id, c, s.playing ? "square" : "play", NAMES[c], s.playing));
++          else if (c === "mute") parts.push(button(cur.id, c, s.muted ? "volume-x" : "volume-2", NAMES[c], s.muted));
++          else if (c === "favourite") parts.push(button(cur.id, c, "star", NAMES[c], s.favourite));
++          else parts.push(button(cur.id, c, ICONS[c] || "circle", NAMES[c] || c));
++        }
++        ctl.replaceChildren(...parts);
++        try { window.lucide?.createIcons?.({ root: row }); } catch {}
++      }
++      for (const input of ctl.querySelectorAll("input[type=range]")) {
++        if (document.activeElement === input) continue;
++        const v = input.dataset.action === "opacity" ? s.opacity : s.volume;
++        if (v != null) input.value = String(Math.round(v * 100));
++      }
++      requestAnimationFrame(() => window._dpsApp?._sendLockBtnRect?.());
++    };
++
++    const take = (value) => {
++      if (!Array.isArray(value)) return;
++      list = value;
++      render();
++    };
++    Promise.resolve(invoke("media_list")).then(take).catch(() => {});
++    Promise.resolve(listen?.("media-changed", (event) => take(event?.payload))).catch(() => {});
++  };
++  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start, { once: true });
++  else start();
++})();
+diff --git a/public/src/js/pluginFrame.js b/public/src/js/pluginFrame.js
+index 3232d55..d930e0b 100644
+--- a/public/src/js/pluginFrame.js
++++ b/public/src/js/pluginFrame.js
+@@ -217,6 +217,12 @@
+         if (!allowed("video")) throw new Error('the plugin lacks the "video" permission');
+         return call("plugin_video_freetube");
+       },
++      // Clicktrough: what the plugin plays, for the meter's player row
++      // (permission "media"; plugins/media.rs). null: nothing plays.
++      "media.set": ([state]) => {
++        if (!allowed("media")) throw new Error('the plugin lacks the "media" permission');
++        return call("plugin_media_set", { state: state ?? null });
++      },
+       // Clicktrough: share a value with plugins allowed to hear it.
+       share: ([value]) => {
+         if (!allowed("share")) throw new Error('the plugin lacks the "share" permission');
+diff --git a/public/src/js/pluginSettings.js b/public/src/js/pluginSettings.js
+index 2dfbf22..b51867b 100644
+--- a/public/src/js/pluginSettings.js
++++ b/public/src/js/pluginSettings.js
+@@ -75,6 +75,9 @@
+       if (permission === "video") {
+         return t("settings.plugins.permVideo", "Play Twitch and YouTube videos with mpv, and list them (Twitch, YouTube, FreeTube's subscriptions)");
+       }
++      if (permission === "media") {
++        return t("settings.plugins.permMedia", "Show what it plays, with its controls, in a row under the meter's header");
++      }
+       if (permission.startsWith("web:")) {
+         return t("settings.plugins.permWeb", "Read data from {host} on the internet", { host: permission.slice(4) });
+       }
+diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
+index 09e2d5f..ce31537 100644
+--- a/src-tauri/src/app.rs
++++ b/src-tauri/src/app.rs
+@@ -4587,6 +4587,9 @@ pub fn run() {
+             crate::plugins::dock::dock_status,
+             crate::plugins::dock::dock_toggle,
+             crate::plugins::overlays::plugin_overlays,
++            crate::plugins::media::plugin_media_set,
++            crate::plugins::media::media_list,
++            crate::plugins::media::media_control,
+             crate::plugins::overlays::plugin_overlay_toggle,
+             crate::plugins::dock::dock_fold,
+             crate::plugins::dock::plugin_set_docked,
+diff --git a/src-tauri/src/plugins/a2.js b/src-tauri/src/plugins/a2.js
+index ee33606..698fe05 100644
+--- a/src-tauri/src/plugins/a2.js
++++ b/src-tauri/src/plugins/a2.js
+@@ -97,6 +97,12 @@
+ //   a2.on("video", (v) => ...)                 { widget, state: "loading" | "playing" | "ended" | "error",
+ //                                              error, title, pause, buffering, volume, mute }
+ //   await a2.video.twitch("search" | "user" | "channels" | "live", words | login | [logins] | game)
++//   Player row (permission "media", Clicktrough): what the plugin plays, shown with its controls
++//   in a row under the meter's header while anything plays; a control there comes as an event:
++//   await a2.media.set({ icon: "tv", title, sub, paused, muted, volume: 0..1, opacity: 0.2..1,
++//                       controls: ["prev", "playStop", "pause", "next", "mute", "volume", "opacity", "favourite", "stop"] })
++//   await a2.media.set(null)                   nothing plays: the plugin's entry leaves the row
++//   a2.on("media", ({ action, value }) => ...) a control in the row (value: 0..1 for volume and opacity)
+ //   await a2.video.search(words)               YouTube's search (yt-dlp): [{ id, title, channel, ... }]
+ //   await a2.video.feed(channelId)             a YouTube channel's newest videos (its Atom feed, text)
+ //   await a2.video.freetube()                  FreeTube's subscriptions on this computer, or null
+@@ -293,6 +299,10 @@
+       search: (text) => call("video.search", [String(text)]),
+       freetube: () => call("video.freetube", []),
+     }),
++    // Clicktrough: the meter's player row (permission "media").
++    media: Object.freeze({
++      set: (state) => call("media.set", [state ?? null]),
++    }),
+     widgets: Object.freeze({
+       open: (name, size) => call("widgets.open", [String(name), size || {}]),
+       close: (name) => call("widgets.close", [String(name)]),
+diff --git a/src-tauri/src/plugins/media.rs b/src-tauri/src/plugins/media.rs
+new file mode 100644
+index 0000000..1edad59
+--- /dev/null
++++ b/src-tauri/src/plugins/media.rs
+@@ -0,0 +1,164 @@
++//! Clicktrough: the meter's player row. A plugin that plays something (the
++//! Streams plugin's video, the Radio plugin's station) tells the meter what
++//! plays (`a2.media.set(state)`, permission "media"), and the meter shows a
++//! second row under its header while anything plays: a button per playing
++//! plugin, and the chosen one's controls. A control sends the plugin an
++//! event `media` (`{ action, value }`), which it handles as its own buttons.
++//!
++//! The state a plugin gives, every field optional:
++//!
++//! ```json
++//! { "icon": "tv", "title": "Stoopzz", "sub": "Twitch", "paused": false,
++//!   "muted": false, "volume": 0.7, "opacity": 1, "controls": ["pause", "mute", "volume", "opacity", "stop"] }
++//! ```
++//!
++//! `null` takes it away (nothing plays). Only the controls listed here exist.
++
++use std::collections::BTreeMap;
++use std::sync::Mutex;
++
++use serde_json::{json, Value};
++use tauri::Emitter;
++
++/// The controls a plugin may show in the row.
++const CONTROLS: &[&str] = &["prev", "playStop", "pause", "next", "mute", "volume", "opacity", "favourite", "stop"];
++
++fn states() -> &'static Mutex<BTreeMap<String, Value>> {
++    static S: std::sync::OnceLock<Mutex<BTreeMap<String, Value>>> = std::sync::OnceLock::new();
++    S.get_or_init(Mutex::default)
++}
++
++fn text(v: Option<&Value>, max: usize) -> String {
++    v.and_then(Value::as_str).unwrap_or("").chars().filter(|c| !c.is_control()).take(max).collect()
++}
++
++fn unit(v: Option<&Value>, min: f64) -> Option<f64> {
++    v.and_then(Value::as_f64).filter(|v| v.is_finite()).map(|v| v.clamp(min, 1.0))
++}
++
++/// A plugin's state made safe to show: known fields only, short texts.
++fn clean(state: &Value) -> Option<Value> {
++    let s = state.as_object()?;
++    let icon = text(s.get("icon"), 32);
++    let icon = if !icon.is_empty() && icon.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-') { icon } else { "music".into() };
++    let mut controls: Vec<&str> = Vec::new();
++    for c in s.get("controls").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str) {
++        if let Some(known) = CONTROLS.iter().find(|k| **k == c) {
++            if !controls.contains(known) {
++                controls.push(known);
++            }
++        }
++    }
++    Some(json!({
++        "icon": icon,
++        "title": text(s.get("title"), 120),
++        "sub": text(s.get("sub"), 120),
++        "playing": s.get("playing").and_then(Value::as_bool).unwrap_or(true),
++        "paused": s.get("paused").and_then(Value::as_bool).unwrap_or(false),
++        "muted": s.get("muted").and_then(Value::as_bool).unwrap_or(false),
++        "favourite": s.get("favourite").and_then(Value::as_bool).unwrap_or(false),
++        "volume": unit(s.get("volume"), 0.0),
++        "opacity": unit(s.get("opacity"), 0.2),
++        "controls": controls,
++    }))
++}
++
++fn listed(app: &tauri::AppHandle) -> Value {
++    let names: BTreeMap<String, String> = super::host(app)
++        .map(|h| h.list().into_iter().map(|p| (p.id.clone(), p.name.clone())).collect())
++        .unwrap_or_default();
++    let order = super::order(app);
++    let mut list: Vec<(String, Value)> = states().lock().unwrap_or_else(|p| p.into_inner()).iter().map(|(k, v)| (k.clone(), v.clone())).collect();
++    list.sort_by_key(|(id, _)| order.iter().position(|o| o == id).unwrap_or(usize::MAX));
++    Value::Array(
++        list.into_iter()
++            .map(|(id, state)| json!({ "id": id, "name": names.get(&id).cloned().unwrap_or_else(|| id.clone()), "state": state }))
++            .collect(),
++    )
++}
++
++fn notify(app: &tauri::AppHandle) {
++    let _ = app.emit_to("main", "media-changed", listed(app));
++}
++
++/// A plugin turned off or gone: its entry leaves the row.
++pub fn forget(app: &tauri::AppHandle, id: &str) {
++    let gone = states().lock().unwrap_or_else(|p| p.into_inner()).remove(id).is_some();
++    if gone {
++        notify(app);
++    }
++}
++
++/// `a2.media.set(state)`: what the plugin plays now, or null for nothing.
++#[tauri::command]
++pub fn plugin_media_set(app: tauri::AppHandle, window: tauri::WebviewWindow, plugin: Option<String>, state: Option<Value>) -> Result<(), String> {
++    let id = super::window_plugin(&window, plugin.as_deref())?;
++    super::require(&app, &id, "media")?;
++    let cleaned = state.as_ref().filter(|s| !s.is_null()).map(|s| clean(s).ok_or("not a player state")).transpose()?;
++    {
++        let mut all = states().lock().unwrap_or_else(|p| p.into_inner());
++        match cleaned {
++            Some(s) => {
++                if all.get(&id) == Some(&s) {
++                    return Ok(());
++                }
++                all.insert(id, s);
++            }
++            None => {
++                if all.remove(&id).is_none() {
++                    return Ok(());
++                }
++            }
++        }
++    }
++    notify(&app);
++    Ok(())
++}
++
++/// The meter's row: `[{ id, name, state }]`.
++#[tauri::command]
++pub fn media_list(app: tauri::AppHandle) -> Value {
++    listed(&app)
++}
++
++/// A control in the meter's row: the plugin hears `media` `{ action, value }`.
++#[tauri::command]
++pub fn media_control(app: tauri::AppHandle, id: String, action: String, value: Option<Value>) -> Result<(), String> {
++    if !states().lock().unwrap_or_else(|p| p.into_inner()).contains_key(&id) {
++        return Err("nothing of that plugin plays".into());
++    }
++    if !CONTROLS.contains(&action.as_str()) {
++        return Err("unknown control".into());
++    }
++    let value = match value {
++        Some(Value::Number(n)) => n.as_f64().filter(|v| v.is_finite()).map(|v| json!(v.clamp(0.0, 1.0))).unwrap_or(Value::Null),
++        Some(Value::Bool(b)) => Value::Bool(b),
++        _ => Value::Null,
++    };
++    super::emit_plugin(&app, &id, json!({ "plugin": id, "event": "media", "data": { "action": action, "value": value } }));
++    Ok(())
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn a_player_state_keeps_known_fields_only() {
++        let s = clean(&json!({
++            "icon": "tv", "title": "A\u{7}B", "sub": "Twitch", "paused": true, "volume": 1.7, "opacity": 0.05,
++            "controls": ["pause", "pause", "open_url", "stop"], "url": "https://example.com"
++        }))
++        .unwrap();
++        assert_eq!(s["icon"], "tv");
++        assert_eq!(s["title"], "AB");
++        assert_eq!(s["paused"], true);
++        assert_eq!(s["volume"], 1.0);
++        assert_eq!(s["opacity"], 0.2);
++        assert_eq!(s["controls"], json!(["pause", "stop"]));
++        assert!(s.get("url").is_none());
++        assert_eq!(clean(&json!({ "icon": "../x" })).unwrap()["icon"], "music");
++        assert!(clean(&json!("text")).is_none());
++        assert_eq!(clean(&json!({ "title": "x".repeat(500) })).unwrap()["title"].as_str().unwrap().len(), 120);
++    }
++}
+diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
+index d2eefa2..b3987f1 100644
+--- a/src-tauri/src/plugins/mod.rs
++++ b/src-tauri/src/plugins/mod.rs
+@@ -16,6 +16,7 @@ pub mod catalog;
+ pub mod decoder;
+ pub mod dock;
+ pub mod fps;
++pub mod media;
+ // Clicktrough: a plugin's overlay on a button in the meter's header.
+ pub mod overlays;
+ pub mod video;
+@@ -158,6 +159,8 @@ const PLUGIN_SURFACE_COMMANDS: &[&str] = &[
+     "plugin_share", "plugin_file", "plugin_web_get", "plugin_web_image", "plugin_window_size", "plugin_set_order",
+     "dock_lock_toggle", "dock_lock_state",
+     "plugin_widget_file", "plugin_widget_resize", "set_locked_buttons",
++    // Clicktrough: the meter's player row (plugins/media.rs).
++    "plugin_media_set",
+     // Clicktrough: video in a widget and the lists to pick it from (a2.video).
+     "plugin_video_play", "plugin_video_control", "plugin_video_twitch", "plugin_video_feed",
+     "plugin_video_search", "plugin_video_freetube",
+@@ -514,6 +517,7 @@ pub async fn plugin_set_enabled(app: tauri::AppHandle, id: String, enabled: bool
+             let _ = window.close();
+         }
+         dock::sync(&app, None);
++        media::forget(&app, &id);
+     }
+     tracing::info!("Plugins: {id} {}", if enabled { "enabled" } else { "disabled" });
+     // Clicktrough: its overlay's header button comes or goes.
+@@ -1588,6 +1592,7 @@ fn describe_permission(t: &PromptTexts, permission: &str) -> String {
+         "events:items" => "See your inventory and storages, and the items you get (from the game data)".into(),
+         "radio" => "Play internet radio stations (listening only, from the stations this build lists)".into(),
+         "video" => "Play Twitch and YouTube videos with mpv, and list them (Twitch, YouTube, FreeTube's subscriptions)".into(),
++        "media" => "Show what it plays, with its controls, in a row under the meter's header".into(),
+         p => match (p.strip_prefix("decoder:"), p.strip_prefix("web:")) {
+             (Some(name), _) => t.perm_decoder.replace("{name}", name),
+             (_, Some(host)) => format!("Read data from {host} on the internet"),
+diff --git a/src/styles.css b/src/styles.css
+index e4b6903..f65acb3 100644
+--- a/src/styles.css
++++ b/src/styles.css
+@@ -9024,3 +9024,46 @@ html.a2-offline .historyUploadBtn {
+ .detailsPanel .staggerTick.isAmbiguous {
+   outline: 1px solid var(--stagger-warn);
+ }
++
++/* Clicktrough: the player row under the header (mediaRow.js): the playing
++   plugins' buttons, the chosen one's title and controls. As tall as the
++   header's icon row; gold for what is chosen or on. */
++.mediaRow {
++  display: flex;
++  align-items: center;
++  gap: 8px;
++  height: 26px;
++  padding: 0 10px;
++  border-top: 1px solid rgba(255, 255, 255, 0.08);
++  font-size: 11px;
++  color: rgba(255, 255, 255, 0.85);
++  overflow: hidden;
++}
++.mediaRow[hidden] { display: none; }
++.mediaRow button {
++  background: none;
++  border: 0;
++  padding: 0;
++  margin: 0;
++  width: 18px;
++  height: 18px;
++  display: inline-flex;
++  align-items: center;
++  justify-content: center;
++  color: rgba(255, 255, 255, 0.7);
++  border-radius: 4px;
++  flex: none;
++}
++.mediaRow button svg { width: 14px; height: 14px; }
++.mediaRow button:hover { color: #fff; background: rgba(255, 255, 255, 0.08); }
++.mediaRow .mediaTabs { display: flex; gap: 4px; flex: none; }
++.mediaRow .mediaTab[aria-pressed="true"] { color: var(--ct-accent); box-shadow: inset 0 -2px 0 var(--ct-accent); border-radius: 0; }
++.mediaRow .mediaBtn[aria-pressed="true"].mediaBtn-mute,
++.mediaRow .mediaBtn[aria-pressed="true"].mediaBtn-favourite { color: var(--ct-accent); }
++.mediaRow .mediaNow { flex: 1 1 auto; min-width: 0; display: flex; gap: 6px; align-items: baseline; white-space: nowrap; overflow: hidden; }
++.mediaRow .mediaTitle { font-weight: 600; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
++.mediaRow .mediaSub { color: rgba(255, 255, 255, 0.5); overflow: hidden; text-overflow: ellipsis; flex: none; max-width: 40%; }
++.mediaRow .mediaCtl { display: flex; align-items: center; gap: 4px; flex: none; }
++.mediaRow .mediaSlider { display: inline-flex; align-items: center; gap: 3px; color: rgba(255, 255, 255, 0.6); }
++.mediaRow .mediaSlider svg { width: 13px; height: 13px; }
++.mediaRow .mediaSlider input { width: 56px; height: 14px; margin: 0; accent-color: var(--ct-accent); }
+-- 
+2.43.0
+
