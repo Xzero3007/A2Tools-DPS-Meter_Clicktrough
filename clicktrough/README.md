@@ -67,6 +67,7 @@ patches).
 | 0056 | **Plugin parts that stayed solid now follow the opacity slider**: the plugin window's opacity slider made the page see-through, but parts a plugin paints itself (Roster's table head, the Streams bar) stayed solid. The meter now tells each plugin page the slider's value (`var(--a2-alpha)`), and those parts use it. The player row puts its controls on a second line when the meter is too narrow, instead of cutting them off. |
 | 0057 | **Videos show at once, and say why they don't play**: a Jellyfin or YouTube video started while the plugins were off (the puzzle button) played its sound but its window stayed hidden until the plugins were shown; now it shows when it starts. A video that fails says what yt-dlp or mpv reported (before only "no audio or video data played"), and the meter's log keeps it. |
 | 0058 | **YouTube videos play**: YouTube serves a video's stream only a few seconds after handing out its address; the Streams player asked at once, was refused and showed "No video or audio streams selected". It now tries again for up to 10 seconds (the same fix as in the person's own mpv settings for FreeTube). |
+| 0059 | **YouTube's search, newest first**: a plugin can ask yt-dlp's YouTube search for the newest uploads (`a2.video.search(words, { newest: true })`), for the Streams plugin's "AION 2 new". The same searches as before, sorted by date. |
 
 ### Taken early from the original
 

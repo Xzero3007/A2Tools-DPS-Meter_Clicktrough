@@ -1,0 +1,91 @@
+From 8f46bbccd3ca7b1c816065aca50ff5434b669b19 Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Wed, 11 Nov 2026 13:22:00 +0000
+Subject: [PATCH] Plugins: YouTube's search, newest uploads first
+
+a2.video.search(words, { newest: true }): yt-dlp's ytsearchdate, the 20
+newest uploads (the Streams plugin's AION 2 tracker).
+---
+ public/src/js/pluginFrame.js   |  4 ++--
+ src-tauri/src/plugins/a2.js    |  3 ++-
+ src-tauri/src/plugins/video.rs | 10 +++++++---
+ 3 files changed, 11 insertions(+), 6 deletions(-)
+
+diff --git a/public/src/js/pluginFrame.js b/public/src/js/pluginFrame.js
+index 859eeec..2fd2081 100644
+--- a/public/src/js/pluginFrame.js
++++ b/public/src/js/pluginFrame.js
+@@ -221,9 +221,9 @@
+         if (!allowed("video")) throw new Error('the plugin lacks the "video" permission');
+         return call("plugin_video_feed", { channel: String(channel) });
+       },
+-      "video.search": ([text]) => {
++      "video.search": ([text, newest]) => {
+         if (!allowed("video")) throw new Error('the plugin lacks the "video" permission');
+-        return call("plugin_video_search", { text: String(text) });
++        return call("plugin_video_search", { text: String(text), newest: !!newest });
+       },
+       "video.freetube": () => {
+         if (!allowed("video")) throw new Error('the plugin lacks the "video" permission');
+diff --git a/src-tauri/src/plugins/a2.js b/src-tauri/src/plugins/a2.js
+index a61d52d..f9aa92b 100644
+--- a/src-tauri/src/plugins/a2.js
++++ b/src-tauri/src/plugins/a2.js
+@@ -124,6 +124,7 @@
+ //   a2.on("media", ({ action, value, slot }) => ...) a control in the row (value: 0..1 for volume
+ //                                              and opacity, the quality for "quality")
+ //   await a2.video.search(words)               YouTube's search (yt-dlp): [{ id, title, channel, ... }]
++//   await a2.video.search(words, { newest: true })  the same, newest uploads first (Clicktrough)
+ //   await a2.video.feed(channelId)             a YouTube channel's newest videos (its Atom feed, text)
+ //   await a2.video.freetube()                  FreeTube's subscriptions on this computer, or null
+ //   await a2.web.image(url)                    Clicktrough: a picture from the game's icon server
+@@ -318,7 +319,7 @@
+       control: (widget, action, value) => call("video.control", [String(widget), String(action), value ?? null]),
+       twitch: (kind, arg) => call("video.twitch", [String(kind), arg ?? null]),
+       feed: (channel) => call("video.feed", [String(channel)]),
+-      search: (text) => call("video.search", [String(text)]),
++      search: (text, opts) => call("video.search", [String(text), !!opts?.newest]),
+       freetube: () => call("video.freetube", []),
+       jellyfin: (action, arg) => call("video.jellyfin", [String(action), arg ?? null]),
+     }),
+diff --git a/src-tauri/src/plugins/video.rs b/src-tauri/src/plugins/video.rs
+index 32ece0c..c581ec9 100644
+--- a/src-tauri/src/plugins/video.rs
++++ b/src-tauri/src/plugins/video.rs
+@@ -276,18 +276,22 @@ pub async fn plugin_video_feed(
+     net::text(&app, &format!("https://www.youtube.com/feeds/videos.xml?channel_id={channel}")).await
+ }
+ 
+-/// `a2.video.search(text)`: YouTube's search, through yt-dlp: the first 20
+-/// videos (id, title, channel, length, views).
++/// `a2.video.search(text, { newest })`: YouTube's search, through yt-dlp:
++/// the first 20 videos (id, title, channel, length, views), or the 20
++/// newest uploads.
+ #[tauri::command]
+ pub async fn plugin_video_search(
+     app: tauri::AppHandle,
+     window: tauri::WebviewWindow,
+     plugin: Option<String>,
+     text: String,
++    newest: Option<bool>,
+ ) -> Result<Value, String> {
+     let id = window_plugin(&window, plugin.as_deref())?;
+     require(&app, &id, "video")?;
+     let text = text.trim().replace(['\n', '\r'], " ");
++    // Clicktrough: newest uploads first (the Streams plugin's tracker).
++    let search = if newest.unwrap_or(false) { "ytsearchdate20" } else { "ytsearch20" };
+     if text.is_empty() || text.len() > 100 {
+         return Err("no search words".into());
+     }
+@@ -295,7 +299,7 @@ pub async fn plugin_video_search(
+         Duration::from_secs(40),
+         tokio::process::Command::new("yt-dlp")
+             .args(["--ignore-config", "--no-warnings", "--flat-playlist", "--dump-single-json", "--"])
+-            .arg(format!("ytsearch20:{text}"))
++            .arg(format!("{search}:{text}"))
+             .kill_on_drop(true)
+             .output(),
+     )
+-- 
+2.43.0
+
