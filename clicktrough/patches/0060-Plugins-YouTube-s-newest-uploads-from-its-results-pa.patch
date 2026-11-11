@@ -1,7 +1,7 @@
-From 6a3d02c702ea31e21b33cd63506a0e55788a6ea9 Mon Sep 17 00:00:00 2001
+From 4caa2cad5af9bb7f94a09c2e6fdabbdfd2b3323a Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Wed, 11 Nov 2026 16:12:40 +0000
-Subject: [PATCH] Plugins: YouTube's newest uploads from its results page
+Subject: [PATCH 60/60] Plugins: YouTube's newest uploads from its results page
  sorted by date
 
 yt-dlp no longer knows ytsearchdate ("Unsupported url scheme"): the
@@ -12,7 +12,7 @@ newest uploads come from YouTube's results page sorted by upload date
  1 file changed, 25 insertions(+), 4 deletions(-)
 
 diff --git a/src-tauri/src/plugins/video.rs b/src-tauri/src/plugins/video.rs
-index c581ec9..9b54931 100644
+index 2e0f350..88f76c0 100644
 --- a/src-tauri/src/plugins/video.rs
 +++ b/src-tauri/src/plugins/video.rs
 @@ -290,16 +290,22 @@ pub async fn plugin_video_search(
@@ -63,7 +63,7 @@ index c581ec9..9b54931 100644
  /// yt-dlp's search answer, cut to what a list shows.
  pub fn search_entries(all: &Value) -> Value {
      let entries = all.get("entries").and_then(Value::as_array).cloned().unwrap_or_default();
-@@ -1298,6 +1318,7 @@ mod tests {
+@@ -1301,6 +1321,7 @@ mod tests {
      fn a_quality_is_a_height_or_sound_only() {
          assert_eq!(ytdl_format("720"), "bestvideo[height<=?720]+bestaudio/best[height<=?720]/best");
          assert_eq!(ytdl_format("audio"), "bestaudio/best");

@@ -1,7 +1,7 @@
-From 8f46bbccd3ca7b1c816065aca50ff5434b669b19 Mon Sep 17 00:00:00 2001
+From 39dd3c45078cd406fdd4be4cfab46be546ebb1f5 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Wed, 11 Nov 2026 13:22:00 +0000
-Subject: [PATCH] Plugins: YouTube's search, newest uploads first
+Subject: [PATCH 59/60] Plugins: YouTube's search, newest uploads first
 
 a2.video.search(words, { newest: true }): yt-dlp's ytsearchdate, the 20
 newest uploads (the Streams plugin's AION 2 tracker).
@@ -49,7 +49,7 @@ index a61d52d..f9aa92b 100644
        jellyfin: (action, arg) => call("video.jellyfin", [String(action), arg ?? null]),
      }),
 diff --git a/src-tauri/src/plugins/video.rs b/src-tauri/src/plugins/video.rs
-index 32ece0c..c581ec9 100644
+index ac39a32..2e0f350 100644
 --- a/src-tauri/src/plugins/video.rs
 +++ b/src-tauri/src/plugins/video.rs
 @@ -276,18 +276,22 @@ pub async fn plugin_video_feed(

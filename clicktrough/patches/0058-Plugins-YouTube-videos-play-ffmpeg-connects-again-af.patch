@@ -1,4 +1,4 @@
-From c977ad2b472651a901822c32820702762e92de37 Mon Sep 17 00:00:00 2001
+From aae7ec7d805730ca58977bb8699b895f47f55779 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Wed, 11 Nov 2026 09:42:43 +0000
 Subject: [PATCH] Plugins: YouTube videos play (ffmpeg connects again after a
@@ -8,25 +8,28 @@ YouTube hands out a stream's address a few seconds before it serves it;
 mpv asked at once, got 403 Forbidden and played nothing ("No video or
 audio streams selected"). ffmpeg now reconnects on 4xx, up to 10 s.
 ---
- src-tauri/src/plugins/video.rs | 5 +++++
- 1 file changed, 5 insertions(+)
+ src-tauri/src/plugins/video.rs | 8 ++++++++
+ 1 file changed, 8 insertions(+)
 
 diff --git a/src-tauri/src/plugins/video.rs b/src-tauri/src/plugins/video.rs
-index 7abd6fb..32ece0c 100644
+index 7abd6fb..ac39a32 100644
 --- a/src-tauri/src/plugins/video.rs
 +++ b/src-tauri/src/plugins/video.rs
-@@ -768,6 +768,11 @@ mod player {
-             ("idle", "yes"),
-             ("keep-open", "no"),
-             ("ytdl", "yes"),
-+            // YouTube hands out a stream's address a few seconds before it
-+            // serves it (yt-dlp waits, "Sleeping 5.00 seconds as required by
-+            // the site"); mpv asked at once, got 403 and played nothing ("No
-+            // video or audio streams selected"). ffmpeg connects again.
-+            ("stream-lavf-o", "reconnect=1,reconnect_on_http_error=4xx,reconnect_delay_max=10"),
-             ("cache", "yes"),
-             ("demuxer-max-bytes", "64MiB"),
-             ("audio-client-name", "A2Tools Streams"),
+@@ -1218,6 +1218,14 @@ mod player {
+                     // One field, commas and all (a plain set would split it).
+                     command(h, &["change-list", "http-header-fields", "append", header])?;
+                 }
++                // YouTube hands out a stream's address a few seconds before
++                // it serves it (yt-dlp waits, "Sleeping 5.00 seconds as
++                // required by the site"); mpv asked at once, got 403 and
++                // played nothing. ffmpeg connects again, for YouTube alone:
++                // on Twitch's live segments it stalled the picture again and
++                // again.
++                let youtube = load.url.starts_with("https://www.youtube.com/");
++                set(&label, "stream-lavf-o", if youtube { "reconnect=1,reconnect_on_http_error=4xx,reconnect_delay_max=10" } else { "" })?;
+                 set(&label, "start", &if load.start > 0.0 { format!("{:.1}", load.start) } else { "none".into() })?;
+                 set(&label, "force-media-title", &load.title)?;
+                 set(&label, "vid", if load.audio_only { "no" } else { "auto" })?;
 -- 
 2.43.0
 
