@@ -1,19 +1,33 @@
-From 5ccbcdc38196cbd5f27f16593f6f90b18aabfe40 Mon Sep 17 00:00:00 2001
+From e7a3c5c86069d7480609bd3adfcac3cb79f570d2 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Wed, 11 Nov 2026 01:05:22 +0000
 Subject: [PATCH] Meter: the player row shows two players of one plugin, and
  their quality
 
 ---
- public/src/js/mediaRow.js      | 60 ++++++++++++++++++++++---------
+ public/src/js/lockedButtons.js |  2 +-
+ public/src/js/mediaRow.js      | 53 ++++++++++++++++++---------
  public/src/js/pluginFrame.js   |  4 +--
  src-tauri/src/plugins/a2.js    | 11 +++---
  src-tauri/src/plugins/media.rs | 65 ++++++++++++++++++++++++++++------
- src/styles.css                 |  9 +++++
- 5 files changed, 116 insertions(+), 33 deletions(-)
+ src/styles.css                 | 15 ++++++++
+ 6 files changed, 116 insertions(+), 34 deletions(-)
 
+diff --git a/public/src/js/lockedButtons.js b/public/src/js/lockedButtons.js
+index d18a656..ed9e2e7 100644
+--- a/public/src/js/lockedButtons.js
++++ b/public/src/js/lockedButtons.js
+@@ -19,7 +19,7 @@
+   // switch windows, views and tabs, and the menus they open. Not the meter's
+   // reset and capture switch, so a stray click can't end a fight's numbers.
+   const BUTTONS = {
+-    main: ".headerBtns .headerBtn:not(.resetBtn):not(.suspendBtn), .footerBtns .footerBtn, .mediaRow button, .mediaRow input",
++    main: ".headerBtns .headerBtn:not(.resetBtn):not(.suspendBtn), .footerBtns .footerBtn, .mediaRow button, .mediaRow input, .mediaRow select",
+     details: ".detailsHeader button, .detailsHeader .closeX, .detailsSettingsMenu",
+     history: ".historyHeader button, .historyHeader .closeX, .historyFilters select,"
+       + " .historyFilters .historyClassDropdownTrigger, .historyFilters .historyClassDropdownMenu",
 diff --git a/public/src/js/mediaRow.js b/public/src/js/mediaRow.js
-index 49e37fd..24c2b71 100644
+index 49e37fd..fb381df 100644
 --- a/public/src/js/mediaRow.js
 +++ b/public/src/js/mediaRow.js
 @@ -20,7 +20,7 @@
@@ -34,40 +48,33 @@ index 49e37fd..24c2b71 100644
  
      const button = (id, action, iconName, label, pressed) => {
        const b = el("button", `mediaBtn mediaBtn-${action}`);
-@@ -82,6 +82,32 @@
+@@ -82,6 +82,25 @@
        return box;
      };
  
-+    // The quality as a button, not a <select>: its list is the desktop's
-+    // menu, drawn in the desktop's colours. A click steps to the next one
-+    // (right-click: back); it changes a moment after the last click, since
-+    // each change starts the video again.
-+    const QUALITY_NAMES = { audio: "Sound" };
++    // The quality as a dropdown, styled dark (its open list is the
++    // desktop's menu). A change starts the video again in it.
++    const QUALITY_NAMES = { audio: "Sound only" };
 +    const quality = (key, value, list) => {
-+      const qs = Array.isArray(list) && list.length ? list : ["1080"];
-+      let at = Math.max(0, qs.indexOf(value));
-+      let timer = 0;
-+      const b = el("button", "mediaQuality");
-+      b.type = "button";
-+      b.title = "Quality: click for the next, right-click for the one before (it starts again)";
-+      b.setAttribute("aria-label", "Quality");
-+      const show = () => { b.textContent = QUALITY_NAMES[qs[at]] || `${qs[at]}p`; };
-+      const step = (by) => {
-+        at = (at + by + qs.length) % qs.length;
-+        show();
-+        clearTimeout(timer);
-+        timer = setTimeout(() => send(key, "quality", qs[at]), 900);
-+      };
-+      b.addEventListener("click", (event) => { event.stopPropagation(); step(1); });
-+      b.addEventListener("contextmenu", (event) => { event.preventDefault(); event.stopPropagation(); step(-1); });
-+      show();
-+      return b;
++      const select = el("select", "mediaQuality");
++      select.title = "Quality (a change starts it again)";
++      select.setAttribute("aria-label", "Quality");
++      for (const q of Array.isArray(list) ? list : []) {
++        const o = el("option");
++        o.value = q;
++        o.textContent = QUALITY_NAMES[q] || `${q}p`;
++        select.append(o);
++      }
++      if (value) select.value = value;
++      select.addEventListener("click", (event) => event.stopPropagation());
++      select.addEventListener("change", () => send(key, "quality", select.value));
++      return select;
 +    };
 +
      const render = () => {
        const playing = list.filter((p) => p && p.state);
        row.hidden = !playing.length;
-@@ -90,26 +116,27 @@
+@@ -90,26 +109,27 @@
          shownKey = "";
          return;
        }
@@ -102,7 +109,7 @@ index 49e37fd..24c2b71 100644
              try { localStorage.setItem(PICK_KEY, picked); } catch {}
              render();
            });
-@@ -117,13 +144,14 @@
+@@ -117,13 +137,14 @@
          }));
          const parts = [];
          for (const c of s.controls || []) {
@@ -312,22 +319,28 @@ index 1edad59..d4c6def 100644
      }
  }
 diff --git a/src/styles.css b/src/styles.css
-index 0c29e83..4b4d04b 100644
+index 0c29e83..beefb30 100644
 --- a/src/styles.css
 +++ b/src/styles.css
-@@ -9071,3 +9071,12 @@ html.a2-offline .historyUploadBtn {
+@@ -9071,3 +9071,18 @@ html.a2-offline .historyUploadBtn {
  .mediaRow .mediaSlider { display: inline-flex; align-items: center; gap: 3px; color: rgba(255, 255, 255, 0.6); }
  .mediaRow .mediaSlider svg { width: 13px; height: 13px; }
  .mediaRow .mediaSlider input { width: 56px; height: 14px; margin: 0; accent-color: var(--ct-accent); }
-+.mediaRow button.mediaQuality {
-+  width: auto;
-+  min-width: 40px;
-+  padding: 0 5px;
++.mediaRow .mediaQuality {
++  -webkit-appearance: none;
++  appearance: none;
++  height: 18px;
++  padding: 0 16px 0 6px;
 +  border: 1px solid rgba(255, 255, 255, 0.18);
-+  font-size: 10.5px;
-+  font-variant-numeric: tabular-nums;
++  border-radius: 4px;
++  background: rgba(0, 0, 0, 0.35) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 0l4 5 4-5z' fill='%23e0a526'/%3E%3C/svg%3E") no-repeat right 5px center;
 +  color: rgba(255, 255, 255, 0.85);
++  font-size: 11px;
++  flex: none;
++  cursor: pointer;
 +}
++.mediaRow .mediaQuality:hover { border-color: var(--ct-accent); }
++.mediaRow .mediaQuality option { background: #1b1d22; color: #e8e8e8; }
 -- 
 2.43.0
 
