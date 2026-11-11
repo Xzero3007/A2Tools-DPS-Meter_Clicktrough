@@ -1,0 +1,56 @@
+From 16212b3e824256311d4b52aee74b5e65e1d8dbc1 Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Wed, 11 Nov 2026 19:12:11 +0000
+Subject: [PATCH] Plugins: the video volume up to 125, a quarter louder than
+ the stream
+
+The Streams plugin's slider goes to 125: above 100 mpv makes the sound
+louder than the stream, up to 1.25 times (volume-max 108).
+---
+ src-tauri/src/plugins/video.rs | 14 ++++++++------
+ 1 file changed, 8 insertions(+), 6 deletions(-)
+
+diff --git a/src-tauri/src/plugins/video.rs b/src-tauri/src/plugins/video.rs
+index 23a524f..61adced 100644
+--- a/src-tauri/src/plugins/video.rs
++++ b/src-tauri/src/plugins/video.rs
+@@ -97,10 +97,11 @@ pub struct Load {
+ 
+ /// mpv's volume for a plugin's 0 to 100. mpv's volume is cubic (its 70
+ /// plays at 0.7³, a third of the sound, -9 dB), a browser's or FreeTube's
+-/// slider is linear: the plugin's 70 is 0.7 of the sound here too, and its
+-/// 100 the stream as it is (never amplified: no distortion).
++/// slider is linear: the plugin's 70 is 0.7 of the sound here too, its 100
++/// the stream as it is, and up to 125 louder than the stream (1.25 times;
++/// `volume-max` 108, mpv's for that).
+ pub fn mpv_volume(v: f64) -> f64 {
+-    100.0 * (v.clamp(0.0, 100.0) / 100.0).cbrt()
++    100.0 * (v.clamp(0.0, 125.0) / 100.0).cbrt()
+ }
+ 
+ /// A Jellyfin stream's play session or media source id: letters, digits, `-`.
+@@ -1029,7 +1030,7 @@ mod player {
+         ] {
+             opt(k, v);
+         }
+-        opt("volume-max", "100");
++        opt("volume-max", "108");
+         opt("volume", &format!("{volume:.0}"));
+         let code = unsafe { (m.initialize)(h) };
+         if code < 0 {
+@@ -1550,9 +1551,10 @@ mod tests {
+     }
+ 
+     #[test]
+-    fn the_plugins_volume_is_linear_and_never_amplified() {
++    fn the_plugins_volume_is_linear_up_to_one_and_a_quarter() {
+         assert_eq!(mpv_volume(100.0), 100.0);
+-        assert_eq!(mpv_volume(400.0), 100.0);
++        assert!((mpv_volume(400.0) - 107.72).abs() < 0.01);
++        assert!(mpv_volume(125.0) <= 108.0);
+         assert_eq!(mpv_volume(-1.0), 0.0);
+         // mpv cubes it back: the plugin's 70 is 0.7 of the sound.
+         assert!(((mpv_volume(70.0) / 100.0).powi(3) - 0.7).abs() < 1e-9);
+-- 
+2.43.0
+
