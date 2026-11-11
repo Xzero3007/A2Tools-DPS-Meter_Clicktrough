@@ -1,0 +1,538 @@
+From 4868e6ee6a1b11e26aa68b4c993b396d8189b711 Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Wed, 11 Nov 2026 03:14:47 +0000
+Subject: [PATCH] Plugins: the player row on its own header button; video
+ opacity that works on KDE
+
+- The video's opacity is drawn into the picture (a GL pass after mpv), so it
+  works where the window manager ignores a widget's own opacity (KDE).
+- A widget playing a video stays shown when the plugins button or the plugin
+  window hides the plugin's other widgets.
+- The header's TV button shows or hides the player row ("Player row"); the
+  row opens by itself when something starts to play, and lists players that
+  are idle (dimmed). A manifest's ui.overlay can leave out its own header
+  button ("button": false).
+---
+ public/src/js/mediaRow.js         |  74 +++++++++--
+ src-tauri/src/plugins/overlays.rs |  14 ++-
+ src-tauri/src/plugins/video.rs    | 200 ++++++++++++++++++++++++++++--
+ src-tauri/src/plugins/widgets.rs  |   8 +-
+ src/styles.css                    |   4 +
+ 5 files changed, 282 insertions(+), 18 deletions(-)
+
+diff --git a/public/src/js/mediaRow.js b/public/src/js/mediaRow.js
+index 706e26a..20d0d54 100644
+--- a/public/src/js/mediaRow.js
++++ b/public/src/js/mediaRow.js
+@@ -1,10 +1,12 @@
+ // Clicktrough: the player row under the meter's header (plugins/media.rs).
+-// While a plugin plays something (the Streams plugin's video, the Radio
+-// plugin's station) the row shows: on the left a button per playing plugin,
++// The row shows: on the left a button per player (the Streams plugin's
++// Twitch, YouTube and Jellyfin, idle ones dimmed; the Radio while it plays),
+ // on the right the chosen one's title and controls. A control goes to the
+ // plugin (media_control), which plays on as with its own buttons and tells
+-// the meter its new state. Nothing plays: the row goes, and the meter's
+-// rows move back up. Locked, its buttons stay clickable (lockedButtons.js).
++// the meter its new state. A button in the header ("Player row", a TV)
++// shows or hides the row; it opens by itself when something starts to play.
++// Hidden, the meter's rows move back up. Locked, its buttons stay
++// clickable (lockedButtons.js).
+ (() => {
+   const view = window.A2_VIEW || window.__A2_VIEW__ || "main";
+   const invoke = window.__TAURI__?.core?.invoke;
+@@ -12,8 +14,11 @@
+   if (view !== "main" || typeof invoke !== "function") return;
+ 
+   const PICK_KEY = "a2.mediaRow.pick";
++  const ON_KEY = "a2.mediaRow.on";
+   let picked = "";
++  let rowOn = true;
+   try { picked = localStorage.getItem(PICK_KEY) || ""; } catch {}
++  try { rowOn = localStorage.getItem(ON_KEY) !== "0"; } catch {}
+ 
+   const ICONS = {
+     prev: "skip-back", next: "skip-forward", stop: "square", favourite: "star",
+@@ -50,8 +55,38 @@
+     row.append(tabs, now, ctl);
+     header.after(row);
+ 
++    // The header's button: shows or hides the row (gold while shown).
++    const rowBtn = el("div", "headerBtn mediaRowBtn");
++    rowBtn.setAttribute("role", "button");
++    rowBtn.setAttribute("tabindex", "0");
++    rowBtn.setAttribute("aria-label", "Player row");
++    rowBtn.hidden = true;
++    rowBtn.append(icon("tv"));
++    const setOn = (on) => {
++      rowOn = on;
++      try { localStorage.setItem(ON_KEY, on ? "1" : "0"); } catch {}
++      render();
++    };
++    rowBtn.addEventListener("click", (event) => {
++      event.stopPropagation();
++      setOn(!rowOn);
++    });
++    rowBtn.addEventListener("keydown", (event) => {
++      if (event.key !== "Enter" && event.key !== " ") return;
++      event.preventDefault();
++      setOn(!rowOn);
++    });
++    const bar = header.querySelector(".headerBtns");
++    const placeBtn = () => {
++      if (!bar || rowBtn.parentNode === bar) return;
++      const before = bar.querySelector(".overlayBtn, .pluginsBtn");
++      bar.insertBefore(rowBtn, before && before.parentNode === bar ? before : null);
++      try { window.lucide?.createIcons?.({ root: rowBtn }); } catch {}
++    };
++
+     let list = [];
+     let shownKey = "";
++    let wasPlaying = null;
+     const send = (key, action, value) => Promise.resolve(invoke("media_control", { key, action, value: value ?? null })).catch(() => {});
+ 
+     const button = (id, action, iconName, label, pressed) => {
+@@ -105,9 +140,19 @@
+ 
+     const render = () => {
+       const playing = list.filter((p) => p && p.state);
+-      row.hidden = !playing.length;
+-      document.body.classList.toggle("hasMediaRow", !!playing.length);
+-      if (!playing.length) {
++      const btnShown = !!playing.length;
++      if (btnShown) placeBtn();
++      if (rowBtn.hidden === btnShown) {
++        rowBtn.hidden = !btnShown;
++        requestAnimationFrame(() => window._dpsApp?._sendLockBtnRect?.());
++      }
++      rowBtn.classList.toggle("isActive", rowOn);
++      rowBtn.setAttribute("aria-pressed", String(rowOn));
++      rowBtn.title = `Player row: ${rowOn ? "hide" : "show"}`;
++      const shown = rowOn && !!playing.length;
++      row.hidden = !shown;
++      document.body.classList.toggle("hasMediaRow", shown);
++      if (!shown) {
+         shownKey = "";
+         return;
+       }
+@@ -128,6 +173,7 @@
+           b.title = name;
+           b.setAttribute("aria-label", name);
+           b.setAttribute("aria-pressed", String(p.key === picked));
++          if (p.state.playing === false) b.classList.add("isIdle");
+           b.append(icon(p.state.icon || "music"));
+           b.addEventListener("click", (event) => {
+             event.stopPropagation();
+@@ -166,9 +212,23 @@
+       requestAnimationFrame(() => window._dpsApp?._sendLockBtnRect?.());
+     };
+ 
++    // Something starts to play: the row opens, on it.
+     const take = (value) => {
+       if (!Array.isArray(value)) return;
+       list = value;
++      const now = new Set(list.filter((p) => p?.state?.playing !== false && !p?.state?.paused).map((p) => p.key));
++      if (wasPlaying) {
++        const started = [...now].find((k) => !wasPlaying.has(k));
++        if (started) {
++          picked = started;
++          try { localStorage.setItem(PICK_KEY, picked); } catch {}
++          if (!rowOn) {
++            rowOn = true;
++            try { localStorage.setItem(ON_KEY, "1"); } catch {}
++          }
++        }
++      }
++      wasPlaying = now;
+       render();
+     };
+     Promise.resolve(invoke("media_list")).then(take).catch(() => {});
+diff --git a/src-tauri/src/plugins/overlays.rs b/src-tauri/src/plugins/overlays.rs
+index 69c0f75..071441e 100644
+--- a/src-tauri/src/plugins/overlays.rs
++++ b/src-tauri/src/plugins/overlays.rs
+@@ -10,6 +10,10 @@
+ //! hidden or not) to open or close that widget (event `overlay`, `{ show,
+ //! widget }`), as its own switch does. The plugins button leaves these
+ //! overlays alone: it hides the plugin window (and the other widgets) only.
++//!
++//! `"button": false` leaves the header button out (the Streams plugin's
++//! video: the meter's player row has its own button), the overlay keeping
++//! the rest (Settings' places to hide it, the plugins button leaving it).
+ 
+ use serde_json::Value;
+ use tauri::Emitter;
+@@ -21,6 +25,7 @@ struct Overlay {
+     widget: String,
+     title: String,
+     icon: String,
++    button: bool,
+ }
+ 
+ /// An overlay as a manifest's `ui.overlay` declares it, or None.
+@@ -33,7 +38,8 @@ fn read(id: &str, name: &str, ui: Option<&Value>) -> Option<Overlay> {
+     }
+     let title: String = o.get("title").and_then(Value::as_str).unwrap_or(name).chars().take(40).collect();
+     let icon = o.get("icon").and_then(Value::as_str).filter(|s| ok_name(s)).unwrap_or("layers").to_string();
+-    Some(Overlay { id: id.to_string(), name: name.to_string(), widget, title, icon })
++    let button = o.get("button").and_then(Value::as_bool).unwrap_or(true);
++    Some(Overlay { id: id.to_string(), name: name.to_string(), widget, title, icon, button })
+ }
+ 
+ /// The overlays of the plugins loaded and turned on, in the plugins' order.
+@@ -90,6 +96,7 @@ pub fn is_overlay(app: &tauri::AppHandle, label: &str) -> bool {
+ fn listed(app: &tauri::AppHandle) -> Value {
+     let list: Vec<Value> = declared(app)
+         .into_iter()
++        .filter(|o| o.button)
+         .map(|o| {
+             let on = is_on(app, &super::widgets::label(&o.id, &o.widget));
+             serde_json::json!({ "id": o.id, "name": o.name, "title": o.title, "icon": o.icon, "on": on })
+@@ -107,7 +114,7 @@ pub fn plugin_overlays(app: tauri::AppHandle) -> Value {
+ /// A header button pressed: plugin `id`'s overlay shown, or hidden.
+ #[tauri::command]
+ pub fn plugin_overlay_toggle(app: tauri::AppHandle, id: String) -> Value {
+-    let Some(o) = declared(&app).into_iter().find(|o| o.id == id) else { return listed(&app) };
++    let Some(o) = declared(&app).into_iter().find(|o| o.id == id && o.button) else { return listed(&app) };
+     let label = super::widgets::label(&o.id, &o.widget);
+     // Clicktrough: in a zone that hides it (a dungeon), the button shows it
+     // anyway, or hides it again, the plugin keeping it open.
+@@ -147,5 +154,8 @@ mod tests {
+             assert!(o.is_none() || o.unwrap().icon == "layers", "{bad}");
+         }
+         assert!(read("x", "X", None).is_none());
++        assert!(o.button);
++        let quiet = serde_json::json!({ "overlay": { "widget": "video", "button": false } });
++        assert!(!read("streams", "Streams", Some(&quiet)).unwrap().button);
+     }
+ }
+diff --git a/src-tauri/src/plugins/video.rs b/src-tauri/src/plugins/video.rs
+index 46d0d26..4af40cf 100644
+--- a/src-tauri/src/plugins/video.rs
++++ b/src-tauri/src/plugins/video.rs
+@@ -452,6 +452,12 @@ mod net {
+     }
+ }
+ 
++/// Whether widget `label` plays a video (it stays shown when the plugins
++/// button or the plugin window hides the plugin's other widgets).
++pub fn has_player(label: &str) -> bool {
++    player::has_player(label)
++}
++
+ #[cfg(not(target_os = "linux"))]
+ mod player {
+     pub fn play(_: &tauri::AppHandle, _: &str, _: &tauri::WebviewWindow, _: super::Load) -> Result<(), String> {
+@@ -469,6 +475,9 @@ mod player {
+     pub fn opacity(_: &tauri::AppHandle, _: &str, _: f64) -> Result<(), String> {
+         Ok(())
+     }
++    pub fn has_player(_: &str) -> bool {
++        false
++    }
+ }
+ 
+ /// libmpv, loaded at run time, drawing into a GL area under the widget's
+@@ -670,11 +679,20 @@ mod player {
+         area: gtk::GLArea,
+         render: Handle,
+         label: Box<String>,
++        /// How much of the video shows (0.2 to 1), applied when drawn.
++        opacity: f64,
++        /// The alpha pass's GL program and vertex array, in the area's context.
++        fade: Option<(u32, u32)>,
+     }
+     thread_local! {
+         static VIEWS: RefCell<HashMap<String, View>> = RefCell::new(HashMap::new());
+     }
+ 
++    /// Whether widget `label` has a video player (one started there).
++    pub fn has_player(label: &str) -> bool {
++        players().lock().unwrap_or_else(|p| p.into_inner()).contains_key(label)
++    }
++
+     fn handle_of(label: &str) -> Option<Handle> {
+         players().lock().unwrap_or_else(|p| p.into_inner()).get(label).map(|p| p.handle as Handle)
+     }
+@@ -851,8 +869,9 @@ mod player {
+         }
+     }
+ 
+-    fn draw(area: &gtk::GLArea, render: Handle) {
+-        let Ok(m) = mpv() else { return };
++    /// mpv draws the frame; the area's framebuffer, for what follows.
++    fn draw(area: &gtk::GLArea, render: Handle) -> c_int {
++        let Ok(m) = mpv() else { return 0 };
+         type GetIntegerv = unsafe extern "C" fn(u32, *mut c_int);
+         static GET: OnceLock<usize> = OnceLock::new();
+         let get = *GET.get_or_init(|| get_proc_address(std::ptr::null_mut(), c"glGetIntegerv".as_ptr()) as usize);
+@@ -871,6 +890,141 @@ mod player {
+             RenderParam { kind: 0, data: std::ptr::null_mut() },
+         ];
+         unsafe { (m.render_render)(render, params.as_mut_ptr()) };
++        fbo
++    }
++
++    /// A GL function by name: the context's loader, else the GL libraries.
++    fn gl_fn(name: &CStr) -> usize {
++        let p = get_proc_address(std::ptr::null_mut(), name.as_ptr());
++        if !p.is_null() {
++            return p as usize;
++        }
++        static LIBS: OnceLock<Vec<libloading::Library>> = OnceLock::new();
++        let libs = LIBS.get_or_init(|| {
++            ["libOpenGL.so.0", "libGL.so.1", "libGLESv2.so.2"].iter().filter_map(|l| unsafe { libloading::Library::new(l).ok() }).collect()
++        });
++        for l in libs {
++            if let Ok(f) = unsafe { l.get::<*mut c_void>(name.to_bytes_with_nul()) } {
++                if !f.is_null() {
++                    return *f as usize;
++                }
++            }
++        }
++        0
++    }
++
++    /// The video's opacity: mpv draws it opaque, then one pass over the
++    /// area multiplies every pixel (colour and alpha) by the opacity, so
++    /// the area's picture is see-through as GTK puts it on the window. A
++    /// window's or widget's own opacity did nothing on KDE (Wayland).
++    /// The program: a triangle over the whole area, colour nothing; the
++    /// blend (zero, constant alpha) does the multiplying.
++    fn fade_program(area: &gtk::GLArea) -> Option<(u32, u32)> {
++        type CreateShader = unsafe extern "C" fn(u32) -> u32;
++        type ShaderSource = unsafe extern "C" fn(u32, c_int, *const *const c_char, *const c_int);
++        type Uint = unsafe extern "C" fn(u32);
++        type GetShaderiv = unsafe extern "C" fn(u32, u32, *mut c_int);
++        type CreateProgram = unsafe extern "C" fn() -> u32;
++        type Attach = unsafe extern "C" fn(u32, u32);
++        type GenVertexArrays = unsafe extern "C" fn(c_int, *mut u32);
++        const VERTEX: u32 = 0x8B31;
++        const FRAGMENT: u32 = 0x8B30;
++        const COMPILE_STATUS: u32 = 0x8B81;
++        const LINK_STATUS: u32 = 0x8B82;
++        let f = |n: &CStr| gl_fn(n);
++        let (cs, src, comp, gsi, cp, att, link, gpi, gva, del) = (
++            f(c"glCreateShader"), f(c"glShaderSource"), f(c"glCompileShader"), f(c"glGetShaderiv"),
++            f(c"glCreateProgram"), f(c"glAttachShader"), f(c"glLinkProgram"), f(c"glGetProgramiv"),
++            f(c"glGenVertexArrays"), f(c"glDeleteShader"),
++        );
++        if [cs, src, comp, gsi, cp, att, link, gpi, gva, del].contains(&0) {
++            return None;
++        }
++        let es = area.context().is_some_and(|c| c.uses_es());
++        let head = if es { "#version 300 es\nprecision mediump float;\n" } else { "#version 150\n" };
++        let vs = format!("{head}void main() {{ vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2)); gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0); }}\0");
++        let fs = format!("{head}out vec4 colour; void main() {{ colour = vec4(0.0); }}\0");
++        unsafe {
++            let create: CreateShader = std::mem::transmute(cs);
++            let source: ShaderSource = std::mem::transmute(src);
++            let compile: Uint = std::mem::transmute(comp);
++            let shader_iv: GetShaderiv = std::mem::transmute(gsi);
++            let program_iv: GetShaderiv = std::mem::transmute(gpi);
++            let attach: Attach = std::mem::transmute(att);
++            let link_program: Uint = std::mem::transmute(link);
++            let delete: Uint = std::mem::transmute(del);
++            let build = |kind: u32, text: &str| -> Option<u32> {
++                let sh = create(kind);
++                let ptr = text.as_ptr() as *const c_char;
++                source(sh, 1, &ptr, std::ptr::null());
++                compile(sh);
++                let mut ok: c_int = 0;
++                shader_iv(sh, COMPILE_STATUS, &mut ok);
++                (ok != 0).then_some(sh)
++            };
++            let v = build(VERTEX, &vs)?;
++            let fr = build(FRAGMENT, &fs)?;
++            let program = (std::mem::transmute::<usize, CreateProgram>(cp))();
++            attach(program, v);
++            attach(program, fr);
++            link_program(program);
++            delete(v);
++            delete(fr);
++            let mut ok: c_int = 0;
++            program_iv(program, LINK_STATUS, &mut ok);
++            if ok == 0 {
++                return None;
++            }
++            let mut vao = 0u32;
++            (std::mem::transmute::<usize, GenVertexArrays>(gva))(1, &mut vao);
++            Some((program, vao))
++        }
++    }
++
++    fn fade_draw(area: &gtk::GLArea, fbo: c_int, program: u32, vao: u32, opacity: f64) {
++        type Uint = unsafe extern "C" fn(u32);
++        type BlendFunc = unsafe extern "C" fn(u32, u32);
++        type BlendColor = unsafe extern "C" fn(f32, f32, f32, f32);
++        type Viewport = unsafe extern "C" fn(c_int, c_int, c_int, c_int);
++        type DrawArrays = unsafe extern "C" fn(u32, c_int, c_int);
++        const BLEND: u32 = 0x0BE2;
++        const ZERO: u32 = 0;
++        const CONSTANT_ALPHA: u32 = 0x8003;
++        const TRIANGLES: u32 = 0x0004;
++        type BindFramebuffer = unsafe extern "C" fn(u32, u32);
++        const FRAMEBUFFER: u32 = 0x8D40;
++        static FNS: OnceLock<[usize; 9]> = OnceLock::new();
++        let fns = FNS.get_or_init(|| [
++            gl_fn(c"glUseProgram"), gl_fn(c"glBindVertexArray"), gl_fn(c"glEnable"), gl_fn(c"glDisable"),
++            gl_fn(c"glBlendFunc"), gl_fn(c"glBlendColor"), gl_fn(c"glViewport"), gl_fn(c"glDrawArrays"),
++            gl_fn(c"glBindFramebuffer"),
++        ]);
++        if fns.contains(&0) {
++            return;
++        }
++        let scale = area.scale_factor();
++        unsafe {
++            let use_program: Uint = std::mem::transmute(fns[0]);
++            let bind_vao: Uint = std::mem::transmute(fns[1]);
++            let enable: Uint = std::mem::transmute(fns[2]);
++            let disable: Uint = std::mem::transmute(fns[3]);
++            let blend_func: BlendFunc = std::mem::transmute(fns[4]);
++            let blend_color: BlendColor = std::mem::transmute(fns[5]);
++            let viewport: Viewport = std::mem::transmute(fns[6]);
++            let draw_arrays: DrawArrays = std::mem::transmute(fns[7]);
++            // mpv leaves its own framebuffer bound, not the area's.
++            (std::mem::transmute::<usize, BindFramebuffer>(fns[8]))(FRAMEBUFFER, fbo as u32);
++            viewport(0, 0, area.allocated_width() * scale, area.allocated_height() * scale);
++            use_program(program);
++            bind_vao(vao);
++            enable(BLEND);
++            blend_func(ZERO, CONSTANT_ALPHA);
++            blend_color(0.0, 0.0, 0.0, opacity.clamp(0.0, 1.0) as f32);
++            draw_arrays(TRIANGLES, 0, 3);
++            disable(BLEND);
++            bind_vao(0);
++            use_program(0);
++        }
+     }
+ 
+     /// The widget's window, its page put over a GL area: once per widget.
+@@ -920,7 +1074,26 @@ mod player {
+                 }
+             }
+             if !render.is_null() {
+-                draw(area, render);
++                let fbo = draw(area, render);
++                let opacity = VIEWS.with(|v| v.borrow().get(&key).map(|v| v.opacity)).unwrap_or(1.0);
++                if opacity < 0.999 {
++                    let fade = VIEWS.with(|v| v.borrow().get(&key).and_then(|v| v.fade));
++                    let fade = fade.or_else(|| {
++                        let made = fade_program(area);
++                        if made.is_none() {
++                            tracing::warn!("Video: no opacity (its GL program didn't build)");
++                        }
++                        VIEWS.with(|v| {
++                            if let Some(view) = v.borrow_mut().get_mut(&key) {
++                                view.fade = made.or(Some((0, 0)));
++                            }
++                        });
++                        made
++                    });
++                    if let Some((program, vao)) = fade.filter(|f| f.0 != 0) {
++                        fade_draw(area, fbo, program, vao, opacity);
++                    }
++                }
+             }
+             gtk::glib::Propagation::Stop
+         });
+@@ -930,6 +1103,8 @@ mod player {
+             area: area.clone(),
+             render: std::ptr::null_mut(),
+             label: Box::new(label.to_string()),
++            opacity: opacities().lock().unwrap_or_else(|p| p.into_inner()).get(label).copied().unwrap_or(1.0),
++            fade: None,
+         }));
+         Ok(area)
+     }
+@@ -937,6 +1112,12 @@ mod player {
+     /// The render context goes before its mpv: then mpv is told to quit,
+     /// and its event thread ends it.
+     fn free_render(area: &gtk::GLArea, label: &str) {
++        // The alpha pass's objects go with the context.
++        VIEWS.with(|v| {
++            if let Some(view) = v.borrow_mut().get_mut(label) {
++                view.fade = None;
++            }
++        });
+         let render = VIEWS.with(|v| v.borrow_mut().get_mut(label).map(|v| std::mem::replace(&mut v.render, std::ptr::null_mut())));
+         if let (Some(r), Ok(m)) = (render, mpv()) {
+             if !r.is_null() {
+@@ -966,8 +1147,12 @@ mod player {
+                         h
+                     }
+                 };
+-                if let Some(o) = opacities().lock().unwrap_or_else(|p| p.into_inner()).get(&label) {
+-                    area.set_opacity(*o);
++                if let Some(o) = opacities().lock().unwrap_or_else(|p| p.into_inner()).get(&label).copied() {
++                    VIEWS.with(|v| {
++                        if let Some(view) = v.borrow_mut().get_mut(&label) {
++                            view.opacity = o;
++                        }
++                    });
+                 }
+                 area.set_visible(true);
+                 area.queue_render();
+@@ -1007,8 +1192,9 @@ mod player {
+         let label = label.to_string();
+         app.run_on_main_thread(move || {
+             VIEWS.with(|v| {
+-                if let Some(view) = v.borrow().get(&label) {
+-                    view.area.set_opacity(value);
++                if let Some(view) = v.borrow_mut().get_mut(&label) {
++                    view.opacity = value;
++                    view.area.queue_render();
+                 }
+             });
+         }).map_err(|e| e.to_string())
+diff --git a/src-tauri/src/plugins/widgets.rs b/src-tauri/src/plugins/widgets.rs
+index 2170bb8..488d55a 100644
+--- a/src-tauri/src/plugins/widgets.rs
++++ b/src-tauri/src/plugins/widgets.rs
+@@ -109,7 +109,7 @@ fn held_by_button_set() -> &'static Mutex<std::collections::HashSet<String>> {
+ /// plugins are off, and it is no plugin overlay with a header button of its
+ /// own (overlays.rs), which only that button shows or hides.
+ pub fn plugins_button_holds(app: &tauri::AppHandle, label: &str) -> bool {
+-    plugins_hidden(app) && !super::overlays::is_overlay(app, label)
++    plugins_hidden(app) && !super::overlays::is_overlay(app, label) && !super::video::has_player(label)
+ }
+ 
+ /// A header button shows overlay `label`: held off by the plugins button
+@@ -187,7 +187,11 @@ pub fn set_plugins_hidden(app: &tauri::AppHandle, off: bool) {
+     if off {
+         for (label, window) in app.webview_windows() {
+             // Clicktrough: not the overlays with a header button of their own.
+-            if parse_label(&label).is_some() && !is_closed(&label) && !super::overlays::is_overlay(app, &label) {
++            // Nor a widget playing a video (the Streams plugin's Twitch, YouTube
++            // and Jellyfin): it plays on, shown, with the plugin window hidden.
++            if parse_label(&label).is_some() && !is_closed(&label) && !super::overlays::is_overlay(app, &label)
++                && !super::video::has_player(&label)
++            {
+                 hold_by_button(&window);
+             }
+         }
+diff --git a/src/styles.css b/src/styles.css
+index 7acaae1..96abe56 100644
+--- a/src/styles.css
++++ b/src/styles.css
+@@ -571,6 +571,9 @@ body.linuxOverlay .meter {
+ /* Clicktrough: a plugin overlay's own button (overlayButtons.js): gold while it shows. */
+ .header .headerBtns .overlayBtn.isActive { color: var(--ct-accent); }
+ .header .headerBtns .overlayBtn.isActive:hover { color: var(--ct-accent-light); }
++.header .headerBtns .mediaRowBtn[hidden] { display: none; }
++.header .headerBtns .mediaRowBtn.isActive { color: var(--ct-accent); }
++.header .headerBtns .mediaRowBtn.isActive:hover { color: var(--ct-accent-light); }
+ /* Clicktrough: the browser button (browserButton.js), gold while Brave shows. */
+ .header .headerBtns .browserBtn.isActive { color: var(--ct-accent); }
+ .header .headerBtns .browserBtn.isActive:hover { color: var(--ct-accent-light); }
+@@ -9064,6 +9067,7 @@ html.a2-offline .historyUploadBtn {
+ .mediaRow button svg { width: 14px; height: 14px; }
+ .mediaRow button:hover { color: #fff; background: rgba(255, 255, 255, 0.08); }
+ .mediaRow .mediaTabs { display: flex; gap: 4px; flex: none; }
++.mediaRow .mediaTab.isIdle { color: rgba(255, 255, 255, 0.35); }
+ .mediaRow .mediaTab[aria-pressed="true"] { color: var(--ct-accent); box-shadow: inset 0 -2px 0 var(--ct-accent); border-radius: 0; }
+ .mediaRow .mediaBtn[aria-pressed="true"].mediaBtn-mute,
+ .mediaRow .mediaBtn[aria-pressed="true"].mediaBtn-favourite { color: var(--ct-accent); }
+-- 
+2.43.0
+
