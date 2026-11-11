@@ -1,4 +1,4 @@
-From e120b600563b00f9412b7f62a0d52f0267bc04fa Mon Sep 17 00:00:00 2001
+From 18ed4c44c0bc034ac68a79a2df770f41f57b2f30 Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Wed, 11 Nov 2026 00:33:13 +0000
 Subject: [PATCH] Meter: Brave Origin above the game, shown or hidden from the
@@ -11,27 +11,27 @@ a small KWin script minimises it, brings it back and sets its opacity
 (Settings, Browser). It closes with the meter. The meter sends nothing:
 Brave goes online by itself.
 ---
- index.html                                    |  33 +++
+ index.html                                    |  33 ++
  packaging/arch/PKGBUILD                       |   3 +-
- public/src/js/browserButton.js                |  87 ++++++
- src-tauri/src/app.rs                          |  12 +-
- src-tauri/src/browser.rs                      | 125 +++++++++
+ public/src/js/browserButton.js                |  87 +++++
+ src-tauri/src/app.rs                          |  15 +-
+ src-tauri/src/browser.rs                      | 125 +++++++
  src-tauri/src/lib.rs                          |   3 +
  src-tauri/src/platform/kwin_rules.rs          |  45 +++
- src-tauri/src/platform/linux/browser.rs       | 256 ++++++++++++++++++
+ src-tauri/src/platform/linux/browser.rs       | 332 ++++++++++++++++++
  src-tauri/src/platform/linux/focus.rs         |   7 +
  src-tauri/src/platform/linux/mod.rs           |   1 +
  src-tauri/src/platform/linux/window_rules.rs  |  12 +-
  src-tauri/src/platform/mod.rs                 |   2 +-
- src-tauri/src/platform/unsupported/browser.rs |  33 +++
+ src-tauri/src/platform/unsupported/browser.rs |  33 ++
  src-tauri/src/platform/unsupported/mod.rs     |   1 +
  .../src/platform/unsupported/window_rules.rs  |   5 +
  src-tauri/src/platform/win32/mod.rs           |   2 +
  src/data/i18n/ui/de.json                      |   9 +-
  src/data/i18n/ui/en.json                      |   9 +-
  src/styles.css                                |   4 +
- tests/browser-button.test.mjs                 | 116 ++++++++
- 20 files changed, 758 insertions(+), 7 deletions(-)
+ tests/browser-button.test.mjs                 | 116 ++++++
+ 20 files changed, 837 insertions(+), 7 deletions(-)
  create mode 100644 public/src/js/browserButton.js
  create mode 100644 src-tauri/src/browser.rs
  create mode 100644 src-tauri/src/platform/linux/browser.rs
@@ -204,10 +204,20 @@ index 0000000..fec3dc8
 +  else start();
 +})();
 diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
-index ce31537..8faa5aa 100644
+index ce31537..dd36ecc 100644
 --- a/src-tauri/src/app.rs
 +++ b/src-tauri/src/app.rs
-@@ -3739,6 +3739,10 @@ pub fn run() {
+@@ -1626,6 +1626,9 @@ fn set_manual_device(state: tauri::State<'_, AppState>, device: String) {
+ pub(crate) fn quit_app(app: tauri::AppHandle) {
+     save_fights_before_quit(&app);
+     flush_settings_before_exit(&app);
++    // Clicktrough: the browser the meter started closes with it (on Exit
++    // too, for every other way out).
++    crate::browser::close();
+     app.exit(0);
+ }
+ 
+@@ -3739,6 +3742,10 @@ pub fn run() {
                      save_queued_fights(app);
                      flush_settings_before_exit(app);
                  }
@@ -218,7 +228,7 @@ index ce31537..8faa5aa 100644
              })
              .build())
          .plugin(tauri_plugin_process::init())
-@@ -3977,11 +3981,12 @@ pub fn run() {
+@@ -3977,11 +3984,12 @@ pub fn run() {
                      // overlay takes no focus, so a click on it leaves the game
                      // focused (#71); nor do plugins' icons. Plugin windows
                      // stay above the game, so their alerts are seen.
@@ -232,7 +242,7 @@ index ce31537..8faa5aa 100644
                      ];
                      for (name, ensure) in rules {
                          if let Err(e) = ensure(false) {
-@@ -4182,6 +4187,8 @@ pub fn run() {
+@@ -4182,6 +4190,8 @@ pub fn run() {
              // Clicktrough: start and close with AION2.
              let handle = app.handle().clone();
              std::thread::spawn(move || follow_the_game(handle));
@@ -241,7 +251,7 @@ index ce31537..8faa5aa 100644
  
              // Housekeeping every 500 ms: ping, auto-hide, window positions.
              let handle = app.handle().clone();
-@@ -4591,6 +4598,9 @@ pub fn run() {
+@@ -4591,6 +4601,9 @@ pub fn run() {
              crate::plugins::media::media_list,
              crate::plugins::media::media_control,
              crate::plugins::overlays::plugin_overlay_toggle,
@@ -459,10 +469,10 @@ index 3820580..6a51966 100644
  }
 diff --git a/src-tauri/src/platform/linux/browser.rs b/src-tauri/src/platform/linux/browser.rs
 new file mode 100644
-index 0000000..f16cb35
+index 0000000..0b9bf3c
 --- /dev/null
 +++ b/src-tauri/src/platform/linux/browser.rs
-@@ -0,0 +1,256 @@
+@@ -0,0 +1,332 @@
 +//! Clicktrough: Brave Origin as an overlay. A browser's window can't be put
 +//! inside another program's on Wayland, so the meter starts the player's own
 +//! Brave Origin, with a profile of its own, and has KWin keep that window
@@ -557,7 +567,9 @@ index 0000000..f16cb35
 +pub fn is_browser_main(cmdline: &[u8], profile: &Path) -> bool {
 +    let want = format!("--user-data-dir={}", profile.display());
 +    let mut has_profile = false;
-+    for arg in cmdline.split(|b| *b == 0) {
++    // Chromium may write its command line back as one line, with spaces
++    // between the arguments: both are read.
++    for arg in cmdline.split(|b| *b == 0 || b.is_ascii_whitespace()) {
 +        if arg == want.as_bytes() {
 +            has_profile = true;
 +        }
@@ -575,6 +587,61 @@ index 0000000..f16cb35
 +        .filter_map(|e| e.file_name().to_str()?.parse::<i32>().ok())
 +        .filter(|pid| std::fs::read(format!("/proc/{pid}/cmdline")).is_ok_and(|c| is_browser_main(&c, profile)))
 +        .collect()
++}
++
++/// The browser's process the meter started last (the wrapper execs it).
++static SPAWNED: Mutex<Option<i32>> = Mutex::new(None);
++
++/// Start the browser from a thread that lives as long as the meter, with the
++/// kernel told to end it when the meter ends (`PR_SET_PDEATHSIG`, which
++/// follows the thread that started it): it closes with the meter however
++/// the meter ends, a crash included.
++fn launch(program: PathBuf, profile: PathBuf) -> Result<i32, String> {
++    use std::sync::mpsc;
++    type Job = (PathBuf, PathBuf, mpsc::Sender<Result<i32, String>>);
++    static LAUNCHER: std::sync::OnceLock<Mutex<mpsc::Sender<Job>>> = std::sync::OnceLock::new();
++    let sender = LAUNCHER.get_or_init(|| {
++        let (tx, rx) = mpsc::channel::<Job>();
++        std::thread::Builder::new()
++            .name("browser-launcher".into())
++            .spawn(move || {
++                for (program, profile, answer) in rx {
++                    let _ = answer.send(spawn_tied(&program, &profile));
++                }
++            })
++            .ok();
++        Mutex::new(tx)
++    });
++    let (tx, rx) = mpsc::channel();
++    sender.lock().unwrap_or_else(|p| p.into_inner()).send((program, profile, tx)).map_err(|e| e.to_string())?;
++    rx.recv_timeout(std::time::Duration::from_secs(10)).map_err(|e| e.to_string())?
++}
++
++fn spawn_tied(program: &Path, profile: &Path) -> Result<i32, String> {
++    use std::os::unix::process::CommandExt;
++    let mut command = Command::new(program);
++    command.args(arguments(profile)).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
++    // SAFETY: only prctl(2), async-signal-safe, between fork and exec.
++    unsafe {
++        command.pre_exec(|| {
++            libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM);
++            Ok(())
++        });
++    }
++    let child = command.spawn().map_err(|e| format!("{}: {e}", program.display()))?;
++    let pid = child.id() as i32;
++    // Reaped by its own thread, so it leaves no zombie behind.
++    std::thread::spawn(move || {
++        let mut child = child;
++        let _ = child.wait();
++    });
++    Ok(pid)
++}
++
++fn alive(pid: i32) -> bool {
++    // A zombie counts as gone.
++    std::fs::read_to_string(format!("/proc/{pid}/stat"))
++        .is_ok_and(|s| s.rsplit_once(')').is_some_and(|(_, rest)| !rest.trim_start().starts_with('Z')))
 +}
 +
 +/// Shown or hidden, as the meter last asked.
@@ -597,14 +664,9 @@ index 0000000..f16cb35
 +    if show && running(&profile).is_empty() {
 +        let program = program().ok_or("Brave Origin is not installed")?;
 +        std::fs::create_dir_all(&profile).map_err(|e| format!("{}: {e}", profile.display()))?;
-+        Command::new(&program)
-+            .args(arguments(&profile))
-+            .stdin(Stdio::null())
-+            .stdout(Stdio::null())
-+            .stderr(Stdio::null())
-+            .spawn()
-+            .map_err(|e| format!("{}: {e}", program.display()))?;
-+        tracing::info!("Browser: started {}", program.display());
++        let pid = launch(program.clone(), profile.clone())?;
++        *SPAWNED.lock().unwrap_or_else(|p| p.into_inner()) = Some(pid);
++        tracing::info!("Browser: started {} (process {pid})", program.display());
 +    }
 +    *VISIBLE.lock().unwrap_or_else(|p| p.into_inner()) = show;
 +    apply(show, opacity);
@@ -661,15 +723,34 @@ index 0000000..f16cb35
 +/// SIGTERM as a normal quit and keeps its tabs for the next start.
 +pub fn close() {
 +    let Some(profile) = profile_dir() else { return };
-+    let pids = running(&profile);
-+    for pid in &pids {
-+        // SAFETY: kill(2) with a process id read from /proc just now.
-+        unsafe {
-+            libc::kill(*pid, libc::SIGTERM);
-+        }
++    let mut pids = running(&profile);
++    if let Some(pid) = SPAWNED.lock().unwrap_or_else(|p| p.into_inner()).take()
++        && alive(pid)
++        && !pids.contains(&pid)
++    {
++        pids.push(pid);
 +    }
-+    if !pids.is_empty() {
-+        tracing::info!("Browser: closed with the meter");
++    if pids.is_empty() {
++        return;
++    }
++    tracing::info!("Browser: closing with the meter (processes {pids:?})");
++    let signal = |sig| {
++        for pid in &pids {
++            // SAFETY: kill(2) with a process id read from /proc just now.
++            unsafe {
++                libc::kill(*pid, sig);
++            }
++        }
++    };
++    signal(libc::SIGTERM);
++    // Up to 3 s to save its tabs and go; then it is ended.
++    let until = std::time::Instant::now() + std::time::Duration::from_secs(3);
++    while pids.iter().any(|p| alive(*p)) && std::time::Instant::now() < until {
++        std::thread::sleep(std::time::Duration::from_millis(100));
++    }
++    if pids.iter().any(|p| alive(*p)) {
++        tracing::info!("Browser: still open after 3 s, ended");
++        signal(libc::SIGKILL);
 +    }
 +    if super::process::is_kde()
 +        && let Some(Some(connection)) = CONNECTION.get()
@@ -694,6 +775,11 @@ index 0000000..f16cb35
 +        assert!(!is_browser_main(own, profile));
 +        let other = b"/opt/brave-origin/brave\0--user-data-dir=/home/p/.local/share/a2tools-dps-meter/brave2\0";
 +        assert!(!is_browser_main(other, profile));
++        // Written back as one line.
++        let one_line = b"/opt/brave-origin/brave --user-data-dir=/home/p/.local/share/a2tools-dps-meter/brave --class=a2tools-browser\0";
++        assert!(is_browser_main(one_line, profile));
++        let one_line_helper = b"/opt/brave-origin/brave --type=gpu-process --user-data-dir=/home/p/.local/share/a2tools-dps-meter/brave\0";
++        assert!(!is_browser_main(one_line_helper, profile));
 +    }
 +
 +    #[test]
