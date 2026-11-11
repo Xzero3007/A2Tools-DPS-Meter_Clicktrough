@@ -1,0 +1,214 @@
+From 0176c45d289c720557a66d74a7fd16c62ee9a544 Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Tue, 10 Nov 2026 23:55:50 +0000
+Subject: [PATCH] Plugins: only overlays that ask hide; a shop counts standing,
+ 3 min at most
+
+Patch 0046 hid every plugin overlay outside the open world and at shops,
+the Closet's (made for the shop), the Radio's and the video overlay too.
+Now an overlay hides only where its manifest asks (ui.overlay.hideIn:
+"dungeon", "games", "arena", "shop"; the Map's and the Limits'), unless
+the player set it otherwise in Settings.
+
+A merchant's list counts as a shop opened only with the player standing
+(no movement step for 1.5 s), a list heard again doesn't start the count
+of steps anew, and the shop ends after 3 minutes at the latest: the
+overlays didn't come back after a shop.
+---
+ src-tauri/src/plugins/overlays.rs | 14 +++++
+ src-tauri/src/plugins/zones.rs    | 99 ++++++++++++++++++++++++-------
+ 2 files changed, 91 insertions(+), 22 deletions(-)
+
+diff --git a/src-tauri/src/plugins/overlays.rs b/src-tauri/src/plugins/overlays.rs
+index ad0a2bb..69c0f75 100644
+--- a/src-tauri/src/plugins/overlays.rs
++++ b/src-tauri/src/plugins/overlays.rs
+@@ -51,6 +51,20 @@ fn declared(app: &tauri::AppHandle) -> Vec<Overlay> {
+     out
+ }
+ 
++/// Whether plugin `id`'s overlay asks to hide where `place` ("dungeon",
++/// "games", "arena", "shop"): its manifest's `ui.overlay.hideIn`.
++pub fn asks_to_hide(app: &tauri::AppHandle, id: &str, place: &str) -> bool {
++    let Ok(host) = super::host(app) else { return false };
++    host.with(id, |l| {
++        l.manifest.ui.as_ref()
++            .and_then(|u| u.get("overlay"))
++            .and_then(|o| o.get("hideIn"))
++            .and_then(Value::as_array)
++            .is_some_and(|a| a.iter().any(|v| v.as_str() == Some(place)))
++    })
++    .unwrap_or(false)
++}
++
+ /// The plugins with an overlay, in the plugins' order (Settings).
+ pub fn ids(app: &tauri::AppHandle) -> Vec<String> {
+     declared(app).into_iter().map(|o| o.id).collect()
+diff --git a/src-tauri/src/plugins/zones.rs b/src-tauri/src/plugins/zones.rs
+index 9cec35b..f38494f 100644
+--- a/src-tauri/src/plugins/zones.rs
++++ b/src-tauri/src/plugins/zones.rs
+@@ -13,8 +13,10 @@
+ //! closes, so the overlays come back as the player walks, rides or flies
+ //! off (the client's movement, `client_sent`), or at the next zone.
+ //!
+-//! Per plugin, in Settings → Plugins (an overlay's plugin only); every
+-//! overlay hides in all four until the player turns one off. There, the
++//! A shop counts only with the player standing, and ends after 3 minutes at
++//! the latest. Per plugin, in Settings → Plugins (an overlay's plugin only);
++//! an overlay hides where its manifest asks (`ui.overlay.hideIn`: the Map's
++//! and the Limits' in all four), until the player sets it otherwise. There, the
+ //! overlay's header button shows it anyway, until the next zone or shop.
+ 
+ use std::collections::HashSet;
+@@ -114,17 +116,32 @@ fn lock<T>(m: &'static Mutex<T>) -> std::sync::MutexGuard<'static, T> {
+     m.lock().unwrap_or_else(|p| p.into_inner())
+ }
+ 
+-/// The plugins whose overlay stays in zones of `kind`.
+-fn shown_in(app: &tauri::AppHandle, kind: Kind) -> Vec<String> {
++/// The plugins listed under a setting.
++fn listed(app: &tauri::AppHandle, key: &str) -> Vec<String> {
+     app.try_state::<AppState>()
+-        .and_then(|s| s.settings.get(kind.key()))
++        .and_then(|s| s.settings.get(key))
+         .and_then(|s| serde_json::from_str(&s).ok())
+         .unwrap_or_default()
+ }
+ 
+-/// Whether plugin `id`'s overlay hides in zones of `kind`.
++/// The setting: the plugins whose overlay the player set to hide in zones
++/// of `kind` (the others as their manifest says).
++fn hidden_key(kind: Kind) -> String {
++    format!("{}.hidden", kind.key())
++}
++
++/// Whether plugin `id`'s overlay hides in zones of `kind`: as the player
++/// set it in Settings, else as its manifest asks (`ui.overlay.hideIn`, the
++/// Map's and the Limits'). An overlay that doesn't ask stays everywhere:
++/// the Closet's is for the shop, a radio or video player for anywhere.
+ pub fn hides_in(app: &tauri::AppHandle, id: &str, kind: Kind) -> bool {
+-    !shown_in(app, kind).iter().any(|x| x == id)
++    if listed(app, &hidden_key(kind)).iter().any(|x| x == id) {
++        return true;
++    }
++    if listed(app, kind.key()).iter().any(|x| x == id) {
++        return false;
++    }
++    super::overlays::asks_to_hide(app, id, kind.name())
+ }
+ 
+ /// For Settings: per kind, the plugins whose overlay hides there.
+@@ -140,12 +157,14 @@ pub fn view(app: &tauri::AppHandle, ids: &[String]) -> serde_json::Value {
+ /// Settings: plugin `id`'s overlay hides in zones of `kind`, or not.
+ pub fn set_hides_in(app: &tauri::AppHandle, id: &str, kind: Kind, hide: bool) {
+     let Some(state) = app.try_state::<AppState>() else { return };
+-    let mut ids = shown_in(app, kind);
+-    ids.retain(|x| x != id);
+-    if !hide {
+-        ids.push(id.to_string());
++    for (key, on) in [(kind.key().to_string(), !hide), (hidden_key(kind), hide)] {
++        let mut ids = listed(app, &key);
++        ids.retain(|x| x != id);
++        if on {
++            ids.push(id.to_string());
++        }
++        state.settings.set(&key, &serde_json::to_string(&ids).unwrap_or_default());
+     }
+-    state.settings.set(kind.key(), &serde_json::to_string(&ids).unwrap_or_default());
+     sync(app);
+ }
+ 
+@@ -199,6 +218,21 @@ fn sync_soon(app: &tauri::AppHandle) {
+ static AT_SHOP: AtomicBool = AtomicBool::new(false);
+ /// The app, for the client's movement (`client_sent`), which comes without it.
+ static APP: OnceLock<tauri::AppHandle> = OnceLock::new();
++/// The client's last movement step.
++fn last_step() -> &'static Mutex<Option<Instant>> {
++    static LAST: OnceLock<Mutex<Option<Instant>>> = OnceLock::new();
++    LAST.get_or_init(Mutex::default)
++}
++/// A merchant's list counts as a shop opened only with the player standing:
++/// none of his steps this shortly before.
++const STANDING_FOR: Duration = Duration::from_millis(1500);
++/// And the shop ends after this long at the latest (a step missed, the
++/// shop left without a word from the game), as the Closet's pop-up does.
++const SHOP_AT_MOST: Duration = Duration::from_secs(180);
++/// Which shop visit it is: a later one keeps an earlier one's timer from
++/// ending it.
++static SHOP_VISIT: AtomicU32 = AtomicU32::new(0);
++
+ /// The client's movement steps heard since the shop opened.
+ fn steps() -> &'static Mutex<std::collections::VecDeque<Instant>> {
+     static STEPS: OnceLock<Mutex<std::collections::VecDeque<Instant>>> = OnceLock::new();
+@@ -213,22 +247,48 @@ const MOVED_WITHIN: Duration = Duration::from_millis(2000);
+ /// A merchant's list (`91 56`): a tab of a shop opened.
+ pub fn saw_shop(app: &tauri::AppHandle) {
+     let _ = APP.set(app.clone());
+-    lock(steps()).clear();
+-    if AT_SHOP.swap(true, Ordering::Relaxed) {
++    let walking = lock(last_step()).is_some_and(|t| t.elapsed() < STANDING_FOR);
++    if walking || AT_SHOP.load(Ordering::Relaxed) {
+         return;
+     }
++    lock(steps()).clear();
++    AT_SHOP.store(true, Ordering::Relaxed);
++    let visit = SHOP_VISIT.fetch_add(1, Ordering::Relaxed) + 1;
+     tracing::debug!("Plugins: a shop opened: the overlays as it says");
+     lock(shown_anyway()).clear();
+     sync_soon(app);
++    std::thread::spawn(move || {
++        std::thread::sleep(SHOP_AT_MOST);
++        if SHOP_VISIT.load(Ordering::Relaxed) == visit {
++            leave_shop("the shop's time is up");
++        }
++    });
++}
++
++/// The shop over: the overlays it hid come back.
++fn leave_shop(why: &str) {
++    if !AT_SHOP.swap(false, Ordering::Relaxed) {
++        return;
++    }
++    tracing::debug!("Plugins: {why}: the overlays back");
++    lock(steps()).clear();
++    lock(shown_anyway()).clear();
++    if let Some(app) = APP.get() {
++        sync_soon(app);
++    }
+ }
+ 
+ /// A segment the client sent, by its length: the player walking, riding or
+ /// flying off ends the shop.
+ pub fn client_sent(len: usize) {
+-    if !AT_SHOP.load(Ordering::Relaxed) || !(28..=96).contains(&len) {
++    if !(28..=96).contains(&len) {
+         return;
+     }
+     let now = Instant::now();
++    *lock(last_step()) = Some(now);
++    if !AT_SHOP.load(Ordering::Relaxed) {
++        return;
++    }
+     let moved = {
+         let mut q = lock(steps());
+         q.push_back(now);
+@@ -237,13 +297,8 @@ pub fn client_sent(len: usize) {
+         }
+         q.len() >= MOVED_STEPS
+     };
+-    if moved && AT_SHOP.swap(false, Ordering::Relaxed) {
+-        tracing::debug!("Plugins: moving on from the shop: the overlays back");
+-        lock(steps()).clear();
+-        lock(shown_anyway()).clear();
+-        if let Some(app) = APP.get() {
+-            sync_soon(app);
+-        }
++    if moved {
++        leave_shop("moving on from the shop");
+     }
+ }
+ 
+-- 
+2.43.0
+
