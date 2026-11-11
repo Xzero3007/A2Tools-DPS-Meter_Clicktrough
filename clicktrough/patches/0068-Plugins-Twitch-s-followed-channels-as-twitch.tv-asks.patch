@@ -1,0 +1,207 @@
+From c434796459050c6ad2887b120154988a86b59bf4 Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Wed, 11 Nov 2026 22:02:43 +0000
+Subject: [PATCH] Plugins: Twitch's followed channels as twitch.tv asks for
+ them, and why when none come
+
+The followed channels came back empty without a word: Twitch answers
+the raw follows field with "service error". Now the live followed
+channels (followedLiveUsers with sort RELEVANCE, the only sort it
+answers), then all followed by id (twitch.tv's own ChannelFollows query
+for its following page) and those channels by id, merged; when all are
+empty, Twitch's refusal is passed on.
+---
+ src-tauri/src/plugins/video.rs | 147 +++++++++++++++++++++++++++++++--
+ 1 file changed, 142 insertions(+), 5 deletions(-)
+
+diff --git a/src-tauri/src/plugins/video.rs b/src-tauri/src/plugins/video.rs
+index 61adced..def0847 100644
+--- a/src-tauri/src/plugins/video.rs
++++ b/src-tauri/src/plugins/video.rs
+@@ -267,10 +267,32 @@ pub fn twitch_query(kind: &str, arg: &Value) -> Result<Value, String> {
+                 "variables": { "l": logins },
+             }))
+         }
+-        // The signed-in player's followed channels (sent with the token).
+-        "followed" => Ok(json!({
+-            "query": format!("query {{ currentUser {{ follows(first: 100) {{ edges {{ node {{ {USER} }} }} }} }} }}"),
++        // The signed-in player's followed channels (sent with the token):
++        // those live now, and all of them (Twitch's web page asks both).
++        // Only `sort: RELEVANCE` answers; without it, Twitch says "service error".
++        "followedLive" => Ok(json!({
++            "query": format!("query {{ currentUser {{ followedLiveUsers(first: 100, sort: RELEVANCE) {{ edges {{ node {{ {USER} }} }} }} }} }}"),
+         })),
++        // All followed channels, by id: twitch.tv's own query for its
++        // following page (the raw `follows` field says "service error").
++        "followedIds" => {
++            let cursor = arg.as_str().filter(|c| c.len() <= 200 && c.chars().all(|c| c.is_ascii_graphic()));
++            Ok(json!({
++                "operationName": "ChannelFollows",
++                "variables": { "limit": 100, "order": "DESC", "cursor": cursor },
++                "extensions": { "persistedQuery": { "version": 1, "sha256Hash": "eecf815273d3d949e5cf0085cc5084cd8a1b5b7b6f7990cf43cb0beadf546907" } },
++            }))
++        }
++        // Channels by their ids (at most 100), live or not.
++        "ids" => {
++            let ids: Vec<String> = arg.as_array().ok_or("no channels")?.iter()
++                .filter_map(|i| i.as_str()).filter(|i| !i.is_empty() && i.len() <= 20 && i.chars().all(|c| c.is_ascii_digit()))
++                .map(str::to_string).take(100).collect();
++            Ok(json!({
++                "query": format!("query($i: [ID!]) {{ users(ids: $i) {{ {USER} }} }}"),
++                "variables": { "i": ids },
++            }))
++        }
+         "live" => match arg.as_str().map(str::trim).filter(|g| !g.is_empty()) {
+             Some(game) if game.len() <= 100 => Ok(json!({
+                 "query": format!("query($g: String!) {{ game(name: $g) {{ streams(first: 30) {{ edges {{ node {{ {STREAM} }} }} }} }} }}"),
+@@ -324,14 +346,97 @@ pub async fn plugin_video_twitch(
+             Ok(Value::Null)
+         }
+         // The channels the signed-in player follows, live or not.
++        // The live ones first, then every followed channel: their ids (up to
++        // 1000, signed in), then the channels by id (public). One ask that
++        // Twitch refuses leaves the others; all empty with a refusal says why.
+         "followed" => {
+             let account = twitch_account(&app).ok_or("sign in to Twitch first")?;
+-            net::twitch(&app, twitch_query("followed", &Value::Null)?, Some(&account.token)).await
++            let token = Some(account.token.as_str());
++            let mut answers = Vec::new();
++            let mut errors = Vec::new();
++            let mut keep = |r: Result<Value, String>, answers: &mut Vec<Value>| match r {
++                Ok(a) => {
++                    if let Some(e) = a.get("_errors").and_then(Value::as_array) {
++                        errors.extend(e.iter().filter_map(Value::as_str).map(str::to_string));
++                    }
++                    answers.push(a);
++                }
++                Err(e) => errors.push(e),
++            };
++            keep(net::twitch(&app, twitch_query("followedLive", &Value::Null)?, token).await, &mut answers);
++            let mut pages = Vec::new();
++            let mut cursor = Value::Null;
++            for _ in 0..10 {
++                let mut got = Vec::new();
++                keep(net::twitch(&app, twitch_query("followedIds", &cursor)?, token).await, &mut got);
++                let Some(page) = got.pop() else { break };
++                let next = followed_page_cursor(&page);
++                pages.push(page);
++                match next {
++                    Some(c) => cursor = json!(c),
++                    None => break,
++                }
++            }
++            let ids = followed_ids(&pages);
++            for chunk in ids.chunks(100) {
++                keep(net::twitch(&app, twitch_query("ids", &json!(chunk))?, None).await, &mut answers);
++            }
++            let users = followed_users(&answers);
++            tracing::info!("Twitch: {} followed channels ({} errors)", users.len(), errors.len());
++            if users.is_empty() && !errors.is_empty() {
++                errors.dedup();
++                return Err(errors.join("; "));
++            }
++            Ok(json!({ "users": users }))
+         }
+         _ => net::twitch(&app, twitch_query(&kind, &arg)?, None).await,
+     }
+ }
+ 
++/// The followed channels of the "followed" answers, each once (the live
++/// answer first, so a live channel keeps its stream).
++pub fn followed_users(answers: &[Value]) -> Vec<Value> {
++    let mut out: Vec<Value> = Vec::new();
++    for a in answers {
++        let live = a.get("currentUser").and_then(|u| u.get("followedLiveUsers")).and_then(|l| l.get("edges")).and_then(Value::as_array);
++        let nodes: Vec<&Value> = match (live, a.get("users").and_then(Value::as_array)) {
++            (Some(edges), _) => edges.iter().filter_map(|e| e.get("node")).collect(),
++            (None, Some(users)) => users.iter().collect(),
++            _ => continue,
++        };
++        for node in nodes.into_iter().filter(|n| n.is_object()) {
++            let login = node.get("login").and_then(Value::as_str).unwrap_or("");
++            if !login.is_empty() && !out.iter().any(|u| u.get("login").and_then(Value::as_str) == Some(login)) {
++                out.push(node.clone());
++            }
++        }
++    }
++    out
++}
++
++/// The followed channels' ids of ChannelFollows' pages, each once.
++pub fn followed_ids(pages: &[Value]) -> Vec<String> {
++    let mut out: Vec<String> = Vec::new();
++    for p in pages {
++        let Some(edges) = p.pointer("/user/follows/edges").and_then(Value::as_array) else { continue };
++        for id in edges.iter().filter_map(|e| e.pointer("/node/id")).filter_map(Value::as_str) {
++            if !out.iter().any(|x| x == id) {
++                out.push(id.to_string());
++            }
++        }
++    }
++    out
++}
++
++/// Where ChannelFollows goes on: the last edge's cursor, when there is more.
++pub fn followed_page_cursor(page: &Value) -> Option<String> {
++    let follows = page.pointer("/user/follows")?;
++    if !follows.pointer("/pageInfo/hasNextPage").and_then(Value::as_bool).unwrap_or(false) {
++        return None;
++    }
++    follows.get("edges")?.as_array()?.last()?.get("cursor")?.as_str().filter(|c| !c.is_empty()).map(str::to_string)
++}
++
+ /// The signed-in Twitch account: twitch.tv's `auth-token`, which Streamlink
+ /// and the followed channels' query send to Twitch.
+ #[derive(serde::Serialize, serde::Deserialize, Default)]
+@@ -680,8 +785,17 @@ mod net {
+             if answer.get("data").map_or(true, Value::is_null) {
+                 return Err(format!("Twitch: {err}"));
+             }
++            tracing::warn!("Twitch: {err}");
++        }
++        let mut data = answer.get("data").cloned().unwrap_or(Value::Null);
++        // Twitch answered part of it: what it refused goes along.
++        if let (Some(errs), Some(obj)) = (answer.get("errors").and_then(Value::as_array), data.as_object_mut()) {
++            let msgs: Vec<Value> = errs.iter().filter_map(|e| e.get("message").and_then(Value::as_str)).map(|m| json!(format!("Twitch: {m}"))).collect();
++            if !msgs.is_empty() {
++                obj.insert("_errors".into(), Value::Array(msgs));
++            }
+         }
+-        Ok(answer.get("data").cloned().unwrap_or(Value::Null))
++        Ok(data)
+     }
+ 
+     pub async fn text(app: &tauri::AppHandle, url: &str) -> Result<String, String> {
+@@ -1560,6 +1674,29 @@ mod tests {
+         assert!(((mpv_volume(70.0) / 100.0).powi(3) - 0.7).abs() < 1e-9);
+     }
+ 
++    #[test]
++    fn followed_channels_merged_once() {
++        let live = json!({ "currentUser": { "followedLiveUsers": { "edges": [{ "node": { "login": "a", "stream": { "title": "x" } } }] } } });
++        let refused = json!({ "currentUser": null, "_errors": ["Twitch: no"] });
++        let by_id = json!({ "users": [{ "login": "a", "stream": null }, { "login": "b" }, null] });
++        let u = followed_users(&[live, refused, by_id]);
++        let logins: Vec<&str> = u.iter().map(|n| n["login"].as_str().unwrap()).collect();
++        assert_eq!(logins, ["a", "b"]);
++        assert_eq!(u[0]["stream"]["title"], "x");
++    }
++
++    #[test]
++    fn followed_ids_page_by_page() {
++        let p1 = json!({ "user": { "follows": { "edges": [{ "cursor": "c1", "node": { "id": "11" } }, { "cursor": "c2", "node": { "id": "12" } }], "pageInfo": { "hasNextPage": true } } } });
++        let p2 = json!({ "user": { "follows": { "edges": [{ "cursor": "c3", "node": { "id": "12" } }, { "node": { "id": "13" } }], "pageInfo": { "hasNextPage": false } } } });
++        assert_eq!(followed_page_cursor(&p1).as_deref(), Some("c2"));
++        assert_eq!(followed_page_cursor(&p2), None);
++        assert_eq!(followed_ids(&[p1, p2]), ["11", "12", "13"]);
++        let q = twitch_query("ids", &json!(["1", "x", "22"])).unwrap();
++        assert_eq!(q["variables"]["i"], json!(["1", "22"]));
++        assert_eq!(twitch_query("followedIds", &Value::Null).unwrap()["variables"]["cursor"], Value::Null);
++    }
++
+     #[test]
+     fn a_twitch_auth_token_as_pasted() {
+         assert_eq!(twitch_token_of(" OAuth abcdefghij0123456789abcdefghij "), Some("abcdefghij0123456789abcdefghij".into()));
+-- 
+2.43.0
+
