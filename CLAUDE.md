@@ -214,5 +214,6 @@ new version's hosts and links).
   as the desktop's (a white box).
 - The plugin dock is its own window: a change it makes (order, lock) reaches
   Settings only through an event (`plugins-changed`, `dock-locked`).
-- The person's green button and Settings show "vX (Clicktrough N)": N is the
+- The green button offers "vX (Clicktrough N)"; Settings (bottom left) and the
+  title's tooltip show the installed one (patch 0054): N is the
   release workflow's run number (`CT_REVISION`).

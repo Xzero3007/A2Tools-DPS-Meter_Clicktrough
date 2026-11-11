@@ -1,0 +1,65 @@
+From 2fff77b35f36c18ca220c92b4c52f619c77aeb1a Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Wed, 11 Nov 2026 02:37:40 +0000
+Subject: [PATCH] Meter: Settings and the title's tooltip show this build's
+ number
+
+---
+ public/src/js/core.js | 6 +++++-
+ src-tauri/src/app.rs  | 6 ++++--
+ src/styles.css        | 3 +++
+ 3 files changed, 12 insertions(+), 3 deletions(-)
+
+diff --git a/public/src/js/core.js b/public/src/js/core.js
+index b6e9699..99ccb2e 100644
+--- a/public/src/js/core.js
++++ b/public/src/js/core.js
+@@ -6464,8 +6464,12 @@ class DpsApp {
+   updateSettingsVersion() {
+     if (!this.settingsVersionValue) return;
+     const rawVersion = String(window.dpsData?.getVersion?.() || "").trim();
+-    const normalized = rawVersion.replace(/^v/i, "");
++    // Clicktrough: "2.0.80 (Clicktrough 186)" reads "v2.0.80" and "Clicktrough 186"
++    // on a second line in Settings, and on one line as the title's tooltip.
++    const normalized = rawVersion.replace(/^v/i, "").replace(/\s*\(Clicktrough (\d+)\)$/, "\nClicktrough $1");
+     this.settingsVersionValue.textContent = normalized ? `v${normalized}` : "-";
++    const title = document.querySelector(".header .bossNames");
++    if (normalized && title) title.title = `A2Tools v${normalized.replace("\n", " · ")}`;
+     // The backend version fetch is async; retry briefly if it wasn't ready yet.
+     if (!normalized && !this._versionRetryScheduled) {
+       this._versionRetryScheduled = true;
+diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
+index 9b16a48..76aa155 100644
+--- a/src-tauri/src/app.rs
++++ b/src-tauri/src/app.rs
+@@ -664,9 +664,11 @@ fn apply_overlay_lock(app: &tauri::AppHandle, locked: bool) {
+ 
+ // ===== TAURI COMMANDS =====
+ 
++// Clicktrough: the version with this build's release number, as the green
++// button shows it ("2.0.80 (Clicktrough 186)"); a local build is number 0.
+ #[tauri::command]
+-fn get_app_version() -> &'static str {
+-    env!("CARGO_PKG_VERSION")
++fn get_app_version() -> String {
++    format!("{} (Clicktrough {})", env!("CARGO_PKG_VERSION"), crate::update_check::CT_REVISION)
+ }
+ 
+ // Details read shared immutable lookups and storage snapshots, without taking
+diff --git a/src/styles.css b/src/styles.css
+index 5c99ec6..7acaae1 100644
+--- a/src/styles.css
++++ b/src/styles.css
+@@ -1506,6 +1506,9 @@ body.mainPlayerDpsBold :is(.meter, .barPreviewPanel) .item .content .dps > p {
+ }
+ .settingsPanel .settingsNav .settingsVersionLink {
+   align-self: flex-start;
++  /* Clicktrough: the version, then this build's number on its own line. */
++  white-space: pre-line;
++  text-align: left;
+   padding: 8px 10px 2px;
+   font-variant-numeric: tabular-nums;
+   font-variation-settings: "wght" 600, "wdth" 87.5;
+-- 
+2.43.0
+
