@@ -1,0 +1,142 @@
+From cf0a0e512a63fc242a309d200032eb24f5e76868 Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Wed, 11 Nov 2026 22:02:43 +0000
+Subject: [PATCH] Plugins: Twitch's followed channels from three asks, and why
+ when none come
+
+The followed channels came back empty without a word. Now the live
+followed channels, all followed and the public list of the player's
+channel page are asked and merged; when all are empty, Twitch's refusal
+is passed on.
+---
+ src-tauri/src/plugins/video.rs | 82 ++++++++++++++++++++++++++++++++--
+ 1 file changed, 79 insertions(+), 3 deletions(-)
+
+diff --git a/src-tauri/src/plugins/video.rs b/src-tauri/src/plugins/video.rs
+index 61adced..1814ebc 100644
+--- a/src-tauri/src/plugins/video.rs
++++ b/src-tauri/src/plugins/video.rs
+@@ -267,10 +267,22 @@ pub fn twitch_query(kind: &str, arg: &Value) -> Result<Value, String> {
+                 "variables": { "l": logins },
+             }))
+         }
+-        // The signed-in player's followed channels (sent with the token).
++        // The signed-in player's followed channels (sent with the token):
++        // those live now, and all of them (Twitch's web page asks both).
++        "followedLive" => Ok(json!({
++            "query": format!("query {{ currentUser {{ followedLiveUsers(first: 100) {{ edges {{ node {{ {USER} }} }} }} }} }}"),
++        })),
+         "followed" => Ok(json!({
+             "query": format!("query {{ currentUser {{ follows(first: 100) {{ edges {{ node {{ {USER} }} }} }} }} }}"),
+         })),
++        // The same as anyone sees it on the player's channel page (no token).
++        "followedPublic" => {
++            let login = arg.as_str().map(str::trim).filter(|l| valid_login(l)).ok_or("not a channel name")?;
++            Ok(json!({
++                "query": format!("query($l: String!) {{ user(login: $l) {{ follows(first: 100) {{ edges {{ node {{ {USER} }} }} }} }} }}"),
++                "variables": { "l": login.to_ascii_lowercase() },
++            }))
++        }
+         "live" => match arg.as_str().map(str::trim).filter(|g| !g.is_empty()) {
+             Some(game) if game.len() <= 100 => Ok(json!({
+                 "query": format!("query($g: String!) {{ game(name: $g) {{ streams(first: 30) {{ edges {{ node {{ {STREAM} }} }} }} }} }}"),
+@@ -324,14 +336,57 @@ pub async fn plugin_video_twitch(
+             Ok(Value::Null)
+         }
+         // The channels the signed-in player follows, live or not.
++        // Three asks, merged: the live ones and all followed (signed in),
++        // and the public list of the channel page. One that Twitch refuses
++        // leaves the others; all empty with a refusal says why.
+         "followed" => {
+             let account = twitch_account(&app).ok_or("sign in to Twitch first")?;
+-            net::twitch(&app, twitch_query("followed", &Value::Null)?, Some(&account.token)).await
++            let mut answers = Vec::new();
++            let mut errors = Vec::new();
++            for (kind, token) in [("followedLive", true), ("followed", true), ("followedPublic", false)] {
++                let body = twitch_query(kind, &json!(account.login))?;
++                match net::twitch(&app, body, token.then_some(account.token.as_str())).await {
++                    Ok(a) => {
++                        if let Some(e) = a.get("_errors").and_then(Value::as_array) {
++                            errors.extend(e.iter().filter_map(Value::as_str).map(str::to_string));
++                        }
++                        answers.push(a);
++                    }
++                    Err(e) => errors.push(e),
++                }
++            }
++            let users = followed_users(&answers);
++            tracing::info!("Twitch: {} followed channels ({} errors)", users.len(), errors.len());
++            if users.is_empty() && !errors.is_empty() {
++                errors.dedup();
++                return Err(errors.join("; "));
++            }
++            Ok(json!({ "users": users }))
+         }
+         _ => net::twitch(&app, twitch_query(&kind, &arg)?, None).await,
+     }
+ }
+ 
++/// The followed channels of the "followed" answers, each once (the live
++/// answer first, so a live channel keeps its stream).
++pub fn followed_users(answers: &[Value]) -> Vec<Value> {
++    let mut out: Vec<Value> = Vec::new();
++    for a in answers {
++        for root in [a.get("currentUser"), a.get("user")].into_iter().flatten() {
++            for list in ["followedLiveUsers", "follows"] {
++                let Some(edges) = root.get(list).and_then(|l| l.get("edges")).and_then(Value::as_array) else { continue };
++                for node in edges.iter().filter_map(|e| e.get("node")).filter(|n| n.is_object()) {
++                    let login = node.get("login").and_then(Value::as_str).unwrap_or("");
++                    if !login.is_empty() && !out.iter().any(|u| u.get("login").and_then(Value::as_str) == Some(login)) {
++                        out.push(node.clone());
++                    }
++                }
++            }
++        }
++    }
++    out
++}
++
+ /// The signed-in Twitch account: twitch.tv's `auth-token`, which Streamlink
+ /// and the followed channels' query send to Twitch.
+ #[derive(serde::Serialize, serde::Deserialize, Default)]
+@@ -680,8 +735,17 @@ mod net {
+             if answer.get("data").map_or(true, Value::is_null) {
+                 return Err(format!("Twitch: {err}"));
+             }
++            tracing::warn!("Twitch: {err}");
++        }
++        let mut data = answer.get("data").cloned().unwrap_or(Value::Null);
++        // Twitch answered part of it: what it refused goes along.
++        if let (Some(errs), Some(obj)) = (answer.get("errors").and_then(Value::as_array), data.as_object_mut()) {
++            let msgs: Vec<Value> = errs.iter().filter_map(|e| e.get("message").and_then(Value::as_str)).map(|m| json!(format!("Twitch: {m}"))).collect();
++            if !msgs.is_empty() {
++                obj.insert("_errors".into(), Value::Array(msgs));
++            }
+         }
+-        Ok(answer.get("data").cloned().unwrap_or(Value::Null))
++        Ok(data)
+     }
+ 
+     pub async fn text(app: &tauri::AppHandle, url: &str) -> Result<String, String> {
+@@ -1560,6 +1624,18 @@ mod tests {
+         assert!(((mpv_volume(70.0) / 100.0).powi(3) - 0.7).abs() < 1e-9);
+     }
+ 
++    #[test]
++    fn followed_channels_merged_once() {
++        let live = json!({ "currentUser": { "followedLiveUsers": { "edges": [{ "node": { "login": "a", "stream": { "title": "x" } } }] } } });
++        let all = json!({ "currentUser": { "follows": { "edges": [{ "node": { "login": "a", "stream": null } }, { "node": { "login": "b" } }] } } });
++        let public = json!({ "user": { "follows": { "edges": [{ "node": { "login": "c" } }, { "node": null }] } } });
++        let refused = json!({ "currentUser": null, "_errors": ["Twitch: no"] });
++        let u = followed_users(&[live, refused, all, public]);
++        let logins: Vec<&str> = u.iter().map(|n| n["login"].as_str().unwrap()).collect();
++        assert_eq!(logins, ["a", "b", "c"]);
++        assert_eq!(u[0]["stream"]["title"], "x");
++    }
++
+     #[test]
+     fn a_twitch_auth_token_as_pasted() {
+         assert_eq!(twitch_token_of(" OAuth abcdefghij0123456789abcdefghij "), Some("abcdefghij0123456789abcdefghij".into()));
+-- 
+2.43.0
+
