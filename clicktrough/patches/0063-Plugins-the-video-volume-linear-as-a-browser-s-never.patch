@@ -1,0 +1,62 @@
+From dbf6034af16ccb3c22b9c4ff4fabb20c6783c6f4 Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Wed, 11 Nov 2026 18:36:18 +0000
+Subject: [PATCH] Plugins: the video volume linear as a browser's, never
+ amplified
+
+mpv's volume is cubic: the Streams plugin's 70 played at a third of the
+sound. The plugin's 0 to 100 is now linear (its cube root to mpv), and
+100 is the stream as it is (volume-max 100), so nothing distorts.
+---
+ src-tauri/src/plugins/video.rs | 19 +++++++++++--------
+ 1 file changed, 11 insertions(+), 8 deletions(-)
+
+diff --git a/src-tauri/src/plugins/video.rs b/src-tauri/src/plugins/video.rs
+index 10eaf4c..23a524f 100644
+--- a/src-tauri/src/plugins/video.rs
++++ b/src-tauri/src/plugins/video.rs
+@@ -95,10 +95,12 @@ pub struct Load {
+     pub audio_only: bool,
+ }
+ 
+-/// mpv's volume for a plugin's 0 to 100: streams are mixed quiet, so the
+-/// plugin's 100 is mpv's 150 (mpv amplifies above 100; `volume-max` 150).
++/// mpv's volume for a plugin's 0 to 100. mpv's volume is cubic (its 70
++/// plays at 0.7³, a third of the sound, -9 dB), a browser's or FreeTube's
++/// slider is linear: the plugin's 70 is 0.7 of the sound here too, and its
++/// 100 the stream as it is (never amplified: no distortion).
+ pub fn mpv_volume(v: f64) -> f64 {
+-    v.clamp(0.0, 100.0) * 1.5
++    100.0 * (v.clamp(0.0, 100.0) / 100.0).cbrt()
+ }
+ 
+ /// A Jellyfin stream's play session or media source id: letters, digits, `-`.
+@@ -1027,7 +1029,7 @@ mod player {
+         ] {
+             opt(k, v);
+         }
+-        opt("volume-max", "150");
++        opt("volume-max", "100");
+         opt("volume", &format!("{volume:.0}"));
+         let code = unsafe { (m.initialize)(h) };
+         if code < 0 {
+@@ -1548,11 +1550,12 @@ mod tests {
+     }
+ 
+     #[test]
+-    fn the_plugins_full_volume_is_mpvs_150() {
+-        assert_eq!(mpv_volume(100.0), 150.0);
+-        assert_eq!(mpv_volume(50.0), 75.0);
+-        assert_eq!(mpv_volume(400.0), 150.0);
++    fn the_plugins_volume_is_linear_and_never_amplified() {
++        assert_eq!(mpv_volume(100.0), 100.0);
++        assert_eq!(mpv_volume(400.0), 100.0);
+         assert_eq!(mpv_volume(-1.0), 0.0);
++        // mpv cubes it back: the plugin's 70 is 0.7 of the sound.
++        assert!(((mpv_volume(70.0) / 100.0).powi(3) - 0.7).abs() < 1e-9);
+     }
+ 
+     #[test]
+-- 
+2.43.0
+
