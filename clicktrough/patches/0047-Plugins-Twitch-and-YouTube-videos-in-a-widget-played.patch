@@ -1,4 +1,4 @@
-From 987940abeae47ee1da4734793b0626efddac6d97 Mon Sep 17 00:00:00 2001
+From 67a988c70caa277cafcca02af30e5a52d9a909fa Mon Sep 17 00:00:00 2001
 From: A2Tools-patch <patch@localhost>
 Date: Tue, 10 Nov 2026 22:53:41 +0000
 Subject: [PATCH] Plugins: Twitch and YouTube videos in a widget, played by mpv
@@ -27,8 +27,8 @@ mpv and yt-dlp are optional dependencies of the package.
  src-tauri/src/net_guard.rs      |  10 +
  src-tauri/src/plugins/a2.js     |  19 +
  src-tauri/src/plugins/mod.rs    |  13 +
- src-tauri/src/plugins/video.rs  | 965 ++++++++++++++++++++++++++++++++
- 9 files changed, 1054 insertions(+), 1 deletion(-)
+ src-tauri/src/plugins/video.rs  | 994 ++++++++++++++++++++++++++++++++
+ 9 files changed, 1083 insertions(+), 1 deletion(-)
  create mode 100644 src-tauri/src/plugins/video.rs
 
 diff --git a/packaging/arch/PKGBUILD b/packaging/arch/PKGBUILD
@@ -156,7 +156,7 @@ index 545084c..9bec3b4 100644
  
  /// Whether `url` is one of the places above: https, no port, user or
 diff --git a/src-tauri/src/plugins/a2.js b/src-tauri/src/plugins/a2.js
-index 160ecdd..dc8690d 100644
+index 160ecdd..ee33606 100644
 --- a/src-tauri/src/plugins/a2.js
 +++ b/src-tauri/src/plugins/a2.js
 @@ -90,6 +90,16 @@
@@ -166,7 +166,7 @@ index 160ecdd..dc8690d 100644
 +//   Video (permission "video", Clicktrough): a Twitch channel or a YouTube video played by mpv
 +//   in one of the plugin's widgets, under the widget's page (open the widget first):
 +//   await a2.video.play("name", { twitch: "login" | youtube: "videoId", quality: "720", volume: 70 })
-+//   await a2.video.control("name", "pause" | "mute" | "volume" | "stop", value)
++//   await a2.video.control("name", "pause" | "mute" | "volume" | "opacity" | "stop", value)
 +//   a2.on("video", (v) => ...)                 { widget, state: "loading" | "playing" | "ended" | "error",
 +//                                              error, title, pause, buffering, volume, mute }
 +//   await a2.video.twitch("search" | "user" | "channels" | "live", words | login | [logins] | game)
@@ -242,10 +242,10 @@ index 39260e4..d2eefa2 100644
  /// Most bytes an image may have.
 diff --git a/src-tauri/src/plugins/video.rs b/src-tauri/src/plugins/video.rs
 new file mode 100644
-index 0000000..9a0b327
+index 0000000..0edd22b
 --- /dev/null
 +++ b/src-tauri/src/plugins/video.rs
-@@ -0,0 +1,965 @@
+@@ -0,0 +1,994 @@
 +//! Clicktrough: video in a plugin's widget, and the lists to pick it from
 +//! (the Streams plugin; permission "video").
 +//!
@@ -338,7 +338,7 @@ index 0000000..9a0b327
 +    player::play(&app, &id, &target, &url, &format, volume)
 +}
 +
-+/// `a2.video.control(widget, { pause, volume, mute, stop })`.
++/// `a2.video.control(widget, { pause, volume, mute, opacity, stop })`.
 +#[tauri::command]
 +pub fn plugin_video_control(
 +    app: tauri::AppHandle,
@@ -358,6 +358,11 @@ index 0000000..9a0b327
 +        "volume" => {
 +            let v = value.and_then(|v| v.as_f64()).filter(|v| v.is_finite()).ok_or("not a volume")?;
 +            player::set(&label, "volume", &format!("{:.0}", v.clamp(0.0, 100.0)))
++        }
++        // How much of the video shows: 0.2 to 1 (the widget's page stays as it is).
++        "opacity" => {
++            let v = value.and_then(|v| v.as_f64()).filter(|v| v.is_finite()).ok_or("not an opacity")?;
++            player::opacity(&app, &label, v.clamp(0.2, 1.0))
 +        }
 +        _ => Err("unknown video control".into()),
 +    }
@@ -631,6 +636,9 @@ index 0000000..9a0b327
 +    }
 +    pub fn set(_: &str, _: &str, _: &str) -> Result<(), String> {
 +        Err("no video is playing".into())
++    }
++    pub fn opacity(_: &tauri::AppHandle, _: &str, _: f64) -> Result<(), String> {
++        Ok(())
 +    }
 +}
 +
@@ -1112,6 +1120,9 @@ index 0000000..9a0b327
 +                        h
 +                    }
 +                };
++                if let Some(o) = opacities().lock().unwrap_or_else(|p| p.into_inner()).get(&label) {
++                    area.set_opacity(*o);
++                }
 +                area.set_visible(true);
 +                area.queue_render();
 +                let f = CString::new("ytdl-format").unwrap_or_default();
@@ -1126,6 +1137,24 @@ index 0000000..9a0b327
 +            let _ = tx.send(result);
 +        }).map_err(|e| e.to_string())?;
 +        rx.recv_timeout(std::time::Duration::from_secs(10)).map_err(|_| "the video didn't start".to_string())?
++    }
++
++    /// Each widget's video opacity, kept for its next video too.
++    fn opacities() -> &'static Mutex<HashMap<String, f64>> {
++        static O: std::sync::OnceLock<Mutex<HashMap<String, f64>>> = std::sync::OnceLock::new();
++        O.get_or_init(Mutex::default)
++    }
++
++    pub fn opacity(app: &tauri::AppHandle, label: &str, value: f64) -> Result<(), String> {
++        opacities().lock().unwrap_or_else(|p| p.into_inner()).insert(label.to_string(), value);
++        let label = label.to_string();
++        app.run_on_main_thread(move || {
++            VIEWS.with(|v| {
++                if let Some(view) = v.borrow().get(&label) {
++                    view.area.set_opacity(value);
++                }
++            });
++        }).map_err(|e| e.to_string())
 +    }
 +
 +    /// Stop: mpv ends, the area hides, the widget's page alone shows.
