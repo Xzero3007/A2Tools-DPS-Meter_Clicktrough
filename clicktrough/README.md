@@ -76,6 +76,7 @@ patches).
 | 0064 | **A widget that scrolls while locked**: a plugin can open a widget with `unlocked`, and that widget keeps taking the mouse while the meter is locked, so its list scrolls. It still stays put (no moving or resizing) and a screenshot tool still lets clicks through. Closet uses it for its window at the Black Cloud shop and the closet (the person's wish, 2026-11-11). |
 | 0065 | **Reset while locked, the header in your plugin order**: locked, the meter's reset button stays clickable too (only the capture switch is still left out). The plugin buttons in the meter's header (Map, Limits, Closet, Radio, the player row's TV) follow the order of the plugin window's tabs, at once when you drag a tab; the TV stands where the Streams plugin's tab stands. |
 | 0066 | **The monsters you fight, for plugins**: a plugin with the new permission "See the monsters you fight and their HP" (`events:combat`) hears the monsters hit in the last 20 s with their name, HP and max HP, as the meter reads them for its boss bar, bosses first: at most four times a second during a fight, once more when it is over. For the Boss Notes plugin: its phases by the boss's HP (the person's choice, 2026-11-11). Nothing is sent. |
+| 0067 | **One window per widget**: when a plugin opened the same small window twice in one moment, the meter built two, and the second stayed on screen empty and could not be closed (the Closet window at the Black Cloud shop, 2026-11-11). Opening a widget now waits for the one before. |
 
 ### Taken early from the original
 
