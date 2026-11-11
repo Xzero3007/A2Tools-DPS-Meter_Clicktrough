@@ -1,0 +1,137 @@
+From aa813ac991336f0cc016b490770edac69968eec3 Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Wed, 11 Nov 2026 07:59:27 +0000
+Subject: [PATCH] Plugins: a video shows with the plugins off; its error says
+ why
+
+- A video started while the plugins button has the plugins off: its widget
+  was held hidden as it opened (the sound played, the picture not); playing
+  releases it.
+- mpv's warnings and errors (yt-dlp's, through mpv's ytdl hook) are kept
+  for the file playing; a failed video's error carries the last of them
+  (yt-dlp's ERROR line first), and they go to the meter's log.
+---
+ src-tauri/src/plugins/video.rs | 57 ++++++++++++++++++++++++++++++++--
+ 1 file changed, 54 insertions(+), 3 deletions(-)
+
+diff --git a/src-tauri/src/plugins/video.rs b/src-tauri/src/plugins/video.rs
+index 4af40cf..7abd6fb 100644
+--- a/src-tauri/src/plugins/video.rs
++++ b/src-tauri/src/plugins/video.rs
+@@ -130,7 +130,11 @@ pub async fn plugin_video_play(
+     let target = widget_window(&app, &id, &widget)?;
+     let volume = volume.filter(|v| v.is_finite()).unwrap_or(70.0).clamp(0.0, 100.0);
+     tracing::info!("Video: {id} plays {kind} {name} in {widget}");
+-    player::play(&app, &id, &target, Load { volume, ..load })
++    player::play(&app, &id, &target, Load { volume, ..load })?;
++    // Opened while the plugins button had the plugins off, the widget was
++    // held hidden (its sound played, its picture not): a video shows.
++    widgets::release_overlay(&app, target.label());
++    Ok(())
+ }
+ 
+ /// `a2.video.control(widget, { pause, volume, mute, opacity, stop, seek,
+@@ -508,6 +512,13 @@ mod player {
+         data: *mut c_void,
+     }
+     #[repr(C)]
++    struct EventLogMessage {
++        prefix: *const c_char,
++        level: *const c_char,
++        text: *const c_char,
++        log_level: c_int,
++    }
++    #[repr(C)]
+     struct EventEndFile {
+         reason: c_int,
+         error: c_int,
+@@ -531,6 +542,7 @@ mod player {
+     }
+ 
+     const EVENT_SHUTDOWN: c_int = 1;
++    const EVENT_LOG_MESSAGE: c_int = 2;
+     const EVENT_START_FILE: c_int = 6;
+     const EVENT_END_FILE: c_int = 7;
+     const EVENT_FILE_LOADED: c_int = 8;
+@@ -557,6 +569,7 @@ mod player {
+         set_property_string: unsafe extern "C" fn(Handle, *const c_char, *const c_char) -> c_int,
+         command: unsafe extern "C" fn(Handle, *const *const c_char) -> c_int,
+         observe_property: unsafe extern "C" fn(Handle, u64, *const c_char, c_int) -> c_int,
++        request_log_messages: unsafe extern "C" fn(Handle, *const c_char) -> c_int,
+         wait_event: unsafe extern "C" fn(Handle, f64) -> *mut Event,
+         terminate_destroy: unsafe extern "C" fn(Handle),
+         error_string: unsafe extern "C" fn(c_int) -> *const c_char,
+@@ -586,6 +599,7 @@ mod player {
+                 set_property_string: f!("mpv_set_property_string"),
+                 command: f!("mpv_command"),
+                 observe_property: f!("mpv_observe_property"),
++                request_log_messages: f!("mpv_request_log_messages"),
+                 wait_event: f!("mpv_wait_event"),
+                 terminate_destroy: f!("mpv_terminate_destroy"),
+                 error_string: f!("mpv_error_string"),
+@@ -767,6 +781,11 @@ mod player {
+             unsafe { (m.terminate_destroy)(h) };
+             return Err(error(code));
+         }
++        // mpv's warnings and errors (yt-dlp's among them, through mpv's
++        // ytdl hook): a video that doesn't play says why, not only "no audio
++        // or video data played".
++        let warn = CString::new("warn").unwrap_or_default();
++        unsafe { (m.request_log_messages)(h, warn.as_ptr()) };
+         for (name, format) in [("pause", FORMAT_FLAG), ("paused-for-cache", FORMAT_FLAG), ("media-title", FORMAT_STRING),
+                                ("volume", FORMAT_DOUBLE), ("mute", FORMAT_FLAG),
+                                ("time-pos", FORMAT_DOUBLE), ("duration", FORMAT_DOUBLE)] {
+@@ -780,16 +799,48 @@ mod player {
+             let h = raw as Handle;
+             // The position goes to the plugin once a second, not each frame.
+             let mut said_at = f64::NAN;
++            // The last warning about the file playing now (yt-dlp's first).
++            let mut why = String::new();
+             loop {
+                 let ev = unsafe { &*(m.wait_event)(h, -1.0) };
+                 match ev.event_id {
+                     EVENT_SHUTDOWN => break,
+-                    EVENT_START_FILE => tell(&app, &id, &widget, json!({ "state": "loading" })),
++                    EVENT_LOG_MESSAGE if !ev.data.is_null() => {
++                        let l = unsafe { &*(ev.data as *const EventLogMessage) };
++                        let text = |p: *const c_char| if p.is_null() { String::new() } else { unsafe { CStr::from_ptr(p) }.to_string_lossy().into_owned() };
++                        let (prefix, level, line) = (text(l.prefix), text(l.level), text(l.text));
++                        let line = line.trim().to_string();
++                        if line.is_empty() {
++                            continue;
++                        }
++                        let from_ytdl = prefix.contains("ytdl");
++                        if from_ytdl || level == "error" || level == "fatal" {
++                            tracing::warn!("Video: mpv {prefix} {level}: {line}");
++                        } else {
++                            tracing::debug!("Video: mpv {prefix} {level}: {line}");
++                        }
++                        // yt-dlp's ERROR line wins (its "youtube-dl failed" after it
++                        // says less), then any of its lines, then mpv's own.
++                        let had_error = why.contains("ERROR:");
++                        let is_error = line.contains("ERROR:");
++                        if is_error || (!had_error && (from_ytdl || !why.starts_with("yt-dlp"))) {
++                            let line = line.split("; please report this issue").next().unwrap_or(&line).trim().to_string();
++                            why = if from_ytdl { format!("yt-dlp: {line}") } else { line };
++                            why = why.chars().take(240).collect();
++                        }
++                    }
++                    EVENT_START_FILE => {
++                        why.clear();
++                        tell(&app, &id, &widget, json!({ "state": "loading" }))
++                    }
+                     EVENT_FILE_LOADED | EVENT_PLAYBACK_RESTART => tell(&app, &id, &widget, json!({ "state": "playing" })),
+                     EVENT_END_FILE if !ev.data.is_null() => {
+                         let end = unsafe { &*(ev.data as *const EventEndFile) };
+                         match end.reason {
+-                            END_ERROR => tell(&app, &id, &widget, json!({ "state": "error", "error": error(end.error) })),
++                            END_ERROR => {
++                                let e = if why.is_empty() { error(end.error) } else { format!("{} ({why})", error(end.error)) };
++                                tell(&app, &id, &widget, json!({ "state": "error", "error": e }))
++                            }
+                             END_EOF => tell(&app, &id, &widget, json!({ "state": "ended" })),
+                             _ => {}
+                         }
+-- 
+2.43.0
+
