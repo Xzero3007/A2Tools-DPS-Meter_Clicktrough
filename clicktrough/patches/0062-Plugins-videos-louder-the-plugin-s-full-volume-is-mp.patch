@@ -1,0 +1,72 @@
+From bfb8b7faa8580c33761af8f66befa50a53371086 Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Wed, 11 Nov 2026 17:37:43 +0000
+Subject: [PATCH] Plugins: videos louder, the plugin's full volume is mpv's 150
+
+Streams are mixed quiet: a plugin's 0 to 100 is now mpv's 0 to 150
+(volume-max 150), so the same slider plays half again as loud.
+---
+ src-tauri/src/plugins/video.rs | 19 +++++++++++++++++--
+ 1 file changed, 17 insertions(+), 2 deletions(-)
+
+diff --git a/src-tauri/src/plugins/video.rs b/src-tauri/src/plugins/video.rs
+index 5482fb9..10eaf4c 100644
+--- a/src-tauri/src/plugins/video.rs
++++ b/src-tauri/src/plugins/video.rs
+@@ -95,6 +95,12 @@ pub struct Load {
+     pub audio_only: bool,
+ }
+ 
++/// mpv's volume for a plugin's 0 to 100: streams are mixed quiet, so the
++/// plugin's 100 is mpv's 150 (mpv amplifies above 100; `volume-max` 150).
++pub fn mpv_volume(v: f64) -> f64 {
++    v.clamp(0.0, 100.0) * 1.5
++}
++
+ /// A Jellyfin stream's play session or media source id: letters, digits, `-`.
+ fn token_ok(s: &str) -> bool {
+     s.len() <= 64 && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+@@ -152,7 +158,7 @@ pub async fn plugin_video_play(
+         streamlink::stop(target.label());
+         load
+     };
+-    let volume = volume.filter(|v| v.is_finite()).unwrap_or(70.0).clamp(0.0, 100.0);
++    let volume = mpv_volume(volume.filter(|v| v.is_finite()).unwrap_or(70.0));
+     tracing::info!("Video: {id} plays {kind} {name} in {widget}");
+     player::play(&app, &id, &target, Load { volume, ..load })?;
+     // Opened while the plugins button had the plugins off, the widget was
+@@ -185,7 +191,7 @@ pub async fn plugin_video_control(
+         "mute" => player::set(&label, "mute", if value.and_then(|v| v.as_bool()).unwrap_or(true) { "yes" } else { "no" }),
+         "volume" => {
+             let v = value.and_then(|v| v.as_f64()).filter(|v| v.is_finite()).ok_or("not a volume")?;
+-            player::set(&label, "volume", &format!("{:.0}", v.clamp(0.0, 100.0)))
++            player::set(&label, "volume", &format!("{:.0}", mpv_volume(v)))
+         }
+         // How much of the video shows: 0.2 to 1 (the widget's page stays as it is).
+         "opacity" => {
+@@ -1021,6 +1027,7 @@ mod player {
+         ] {
+             opt(k, v);
+         }
++        opt("volume-max", "150");
+         opt("volume", &format!("{volume:.0}"));
+         let code = unsafe { (m.initialize)(h) };
+         if code < 0 {
+@@ -1540,6 +1547,14 @@ mod tests {
+         }
+     }
+ 
++    #[test]
++    fn the_plugins_full_volume_is_mpvs_150() {
++        assert_eq!(mpv_volume(100.0), 150.0);
++        assert_eq!(mpv_volume(50.0), 75.0);
++        assert_eq!(mpv_volume(400.0), 150.0);
++        assert_eq!(mpv_volume(-1.0), 0.0);
++    }
++
+     #[test]
+     fn a_twitch_auth_token_as_pasted() {
+         assert_eq!(twitch_token_of(" OAuth abcdefghij0123456789abcdefghij "), Some("abcdefghij0123456789abcdefghij".into()));
+-- 
+2.43.0
+

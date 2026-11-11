@@ -70,6 +70,7 @@ patches).
 | 0059 | **YouTube's search, newest first**: a plugin can ask yt-dlp's YouTube search for the newest uploads (`a2.video.search(words, { newest: true })`), for the Streams plugin's "AION 2 new". The same searches as before, sorted by date. |
 | 0060 | **"AION 2 new" finds videos again**: the newest uploads came from yt-dlp's date search, which newer yt-dlp versions dropped ("Unsupported url scheme"); now from YouTube's results page sorted by upload date, through yt-dlp as before. |
 | 0061 | **Twitch without the ad breaks, and your followed channels**: when Streamlink is installed (`sudo pacman -S streamlink`, as Streamlink Twitch GUI uses it), the Streams plugin plays Twitch through it, and Streamlink leaves Twitch's ad breaks out (a short pause instead). Signed in with twitch.tv's auth-token (Streams → Twitch → Followed; kept in `twitch.json` in the meter's own folder, sent to Twitch alone), the followed channels show there, and Streamlink sends it along (no ads at all with Turbo or a subscription). The person's decision, 2026-11-11. |
+| 0062 | **Videos louder**: Twitch, YouTube and Jellyfin streams are often mixed quiet; the Streams plugin's volume at 100 is now one and a half times as loud (mpv amplifies up to 150), and every step of the slider with it. |
 
 ### Taken early from the original
 
