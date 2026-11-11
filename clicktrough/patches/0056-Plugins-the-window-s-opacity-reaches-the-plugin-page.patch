@@ -1,0 +1,147 @@
+From d22dfa367b4ac04a9d7affdf5ddc9c60fc9ec2fb Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Wed, 11 Nov 2026 07:32:17 +0000
+Subject: [PATCH] Plugins: the window's opacity reaches the plugin pages; the
+ player row wraps
+
+- The plugin window's (and the dock's) opacity slider is handed to each
+  plugin page as var(--a2-alpha), so what a plugin paints opaque itself (a
+  sticky table head, a player bar) can follow it.
+- The player row's controls go on a second line where the meter is too
+  narrow for them, instead of being cut off.
+---
+ public/src/js/pluginDock.js  |  3 +++
+ public/src/js/pluginFrame.js | 13 +++++++++++++
+ public/src/js/pluginHost.js  |  6 +++++-
+ src-tauri/src/plugins/a2.js  |  5 +++++
+ src/styles.css               | 12 ++++++++----
+ 5 files changed, 34 insertions(+), 5 deletions(-)
+
+diff --git a/public/src/js/pluginDock.js b/public/src/js/pluginDock.js
+index a5702be..45f8c8d 100644
+--- a/public/src/js/pluginDock.js
++++ b/public/src/js/pluginDock.js
+@@ -391,6 +391,9 @@
+   const opaqueBtn = document.querySelector(".dockOpaque");
+   const applyOpacity = () => {
+     document.body.style.setProperty("--panel-alpha", String(prefs.opaque ? 1 : prefs.opacity / 100));
++    // Clicktrough: the plugins hear it too (var(--a2-alpha) in their pages).
++    window.A2_PANEL_ALPHA = prefs.opaque ? 1 : prefs.opacity / 100;
++    for (const d of docked.values()) d.plugin?.setAlpha?.(window.A2_PANEL_ALPHA);
+     opaqueBtn?.setAttribute("aria-pressed", String(!!prefs.opaque));
+     if (opaqueBtn) setLabel(opaqueBtn, prefs.opaque
+       ? t("opaqueOff", "Back to the slider's opacity")
+diff --git a/public/src/js/pluginFrame.js b/public/src/js/pluginFrame.js
+index 9fe0b8b..859eeec 100644
+--- a/public/src/js/pluginFrame.js
++++ b/public/src/js/pluginFrame.js
+@@ -13,6 +13,12 @@
+ (() => {
+   const { invoke, convertFileSrc } = window.__TAURI__.core;
+ 
++  // The panel's opacity as the window last set it (window.A2_PANEL_ALPHA).
++  const panelAlpha = (value = window.A2_PANEL_ALPHA) => {
++    const a = Number(value);
++    return Number.isFinite(a) ? Math.min(1, Math.max(0, a)) : 1;
++  };
++
+   window.createPluginFrame = ({ id, stage, docked = false, compact: folded = false, toast = () => {}, onFit = () => {} }) => {
+     let frame = null;
+     let manifest = null;
+@@ -290,6 +296,9 @@
+     // What a plugin is told as it starts, from its hello: [event, data] each.
+     const startState = (hello) => {
+       const out = [["language", hello.language || "en"], ["theme", hello.theme], ["compact", compact]];
++      // Clicktrough: the panel's opacity (the window's slider), for parts the
++      // plugin paints itself (a sticky header): var(--a2-alpha) in its page.
++      out.push(["panelAlpha", panelAlpha()]);
+       if (hello.character && allowed("events:character")) out.push(["character", hello.character]);
+       if (typeof hello.game === "boolean") out.push(["game", { running: hello.game }]);
+       // Its window (or dock tab) shown or hidden (meter 2.0.77 on).
+@@ -346,6 +355,10 @@
+         return scale;
+       },
+       canStepTextScale: (step) => (step < 0 ? scale > SCALES[0] : scale < SCALES[SCALES.length - 1]),
++      // Clicktrough: the window's opacity slider moved (0.05 to 1).
++      setAlpha(value) {
++        deliver("panelAlpha", panelAlpha(value));
++      },
+       // The fold button ("compact"), which the plugin hears and handles itself.
+       setCompact(on) {
+         compact = !!on;
+diff --git a/public/src/js/pluginHost.js b/public/src/js/pluginHost.js
+index c00d854..4e5e1cc 100644
+--- a/public/src/js/pluginHost.js
++++ b/public/src/js/pluginHost.js
+@@ -104,7 +104,11 @@
+ 
+   const opacity = document.querySelector(".pluginOpacity");
+   const compact = document.querySelector(".pluginCompact");
+-  const applyOpacity = () => document.body.style.setProperty("--panel-alpha", String(panel.opacity / 100));
++  const applyOpacity = () => {
++    document.body.style.setProperty("--panel-alpha", String(panel.opacity / 100));
++    window.A2_PANEL_ALPHA = panel.opacity / 100;
++    plugin.setAlpha?.(window.A2_PANEL_ALPHA);
++  };
+   const applyCompact = () => {
+     compact.setAttribute("aria-pressed", String(panel.compact));
+     const label = panel.compact ? "Show the controls" : "Hide the controls";
+diff --git a/src-tauri/src/plugins/a2.js b/src-tauri/src/plugins/a2.js
+index 45700b6..a61d52d 100644
+--- a/src-tauri/src/plugins/a2.js
++++ b/src-tauri/src/plugins/a2.js
+@@ -49,6 +49,9 @@
+ //                                              (meter 2.0.76 on). The page has them as CSS too: var(--a2-accent),
+ //                                              var(--a2-bg), var(--a2-panel); and selects, checkboxes, radios,
+ //                                              sliders and scrollbars are styled to match unless the plugin styles them itself
++//   var(--a2-alpha)                            Clicktrough: the window's opacity slider (0 to 1), for
++//                                              what the page paints itself (a sticky header):
++//                                              color-mix(in srgb, var(--a2-bg) calc(var(--a2-alpha, 1) * 100%), transparent)
+ //   a2.on("compact", (on) => ...)              the window's fold button: show only the essentials
+ //   a2.on("world", (w) => ...)                 Clicktrough: the world around the player (permission
+ //                                              "events:world"), at most 4 times a second and every 2 s:
+@@ -267,6 +270,8 @@
+     }
+     if (msg.event) {
+       if (msg.event === "theme") setTheme(msg.data);
++      // Clicktrough: the window's opacity, for what the page paints itself.
++      if (msg.event === "panelAlpha" && Number.isFinite(msg.data)) root.style.setProperty("--a2-alpha", String(msg.data));
+       for (const fn of handlers[msg.event] || []) {
+         try {
+           fn(msg.data, { character: msg.character ?? null, at: msg.at ?? null });
+diff --git a/src/styles.css b/src/styles.css
+index 96abe56..252b97d 100644
+--- a/src/styles.css
++++ b/src/styles.css
+@@ -9040,9 +9040,10 @@ html.a2-offline .historyUploadBtn {
+    header's icon row; gold for what is chosen or on. */
+ .mediaRow {
+   display: flex;
++  flex-wrap: wrap;
+   align-items: center;
+-  gap: 8px;
+-  height: 26px;
++  gap: 0 8px;
++  min-height: 26px;
+   padding: 0 10px;
+   border-top: 1px solid rgba(255, 255, 255, 0.08);
+   font-size: 11px;
+@@ -9071,10 +9072,13 @@ html.a2-offline .historyUploadBtn {
+ .mediaRow .mediaTab[aria-pressed="true"] { color: var(--ct-accent); box-shadow: inset 0 -2px 0 var(--ct-accent); border-radius: 0; }
+ .mediaRow .mediaBtn[aria-pressed="true"].mediaBtn-mute,
+ .mediaRow .mediaBtn[aria-pressed="true"].mediaBtn-favourite { color: var(--ct-accent); }
+-.mediaRow .mediaNow { flex: 1 1 auto; min-width: 0; display: flex; gap: 6px; align-items: baseline; white-space: nowrap; overflow: hidden; }
++.mediaRow .mediaNow { flex: 1 1 0; min-width: 0; display: flex; gap: 6px; align-items: baseline; white-space: nowrap; overflow: hidden; }
+ .mediaRow .mediaTitle { font-weight: 600; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+ .mediaRow .mediaSub { color: rgba(255, 255, 255, 0.5); overflow: hidden; text-overflow: ellipsis; flex: none; max-width: 40%; }
+-.mediaRow .mediaCtl { display: flex; align-items: center; gap: 4px; flex: none; }
++.mediaRow .mediaCtl { display: flex; align-items: center; gap: 4px; flex: none; min-height: 26px; }
++/* Too many controls for the meter's width: they go on a second line (the
++   title stays on the first), so none is cut off. */
++.mediaRow .mediaCtl { flex-wrap: wrap; max-width: 100%; }
+ .mediaRow .mediaSlider { display: inline-flex; align-items: center; gap: 3px; color: rgba(255, 255, 255, 0.6); }
+ .mediaRow .mediaSlider svg { width: 13px; height: 13px; }
+ .mediaRow .mediaSlider input { width: 56px; height: 14px; margin: 0; accent-color: var(--ct-accent); }
+-- 
+2.43.0
+
