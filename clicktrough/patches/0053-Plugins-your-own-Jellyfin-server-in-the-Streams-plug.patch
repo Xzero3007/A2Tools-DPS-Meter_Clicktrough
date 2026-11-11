@@ -1,0 +1,1241 @@
+From 351b15499fa7cf02fc04c742d3681c00f6d162af Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Wed, 11 Nov 2026 01:46:36 +0000
+Subject: [PATCH] Plugins: your own Jellyfin server in the Streams plugin, home
+ network only
+
+A plugin with the permission "video" may now list and play what the
+player's own Jellyfin server has: a2.video.jellyfin signs in (the user's
+name and password; the meter keeps the address, the user and the server's
+key in jellyfin.json in its own folder, readable by the player alone, and
+never hands the key to the page), reads the user's libraries, Continue
+watching, Next up, a search and an item's intro and credits (fixed paths),
+the pictures, and tells the server what plays and how far, so Continue
+watching and watched are right in every Jellyfin app.
+
+Only a server in the home network: its address must be a private one
+(10.x, 172.16-31.x, 192.168.x, 127.x, fc00::/7, fe80::/10) or a local name
+(localhost, *.local, *.lan, *.home.arpa, a name without a dot) whose every
+address is such a one. Its own client looks up nothing else, takes no
+proxy and follows no redirect, so nothing of it reaches the internet.
+
+mpv plays it in the widget as Twitch and YouTube (a2.video.play with
+jellyfin, start, title, source, session, audio): the file as it is, or the
+server's conversion to a height; the key goes in mpv's request header,
+never in the address. New video controls: seek, skip (seconds), audio and
+subtitle (a track of the file), subtitleFile (one of the server's); the
+plugin hears the position and the length.
+
+The player row: rewind, forward and skip (with its words, "Skip intro"),
+and a state may offer its qualities ("original": the file as it is).
+---
+ public/src/js/mediaRow.js         |  13 +-
+ public/src/js/pluginFrame.js      |  17 +-
+ src-tauri/src/app.rs              |   1 +
+ src-tauri/src/plugins/a2.js       |  25 +-
+ src-tauri/src/plugins/jellyfin.rs | 692 ++++++++++++++++++++++++++++++
+ src-tauri/src/plugins/media.rs    |  34 +-
+ src-tauri/src/plugins/mod.rs      |   5 +-
+ src-tauri/src/plugins/video.rs    | 135 +++++-
+ src/styles.css                    |   8 +
+ 9 files changed, 899 insertions(+), 31 deletions(-)
+ create mode 100644 src-tauri/src/plugins/jellyfin.rs
+
+diff --git a/public/src/js/mediaRow.js b/public/src/js/mediaRow.js
+index fb381df..706e26a 100644
+--- a/public/src/js/mediaRow.js
++++ b/public/src/js/mediaRow.js
+@@ -17,10 +17,12 @@
+ 
+   const ICONS = {
+     prev: "skip-back", next: "skip-forward", stop: "square", favourite: "star",
++    rewind: "rotate-ccw", forward: "rotate-cw", skip: "fast-forward",
+   };
+   const NAMES = {
+     prev: "Previous", next: "Next", stop: "Stop", favourite: "Favourite", playStop: "Play or stop",
+     pause: "Pause or play", mute: "Mute", volume: "Volume", opacity: "Video opacity", quality: "Quality",
++    rewind: "Back 10 seconds", forward: "On 30 seconds", skip: "Skip",
+   };
+ 
+   const el = (tag, cls) => {
+@@ -84,7 +86,7 @@
+ 
+     // The quality as a dropdown, styled dark (its open list is the
+     // desktop's menu). A change starts the video again in it.
+-    const QUALITY_NAMES = { audio: "Sound only" };
++    const QUALITY_NAMES = { audio: "Sound only", original: "Source" };
+     const quality = (key, value, list) => {
+       const select = el("select", "mediaQuality");
+       select.title = "Quality (a change starts it again)";
+@@ -116,7 +118,7 @@
+       sub.textContent = s.sub || "";
+       now.title = [s.title, s.sub].filter(Boolean).join(" · ");
+       // Rebuilt only when what is shown changes; a slider being dragged keeps its place.
+-      const key = JSON.stringify([playing.map((p) => [p.key, p.state.icon, p.name]), picked, s.controls, s.paused, s.muted, s.playing, s.favourite, s.quality]);
++      const key = JSON.stringify([playing.map((p) => [p.key, p.state.icon, p.name]), picked, s.controls, s.paused, s.muted, s.playing, s.favourite, s.quality, s.skip, cur.qualities]);
+       if (key !== shownKey) {
+         shownKey = key;
+         tabs.replaceChildren(...playing.map((p) => {
+@@ -144,6 +146,13 @@
+           else if (c === "playStop") parts.push(button(cur.key, c, s.playing ? "square" : "play", NAMES[c], s.playing));
+           else if (c === "mute") parts.push(button(cur.key, c, s.muted ? "volume-x" : "volume-2", NAMES[c], s.muted));
+           else if (c === "favourite") parts.push(button(cur.key, c, "star", NAMES[c], s.favourite));
++          else if (c === "skip") {
++            // Words, not only a symbol: "Skip intro", "Skip credits".
++            const b = button(cur.key, c, ICONS.skip, s.skip || NAMES.skip);
++            b.classList.add("mediaBtnText");
++            b.append(document.createTextNode(s.skip || NAMES.skip));
++            parts.push(b);
++          }
+           else parts.push(button(cur.key, c, ICONS[c] || "circle", NAMES[c] || c));
+         }
+         ctl.replaceChildren(...parts);
+diff --git a/public/src/js/pluginFrame.js b/public/src/js/pluginFrame.js
+index f5452bb..9fe0b8b 100644
+--- a/public/src/js/pluginFrame.js
++++ b/public/src/js/pluginFrame.js
+@@ -188,13 +188,19 @@
+       // (permission "video"; plugins::video).
+       "video.play": ([widget, what]) => {
+         if (!allowed("video")) throw new Error('the plugin lacks the "video" permission');
+-        const kind = what?.twitch ? "twitch" : "youtube";
++        const kind = what?.twitch ? "twitch" : what?.jellyfin ? "jellyfin" : "youtube";
++        const text = (v) => (v == null ? null : String(v));
+         return call("plugin_video_play", {
+           widget: String(widget),
+           kind,
+-          name: String(what?.twitch || what?.youtube || ""),
+-          quality: what?.quality == null ? null : String(what.quality),
++          name: String(what?.twitch || what?.jellyfin || what?.youtube || ""),
++          quality: text(what?.quality),
+           volume: what?.volume == null ? null : Number(what.volume),
++          start: what?.start == null ? null : Number(what.start),
++          title: text(what?.title),
++          source: text(what?.source),
++          session: text(what?.session),
++          audio: Number.isInteger(what?.audio) && what.audio >= 0 ? what.audio : null,
+         });
+       },
+       "video.control": ([widget, action, value]) => {
+@@ -217,6 +223,11 @@
+         if (!allowed("video")) throw new Error('the plugin lacks the "video" permission');
+         return call("plugin_video_freetube");
+       },
++      // The player's own Jellyfin server, home network only (plugins::jellyfin).
++      "video.jellyfin": ([action, arg]) => {
++        if (!allowed("video")) throw new Error('the plugin lacks the "video" permission');
++        return call("plugin_video_jellyfin", { action: String(action), arg: arg ?? null });
++      },
+       // Clicktrough: what the plugin plays, for the meter's player row
+       // (permission "media"; plugins/media.rs). null: nothing plays.
+       "media.set": ([state, slot]) => {
+diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
+index 0b165c5..9b16a48 100644
+--- a/src-tauri/src/app.rs
++++ b/src-tauri/src/app.rs
+@@ -4589,6 +4589,7 @@ pub fn run() {
+             crate::plugins::video::plugin_video_feed,
+             crate::plugins::video::plugin_video_search,
+             crate::plugins::video::plugin_video_freetube,
++            crate::plugins::jellyfin::plugin_video_jellyfin,
+             crate::plugins::plugin_window_size,
+             crate::plugins::plugin_restore_bundled,
+             crate::plugins::plugin_set_order,
+diff --git a/src-tauri/src/plugins/a2.js b/src-tauri/src/plugins/a2.js
+index d219bfb..45700b6 100644
+--- a/src-tauri/src/plugins/a2.js
++++ b/src-tauri/src/plugins/a2.js
+@@ -92,16 +92,30 @@
+ //                                              api-search.plaync.com/aion2global/search/)
+ //   Video (permission "video", Clicktrough): a Twitch channel or a YouTube video played by mpv
+ //   in one of the plugin's widgets, under the widget's page (open the widget first):
+-//   await a2.video.play("name", { twitch: "login" | youtube: "videoId", quality: "720", volume: 70 })
+-//   await a2.video.control("name", "pause" | "mute" | "volume" | "opacity" | "stop", value)
++//   await a2.video.play("name", { twitch: "login" | youtube: "videoId" | jellyfin: "itemId",
++//                       quality: "original" | "1080" | "720" | ... | "audio", volume: 70,
++//                       start: seconds, title, source, session, audio })   (the last five: Jellyfin)
++//   await a2.video.control("name", "pause" | "mute" | "volume" | "opacity" | "stop" | "seek" | "skip"
++//                          | "audio" | "subtitle" | "subtitleFile", value)
++//                                              seek: to seconds; skip: by seconds; audio/subtitle: the
++//                                              track's number, "no" or "auto"; subtitleFile: a
++//                                              Jellyfin subtitle { item, source, index, format }
+ //   a2.on("video", (v) => ...)                 { widget, state: "loading" | "playing" | "ended" | "error",
+-//                                              error, title, pause, buffering, volume, mute }
++//                                              error, title, pause, buffering, volume, mute,
++//                                              position, duration }
++//   await a2.video.jellyfin(action, arg)       the player's own Jellyfin server (home network only):
++//                                              "status", "login" { server, user, password }, "logout",
++//                                              "get" { path, query }, "playbackInfo" { item },
++//                                              "report" { kind, item, source, session, position, paused },
++//                                              "played" { item, on }, "image" { item, type, height }
+ //   await a2.video.twitch("search" | "user" | "channels" | "live", words | login | [logins] | game)
+ //   Player row (permission "media", Clicktrough): what the plugin plays, shown with its controls
+ //   in a row under the meter's header while anything plays; a control there comes as an event:
+ //   await a2.media.set({ icon: "tv", title, sub, paused, muted, volume: 0..1, opacity: 0.2..1,
+-//                       controls: ["prev", "playStop", "pause", "next", "mute", "volume", "opacity", "quality", "favourite", "stop"],
+-//                       quality: "1080" | "720" | "480" | "360" | "audio" }, slot)
++//                       controls: ["prev", "playStop", "pause", "rewind", "forward", "skip", "next", "mute",
++//                                  "volume", "opacity", "quality", "favourite", "stop"],
++//                       skip: "Skip intro", quality: "original" | "1080" | "720" | "480" | "360" | "audio",
++//                       qualities: [those offered] }, slot)
+ //   await a2.media.set(null, slot)             nothing plays: the entry leaves the row
+ //                                              (slot: optional, for two things playing at once)
+ //   a2.on("media", ({ action, value, slot }) => ...) a control in the row (value: 0..1 for volume
+@@ -301,6 +315,7 @@
+       feed: (channel) => call("video.feed", [String(channel)]),
+       search: (text) => call("video.search", [String(text)]),
+       freetube: () => call("video.freetube", []),
++      jellyfin: (action, arg) => call("video.jellyfin", [String(action), arg ?? null]),
+     }),
+     // Clicktrough: the meter's player row (permission "media").
+     media: Object.freeze({
+diff --git a/src-tauri/src/plugins/jellyfin.rs b/src-tauri/src/plugins/jellyfin.rs
+new file mode 100644
+index 0000000..14e9daa
+--- /dev/null
++++ b/src-tauri/src/plugins/jellyfin.rs
+@@ -0,0 +1,692 @@
++//! Clicktrough: the player's own Jellyfin server in the Streams plugin
++//! (permission "video").
++//!
++//! The plugin lists what the server has (libraries, Continue watching, Next
++//! up, a search) and plays it in its overlay with the meter's mpv
++//! (`plugins::video`). The server is the player's own, **in the home
++//! network only**: its address must be a private one (10.x, 172.16-31.x,
++//! 192.168.x, 127.x, fc00::/7, fe80::/10) or a local name (localhost,
++//! `*.local`, `*.lan`, `*.home.arpa`, a name without a dot), and a name
++//! counts only when every address it has is such a private one. This
++//! module's client reaches nothing else (its own lookups refuse any other
++//! name or address, no proxy, no redirects), so nothing of it can go out to
++//! the internet, even by a typo.
++//!
++//! The address, the user and the server's key (from a sign-in with the
++//! user's name and password) are kept in `jellyfin.json` in the meter's own
++//! data folder, readable by the player alone; the password isn't kept, and
++//! the key never goes to the plugin's page. What the server is told: the
++//! sign-in, what plays and how far (so Continue watching and "watched" are
++//! right in every Jellyfin app), and an item marked watched or not.
++
++use std::time::Duration;
++
++use serde_json::{json, Value};
++
++use super::{require, window_plugin};
++
++/// Whether `ip` is in a home network: private, loopback or link-local.
++pub fn local_ip(ip: std::net::IpAddr) -> bool {
++    use std::net::IpAddr;
++    match ip {
++        IpAddr::V4(v) => v.is_private() || v.is_loopback() || v.is_link_local(),
++        IpAddr::V6(v) => {
++            let first = v.segments()[0];
++            v.is_loopback()
++                || (first & 0xfe00) == 0xfc00
++                || (first & 0xffc0) == 0xfe80
++                || v.to_ipv4_mapped().is_some_and(|m| local_ip(IpAddr::V4(m)))
++        }
++    }
++}
++
++/// Whether `host` is a home network's name: localhost, a name without a
++/// dot, or one ending in a local suffix. Its addresses are checked too.
++pub fn local_name(host: &str) -> bool {
++    let host = host.trim_end_matches('.').to_ascii_lowercase();
++    if host.is_empty() || host.len() > 253 || !host.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.') {
++        return false;
++    }
++    if host.split('.').any(|l| l.is_empty() || l.starts_with('-') || l.ends_with('-')) {
++        return false;
++    }
++    host == "localhost"
++        || !host.contains('.')
++        || [".local", ".lan", ".home", ".home.arpa", ".internal", ".localdomain", ".localhost"]
++            .iter()
++            .any(|s| host.ends_with(s))
++}
++
++/// The host of a server address, as written in it.
++#[derive(Debug, PartialEq)]
++pub enum Host {
++    Ip(std::net::IpAddr),
++    Name(String),
++}
++
++/// A server address taken apart: http or https, a host in the home network,
++/// a port, and a base path (a reverse proxy's `/jellyfin`).
++#[derive(Debug, PartialEq)]
++pub struct Server {
++    pub https: bool,
++    pub host: Host,
++    pub port: Option<u16>,
++    pub path: String,
++}
++
++impl Server {
++    /// The address with `host` written in place of the one given.
++    fn with_host(&self, host: &str) -> String {
++        let port = self.port.map(|p| format!(":{p}")).unwrap_or_default();
++        format!("{}://{host}{port}{}", if self.https { "https" } else { "http" }, self.path)
++    }
++
++    fn host_text(&self) -> String {
++        match &self.host {
++            Host::Ip(std::net::IpAddr::V6(v)) => format!("[{v}]"),
++            Host::Ip(ip) => ip.to_string(),
++            Host::Name(n) => n.clone(),
++        }
++    }
++
++    /// The address, written the one way.
++    pub fn base(&self) -> String {
++        self.with_host(&self.host_text())
++    }
++}
++
++/// A server address the player typed (`192.168.1.20:8096`,
++/// `http://nas.local:8096`, `https://media.lan/jellyfin`), checked: only a
++/// home network's. Anything else is refused.
++pub fn parse_server(input: &str) -> Result<Server, String> {
++    const NOT_LOCAL: &str = "Only a Jellyfin server in your home network works here (192.168.x.x, 10.x.x.x, 172.16-31.x.x, localhost, or a name like nas.local).";
++    let text = input.trim();
++    if text.is_empty() || text.len() > 200 || text.chars().any(|c| c.is_whitespace() || c.is_control()) {
++        return Err("Type the server's address, like 192.168.1.20:8096.".into());
++    }
++    let (https, rest) = if let Some(r) = text.strip_prefix("http://") {
++        (false, r)
++    } else if let Some(r) = text.strip_prefix("https://") {
++        (true, r)
++    } else if text.contains("://") {
++        return Err("the address starts with http:// or https://".into());
++    } else {
++        (false, text)
++    };
++    let (authority, path) = match rest.find('/') {
++        Some(i) => (&rest[..i], &rest[i..]),
++        None => (rest, ""),
++    };
++    if authority.contains('@') || path.contains(['?', '#', '%', '\\']) || path.contains("..") {
++        return Err("just the server's address, no user, query or extras".into());
++    }
++    let path = path.trim_end_matches('/');
++    if !path.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '-' | '_' | '.')) || path.len() > 64 {
++        return Err("the address's path has characters it can't have".into());
++    }
++    // [v6]:port, v4:port, name:port
++    let (host, port) = if let Some(r) = authority.strip_prefix('[') {
++        let end = r.find(']').ok_or("an IPv6 address goes in [ ]")?;
++        let port = r[end + 1..].strip_prefix(':');
++        if !r[end + 1..].is_empty() && port.is_none() {
++            return Err("not an address".into());
++        }
++        (&r[..end], port)
++    } else {
++        match authority.rsplit_once(':') {
++            Some((h, p)) => (h, Some(p)),
++            None => (authority, None),
++        }
++    };
++    let port = match port {
++        Some(p) => Some(p.parse::<u16>().ok().filter(|p| *p > 0).ok_or("the port is a number from 1 to 65535")?),
++        None => None,
++    };
++    let host = match host.parse::<std::net::IpAddr>() {
++        Ok(ip) if local_ip(ip) => Host::Ip(ip),
++        Ok(_) => return Err(NOT_LOCAL.into()),
++        Err(_) if local_name(host) => Host::Name(host.trim_end_matches('.').to_ascii_lowercase()),
++        Err(_) => return Err(NOT_LOCAL.into()),
++    };
++    Ok(Server { https, host, port, path: path.to_string() })
++}
++
++/// A Jellyfin item id: 32 hex digits, or 36 with dashes.
++pub fn item_ok(id: &str) -> bool {
++    matches!(id.len(), 32 | 36) && id.chars().all(|c| c.is_ascii_hexdigit() || c == '-')
++}
++
++/// The paths a plugin may read (GET), `{user}` standing for the signed-in
++/// user's id: the user's libraries and items, shows' seasons, episodes and
++/// Next up, an item's intro and credits (Media Segments, and the Intro
++/// Skipper plugin's own), and the user's settings.
++pub fn get_path_ok(path: &str) -> bool {
++    const PREFIXES: &[&str] = &[
++        "/Users/{user}/Items", "/Users/{user}/Views", "/UserViews", "/UserItems/", "/Items", "/Shows/",
++        "/MediaSegments/", "/Episode/", "/Genres",
++    ];
++    path.len() <= 200
++        && !path.contains("..")
++        && path.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '-' | '_' | '{' | '}'))
++        && (path == "/Users/{user}" || PREFIXES.iter().any(|p| path.starts_with(p)))
++        && !path.contains("/Images/")
++        && !path.contains("/Download")
++}
++
++/// Percent-encoding for a query's names and values.
++fn encode(s: &str) -> String {
++    let mut out = String::with_capacity(s.len());
++    for b in s.bytes() {
++        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~') {
++            out.push(b as char);
++        } else {
++            out.push_str(&format!("%{b:02X}"));
++        }
++    }
++    out
++}
++
++/// A query from the plugin's `{ name: value }`: names of letters, values
++/// strings, numbers or yes/no, at most 30.
++pub fn query_of(query: &Value) -> Result<String, String> {
++    let Some(map) = query.as_object() else {
++        return if query.is_null() { Ok(String::new()) } else { Err("the query is { name: value }".into()) };
++    };
++    if map.len() > 30 {
++        return Err("too many query values".into());
++    }
++    let mut parts = Vec::new();
++    for (k, v) in map {
++        if k.is_empty() || k.len() > 40 || !k.chars().all(|c| c.is_ascii_alphanumeric()) {
++            return Err(format!("not a query name: {k}"));
++        }
++        let v = match v {
++            Value::String(s) if s.len() <= 300 => s.clone(),
++            Value::Number(n) => n.to_string(),
++            Value::Bool(b) => b.to_string(),
++            Value::Null => continue,
++            _ => return Err(format!("not a query value for {k}")),
++        };
++        parts.push(format!("{}={}", encode(k), encode(&v)));
++    }
++    Ok(parts.join("&"))
++}
++
++/// What the meter keeps of the sign-in.
++#[derive(Clone, serde::Serialize, serde::Deserialize, Default)]
++#[serde(rename_all = "camelCase")]
++pub struct Account {
++    pub server: String,
++    pub server_name: String,
++    pub user: String,
++    pub user_id: String,
++    pub token: String,
++    pub device_id: String,
++}
++
++impl Account {
++    /// What the plugin sees: no key.
++    fn public(&self) -> Value {
++        json!({ "server": self.server, "serverName": self.server_name, "user": self.user, "userId": self.user_id })
++    }
++
++    /// The header Jellyfin reads who asks from.
++    pub fn authorization(&self) -> String {
++        let mut h = format!(
++            "MediaBrowser Client=\"A2Tools Streams\", Device=\"A2Tools DPS Meter\", DeviceId=\"{}\", Version=\"{}\"",
++            self.device_id,
++            env!("CARGO_PKG_VERSION")
++        );
++        if !self.token.is_empty() {
++            h.push_str(&format!(", Token=\"{}\"", self.token));
++        }
++        h
++    }
++}
++
++/// How a video is fetched: the server's file as it is ("original"), sound
++/// only, or the server's conversion down to a height (HLS).
++pub fn stream_path(item: &str, source: &str, session: &str, quality: &str, audio_index: Option<u32>) -> String {
++    let src = if source.is_empty() { item } else { source };
++    let bitrate = match quality {
++        "1080" => Some((1080, 10_000_000)),
++        "720" => Some((720, 4_000_000)),
++        "480" => Some((480, 2_000_000)),
++        "360" => Some((360, 1_000_000)),
++        _ => None,
++    };
++    match bitrate {
++        Some((h, br)) => {
++            let mut p = format!(
++                "/Videos/{item}/master.m3u8?MediaSourceId={src}&VideoCodec=h264&AudioCodec=aac,mp3&MaxHeight={h}\
++                 &VideoBitrate={br}&AudioBitrate=192000&TranscodingMaxAudioChannels=2&SegmentContainer=ts\
++                 &BreakOnNonKeyFrames=true"
++            );
++            if !session.is_empty() {
++                p.push_str(&format!("&PlaySessionId={session}"));
++            }
++            if let Some(a) = audio_index {
++                p.push_str(&format!("&AudioStreamIndex={a}"));
++            }
++            p
++        }
++        None => format!("/Videos/{item}/stream?static=true&mediaSourceId={src}"),
++    }
++}
++
++fn file(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
++    use tauri::Manager;
++    let state = app.try_state::<crate::app::AppState>().ok_or("no app state")?;
++    Ok(state.app_data_dir.join("jellyfin.json"))
++}
++
++fn load(app: &tauri::AppHandle) -> Option<Account> {
++    let text = std::fs::read_to_string(file(app).ok()?).ok()?;
++    let a: Account = serde_json::from_str(&text).ok()?;
++    // Read again, checked again: an address that isn't local is never used.
++    (parse_server(&a.server).is_ok() && !a.token.is_empty()).then_some(a)
++}
++
++fn store(app: &tauri::AppHandle, account: &Account) -> Result<(), String> {
++    let path = file(app)?;
++    let text = serde_json::to_string_pretty(account).map_err(|e| e.to_string())?;
++    let tmp = path.with_extension("json.tmp");
++    {
++        use std::io::Write;
++        let mut opts = std::fs::OpenOptions::new();
++        opts.write(true).create(true).truncate(true);
++        #[cfg(unix)]
++        {
++            use std::os::unix::fs::OpenOptionsExt;
++            opts.mode(0o600);
++        }
++        let mut f = opts.open(&tmp).map_err(|e| e.to_string())?;
++        f.write_all(text.as_bytes()).map_err(|e| e.to_string())?;
++    }
++    std::fs::rename(&tmp, &path).map_err(|e| e.to_string())
++}
++
++fn device_id() -> String {
++    use sha2::{Digest, Sha256};
++    let mut h = Sha256::new();
++    h.update(format!("{:?}{}", std::time::SystemTime::now(), std::process::id()).as_bytes());
++    if let Ok(name) = std::fs::read_to_string("/etc/machine-id") {
++        h.update(name.as_bytes());
++    }
++    h.finalize().iter().take(16).map(|b| format!("{b:02x}")).collect()
++}
++
++/// The address mpv gets for the signed-in server, with the header it sends
++/// along (the key goes in the header, never in the address). A local name is
++/// looked up here and only a home network's address handed on, for plain
++/// http (https keeps its name, which its certificate needs; its addresses
++/// are checked all the same).
++pub async fn mpv_source(app: &tauri::AppHandle, path: &str) -> Result<(String, String), String> {
++    let account = load(app).ok_or("sign in to your Jellyfin server first")?;
++    let server = parse_server(&account.server)?;
++    let base = match &server.host {
++        Host::Ip(_) => server.base(),
++        Host::Name(name) => {
++            let ip = net::local_addresses(name, server.port.unwrap_or(if server.https { 443 } else { 80 })).await?
++                .into_iter().next().ok_or("the server's name has no home network address")?;
++            if server.https {
++                server.base()
++            } else {
++                server.with_host(&match ip {
++                    std::net::IpAddr::V6(v) => format!("[{v}]"),
++                    v4 => v4.to_string(),
++                })
++            }
++        }
++    };
++    Ok((format!("{base}{path}"), format!("Authorization: {}", account.authorization())))
++}
++
++/// `a2.video.jellyfin(action, arg)`: the plugin's calls for the server.
++///
++/// - `status`: who is signed in, where (`{ server, serverName, user }`), or null
++/// - `login` `{ server, user, password }`: sign in (the key is kept here)
++/// - `logout`: sign out, the key forgotten
++/// - `get` `{ path, query }`: one of the readable paths (`get_path_ok`)
++/// - `playbackInfo` `{ item }`: an item's files and tracks
++/// - `report` `{ kind: start | progress | stopped, item, source, session, position, paused, muted, method }`
++/// - `played` `{ item, on }`: mark it watched or not
++/// - `image` `{ item, type, height }`: an item's picture, as a data: URL
++#[tauri::command]
++pub async fn plugin_video_jellyfin(
++    app: tauri::AppHandle,
++    window: tauri::WebviewWindow,
++    plugin: Option<String>,
++    action: String,
++    arg: Option<Value>,
++) -> Result<Value, String> {
++    let id = window_plugin(&window, plugin.as_deref())?;
++    require(&app, &id, "video")?;
++    let arg = arg.unwrap_or(Value::Null);
++    let s = |k: &str| arg.get(k).and_then(Value::as_str).unwrap_or("").to_string();
++    match action.as_str() {
++        "status" => Ok(load(&app).map(|a| a.public()).unwrap_or(Value::Null)),
++        "login" => {
++            let server = parse_server(&s("server"))?;
++            let user = s("user");
++            if user.trim().is_empty() || user.len() > 100 {
++                return Err("type your Jellyfin user name".into());
++            }
++            let password = s("password");
++            if password.len() > 200 {
++                return Err("the password is too long".into());
++            }
++            let mut account = Account {
++                server: server.base(),
++                device_id: load(&app).map(|a| a.device_id).filter(|d| !d.is_empty()).unwrap_or_else(device_id),
++                ..Default::default()
++            };
++            let info = net::request(&account, "GET", "/System/Info/Public", None).await
++                .map_err(|e| format!("no Jellyfin server answered at {}: {e}", account.server))?;
++            if info.get("Id").and_then(Value::as_str).is_none() {
++                return Err("that is not a Jellyfin server".into());
++            }
++            account.server_name = info.get("ServerName").and_then(Value::as_str).unwrap_or("Jellyfin").chars().take(80).collect();
++            let auth = net::request(&account, "POST", "/Users/AuthenticateByName", Some(json!({ "Username": user.trim(), "Pw": password }))).await
++                .map_err(|e| if e.contains("401") { "wrong user name or password".to_string() } else { e })?;
++            account.token = auth.get("AccessToken").and_then(Value::as_str).filter(|t| t.len() <= 200 && t.chars().all(|c| c.is_ascii_alphanumeric())).ok_or("the server gave no key")?.to_string();
++            account.user_id = auth.pointer("/User/Id").and_then(Value::as_str).filter(|u| item_ok(u)).ok_or("the server gave no user")?.to_string();
++            account.user = auth.pointer("/User/Name").and_then(Value::as_str).unwrap_or(user.trim()).chars().take(100).collect();
++            store(&app, &account)?;
++            tracing::info!("Jellyfin: signed in");
++            Ok(account.public())
++        }
++        "logout" => {
++            if let Some(a) = load(&app) {
++                let _ = net::request(&a, "POST", "/Sessions/Logout", None).await;
++            }
++            let _ = std::fs::remove_file(file(&app)?);
++            Ok(Value::Null)
++        }
++        _ => {
++            let account = load(&app).ok_or("sign in to your Jellyfin server first")?;
++            let user = account.user_id.clone();
++            match action.as_str() {
++                "get" => {
++                    let path = s("path");
++                    if !get_path_ok(&path) {
++                        return Err("the plugin can't read that".into());
++                    }
++                    let query = query_of(arg.get("query").unwrap_or(&Value::Null))?;
++                    let path = path.replace("{user}", &user);
++                    let full = if query.is_empty() { path } else { format!("{path}?{query}") };
++                    net::request(&account, "GET", &full, None).await
++                }
++                "playbackInfo" => {
++                    let item = s("item");
++                    if !item_ok(&item) {
++                        return Err("not an item".into());
++                    }
++                    net::request(&account, "POST", &format!("/Items/{item}/PlaybackInfo?UserId={user}"), Some(json!({}))).await
++                }
++                "report" => {
++                    let (item, source, session) = (s("item"), s("source"), s("session"));
++                    if !item_ok(&item) || (!source.is_empty() && !source.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'))
++                        || session.len() > 64 || !session.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
++                    {
++                        return Err("not an item".into());
++                    }
++                    let path = match s("kind").as_str() {
++                        "start" => "/Sessions/Playing",
++                        "progress" => "/Sessions/Playing/Progress",
++                        "stopped" => "/Sessions/Playing/Stopped",
++                        _ => return Err("report start, progress or stopped".into()),
++                    };
++                    let seconds = arg.get("position").and_then(Value::as_f64).filter(|v| v.is_finite() && *v >= 0.0).unwrap_or(0.0);
++                    let method = if s("method") == "Transcode" { "Transcode" } else { "DirectPlay" };
++                    let mut body = json!({
++                        "ItemId": item,
++                        "MediaSourceId": if source.is_empty() { item.clone() } else { source },
++                        "PositionTicks": (seconds * 10_000_000.0) as u64,
++                        "IsPaused": arg.get("paused").and_then(Value::as_bool).unwrap_or(false),
++                        "IsMuted": arg.get("muted").and_then(Value::as_bool).unwrap_or(false),
++                        "PlayMethod": method,
++                        "CanSeek": true,
++                    });
++                    if !session.is_empty() {
++                        body["PlaySessionId"] = json!(session);
++                    }
++                    net::request(&account, "POST", path, Some(body)).await.map(|_| Value::Null)
++                }
++                "played" => {
++                    let item = s("item");
++                    if !item_ok(&item) {
++                        return Err("not an item".into());
++                    }
++                    let on = arg.get("on").and_then(Value::as_bool).unwrap_or(true);
++                    net::request(&account, if on { "POST" } else { "DELETE" }, &format!("/Users/{user}/PlayedItems/{item}"), None).await
++                }
++                "image" => {
++                    let item = s("item");
++                    let kind = s("type");
++                    if !item_ok(&item) || !["Primary", "Thumb", "Backdrop"].contains(&kind.as_str()) {
++                        return Err("not a picture".into());
++                    }
++                    let height = arg.get("height").and_then(Value::as_u64).unwrap_or(300).clamp(40, 720);
++                    net::image(&account, &format!("/Items/{item}/Images/{kind}?fillHeight={height}&quality=85")).await.map(Value::String)
++                }
++                _ => Err("unknown Jellyfin call".into()),
++            }
++        }
++    }
++}
++
++/// The client, for the home network only.
++#[cfg(feature = "net")]
++mod net {
++    use super::*;
++    use std::collections::HashMap;
++    use std::net::{IpAddr, SocketAddr};
++    use std::sync::{Arc, Mutex, OnceLock};
++
++    /// A local name's addresses, the home network's only (none: refused).
++    pub async fn local_addresses(name: &str, port: u16) -> Result<Vec<IpAddr>, String> {
++        if !local_name(name) {
++            return Err(format!("{name}: not a name in your home network"));
++        }
++        let all: Vec<IpAddr> = tokio::net::lookup_host((name, port)).await
++            .map_err(|e| format!("{name}: {e}"))?
++            .map(|a| a.ip())
++            .collect();
++        if all.is_empty() || !all.iter().all(|ip| local_ip(*ip)) {
++            tracing::warn!("Jellyfin: refused {name} (not only home network addresses)");
++            return Err(format!("{name} isn't only in your home network"));
++        }
++        Ok(all)
++    }
++
++    /// Lookups for local names only, answered with home network addresses only.
++    struct LocalOnly;
++    impl reqwest::dns::Resolve for LocalOnly {
++        fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
++            let host = name.as_str().to_string();
++            Box::pin(async move {
++                let ips = local_addresses(&host, 0).await?;
++                Ok(Box::new(ips.into_iter().map(|ip| SocketAddr::new(ip, 0))) as reqwest::dns::Addrs)
++            })
++        }
++    }
++
++    pub fn client() -> &'static reqwest::Client {
++        static C: OnceLock<reqwest::Client> = OnceLock::new();
++        C.get_or_init(|| {
++            reqwest::Client::builder()
++                .user_agent(concat!("A2Tools-DPS-Meter/", env!("CARGO_PKG_VERSION"), " Clicktrough"))
++                .connect_timeout(Duration::from_secs(5))
++                .timeout(Duration::from_secs(30))
++                .dns_resolver(Arc::new(LocalOnly))
++                .no_proxy()
++                .redirect(reqwest::redirect::Policy::none())
++                .build()
++                .unwrap_or_else(|e| {
++                    tracing::error!("Jellyfin: the client could not be built ({e})");
++                    reqwest::Client::builder().dns_resolver(Arc::new(LocalOnly)).no_proxy()
++                        .redirect(reqwest::redirect::Policy::none()).build().expect("a client")
++                })
++        })
++    }
++
++    /// The full address of `path` on the account's server, checked again.
++    fn url(account: &Account, path: &str) -> Result<String, String> {
++        let server = parse_server(&account.server)?;
++        if let Host::Ip(ip) = server.host {
++            if !local_ip(ip) {
++                return Err("not a home network address".into());
++            }
++        }
++        Ok(format!("{}{path}", server.base()))
++    }
++
++    pub async fn request(account: &Account, method: &str, path: &str, body: Option<Value>) -> Result<Value, String> {
++        let url = url(account, path)?;
++        let m = reqwest::Method::from_bytes(method.as_bytes()).map_err(|e| e.to_string())?;
++        let mut req = client().request(m, &url)
++            .header("Authorization", account.authorization())
++            .header("Accept", "application/json");
++        if let Some(b) = body {
++            req = req.header("Content-Type", "application/json").body(b.to_string());
++        }
++        let res = req.send().await.map_err(|e| super::super::web_error(&e))?;
++        let status = res.status();
++        if !status.is_success() {
++            return Err(format!("the server answered {status}"));
++        }
++        let bytes = res.bytes().await.map_err(|e| e.to_string())?;
++        if bytes.len() > 8 * 1024 * 1024 {
++            return Err("the answer is too large".into());
++        }
++        if bytes.is_empty() {
++            return Ok(Value::Null);
++        }
++        serde_json::from_slice(&bytes).or(Ok(Value::Null))
++    }
++
++    pub async fn image(account: &Account, path: &str) -> Result<String, String> {
++        static CACHE: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
++        let cache = CACHE.get_or_init(Mutex::default);
++        let key = format!("{}{path}", account.server);
++        if let Some(hit) = cache.lock().unwrap_or_else(|p| p.into_inner()).get(&key) {
++            return Ok(hit.clone());
++        }
++        let res = client().get(url(account, path)?)
++            .header("Authorization", account.authorization())
++            .header("Accept", "image/webp,image/jpeg,image/png")
++            .send().await.map_err(|e| super::super::web_error(&e))?;
++        if !res.status().is_success() {
++            return Err("no such picture".into());
++        }
++        let kind = res.headers().get(reqwest::header::CONTENT_TYPE).and_then(|v| v.to_str().ok())
++            .and_then(super::super::picture_kind).ok_or("not a picture")?;
++        let bytes = res.bytes().await.map_err(|e| e.to_string())?;
++        if bytes.len() > 3 * 1024 * 1024 {
++            return Err("the picture is too large".into());
++        }
++        let data = format!("data:{kind};base64,{}", super::super::base64(&bytes));
++        let mut c = cache.lock().unwrap_or_else(|p| p.into_inner());
++        if c.len() >= 600 {
++            c.clear();
++        }
++        c.insert(key, data.clone());
++        Ok(data)
++    }
++}
++
++#[cfg(not(feature = "net"))]
++mod net {
++    use super::*;
++    pub async fn local_addresses(_: &str, _: u16) -> Result<Vec<std::net::IpAddr>, String> {
++        Err("this meter is built without network features".into())
++    }
++    pub async fn request(_: &Account, _: &str, _: &str, _: Option<Value>) -> Result<Value, String> {
++        Err("this meter is built without network features".into())
++    }
++    pub async fn image(_: &Account, _: &str) -> Result<String, String> {
++        Err("this meter is built without network features".into())
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn only_a_server_in_the_home_network() {
++        for (input, base) in [
++            ("192.168.1.20:8096", "http://192.168.1.20:8096"),
++            ("http://10.0.0.5:8096/", "http://10.0.0.5:8096"),
++            ("https://172.20.1.1/jellyfin", "https://172.20.1.1/jellyfin"),
++            ("localhost:8096", "http://localhost:8096"),
++            ("127.0.0.1:8096", "http://127.0.0.1:8096"),
++            ("http://NAS.local:8096", "http://nas.local:8096"),
++            ("nas:8096", "http://nas:8096"),
++            ("media.home.arpa", "http://media.home.arpa"),
++            ("http://[fd00::12]:8096", "http://[fd00::12]:8096"),
++            ("[fe80::1]:8096", "http://[fe80::1]:8096"),
++        ] {
++            assert_eq!(parse_server(input).map(|s| s.base()), Ok(base.to_string()), "{input}");
++        }
++        for bad in [
++            "jellyfin.example.com", "https://demo.jellyfin.org/stable", "8.8.8.8:8096", "http://1.2.3.4",
++            "172.32.0.1", "100.64.0.1", "[2001:db8::1]:8096", "[::ffff:8.8.8.8]", "user@192.168.1.2",
++            "192.168.1.2:8096/x?y=1", "192.168.1.2/../x", "ftp://192.168.1.2", "192.168.1.2:99999",
++            "192.168.1.2 :8096", "", "nas.local.evil.com", "my-nas.de", "192.168.1.2.nip.io",
++        ] {
++            assert!(parse_server(bad).is_err(), "{bad}");
++        }
++    }
++
++    #[test]
++    fn readable_paths_only() {
++        for ok in ["/Users/{user}/Items", "/Users/{user}/Items/Resume", "/UserViews", "/Shows/NextUp",
++                   "/Shows/0123456789abcdef0123456789abcdef/Episodes", "/MediaSegments/0123456789abcdef0123456789abcdef",
++                   "/Users/{user}", "/Items/0123456789abcdef0123456789abcdef"] {
++            assert!(get_path_ok(ok), "{ok}");
++        }
++        for bad in ["/System/Configuration", "/Users", "/Users/{user}/../Library", "/Items/x/Download",
++                    "/Library/Refresh", "/Plugins", "/Users/{user}/Policy", "https://x", "/Items?x=1", "/Startup/User"] {
++            assert!(!get_path_ok(bad), "{bad}");
++        }
++    }
++
++    #[test]
++    fn a_query_is_encoded() {
++        assert_eq!(query_of(&json!({ "SearchTerm": "a&b=c", "Limit": 20, "Recursive": true, "X": null })).unwrap(),
++                   "Limit=20&Recursive=true&SearchTerm=a%26b%3Dc");
++        assert!(query_of(&json!({ "a=b": 1 })).is_err());
++        assert!(query_of(&json!("x")).is_err());
++    }
++
++    #[test]
++    fn the_stream_is_the_file_or_the_servers_conversion() {
++        let id = "0123456789abcdef0123456789abcdef";
++        assert_eq!(stream_path(id, "", "", "original", None), format!("/Videos/{id}/stream?static=true&mediaSourceId={id}"));
++        assert_eq!(stream_path(id, "", "", "audio", None), format!("/Videos/{id}/stream?static=true&mediaSourceId={id}"));
++        let p = stream_path(id, id, "abc", "720", Some(2));
++        assert!(p.starts_with(&format!("/Videos/{id}/master.m3u8?")) && p.contains("MaxHeight=720") && p.contains("PlaySessionId=abc") && p.contains("AudioStreamIndex=2"), "{p}");
++    }
++
++    #[test]
++    fn the_key_goes_in_the_header() {
++        let a = Account { token: "abc123".into(), device_id: "d1".into(), ..Default::default() };
++        assert!(a.authorization().ends_with(", Token=\"abc123\""));
++        assert!(a.public().get("token").is_none());
++        assert!(!a.public().to_string().contains("abc123"));
++    }
++
++    /// The client itself: a public address or name is never reached.
++    #[cfg(feature = "net")]
++    #[tokio::test]
++    async fn the_client_reaches_nothing_outside() {
++        for url in ["http://example.com/", "https://demo.jellyfin.org/stable/System/Info/Public"] {
++            let e = net::client().get(url).send().await.unwrap_err();
++            assert!(format!("{e:?}").contains("home network"), "{url}: {e:?}");
++        }
++        assert!(net::local_addresses("example.com", 80).await.is_err());
++        assert!(net::local_addresses("localhost", 80).await.is_ok());
++    }
++}
+diff --git a/src-tauri/src/plugins/media.rs b/src-tauri/src/plugins/media.rs
+index d4c6def..f567e4a 100644
+--- a/src-tauri/src/plugins/media.rs
++++ b/src-tauri/src/plugins/media.rs
+@@ -26,10 +26,18 @@ use serde_json::{json, Value};
+ use tauri::Emitter;
+ 
+ /// The controls a plugin may show in the row.
+-const CONTROLS: &[&str] = &["prev", "playStop", "pause", "next", "mute", "volume", "opacity", "quality", "favourite", "stop"];
++/// `rewind` and `forward` go back and on a little, `skip` past an intro or
++/// the credits (its button shows the state's `skip` text).
++const CONTROLS: &[&str] = &[
++    "prev", "playStop", "pause", "rewind", "forward", "skip", "next", "mute", "volume", "opacity", "quality", "favourite", "stop",
++];
+ 
+-/// The qualities the row offers (the Streams plugin's).
+-const QUALITIES: &[&str] = &["1080", "720", "480", "360", "audio"];
++/// The qualities the row knows (the Streams plugin's; "original": the file
++/// as it is, Jellyfin's). A state may offer some of them (`qualities`).
++const QUALITIES: &[&str] = &["original", "1080", "720", "480", "360", "audio"];
++
++/// The qualities the row offers when a state names none.
++const DEFAULT_QUALITIES: &[&str] = &["1080", "720", "480", "360", "audio"];
+ 
+ /// A slot's name: short, lower case.
+ fn slot_ok(s: &str) -> bool {
+@@ -78,6 +86,18 @@ fn clean(state: &Value) -> Option<Value> {
+         "volume": unit(s.get("volume"), 0.0),
+         "opacity": unit(s.get("opacity"), 0.2),
+         "quality": s.get("quality").and_then(Value::as_str).filter(|q| QUALITIES.contains(q)),
++        "qualities": s.get("qualities").and_then(Value::as_array).map(|qs| {
++            let mut out: Vec<&str> = Vec::new();
++            for q in qs.iter().filter_map(Value::as_str) {
++                if let Some(k) = QUALITIES.iter().find(|k| **k == q) {
++                    if !out.contains(k) {
++                        out.push(k);
++                    }
++                }
++            }
++            out
++        }).filter(|qs| !qs.is_empty()),
++        "skip": text(s.get("skip"), 24),
+         "controls": controls,
+     }))
+ }
+@@ -95,7 +115,8 @@ fn listed(app: &tauri::AppHandle) -> Value {
+             .map(|(k, state)| {
+                 let id = plugin(&k);
+                 let slot = k.split_once('/').map(|(_, s)| s.to_string()).unwrap_or_default();
+-                json!({ "key": k, "id": id, "slot": slot, "name": names.get(&id).cloned().unwrap_or_else(|| id.clone()), "state": state, "qualities": QUALITIES })
++                let qualities = state.get("qualities").filter(|q| q.is_array()).cloned().unwrap_or_else(|| json!(DEFAULT_QUALITIES));
++                json!({ "key": k, "id": id, "slot": slot, "name": names.get(&id).cloned().unwrap_or_else(|| id.clone()), "state": state, "qualities": qualities })
+             })
+             .collect(),
+     )
+@@ -203,5 +224,10 @@ mod tests {
+         assert_eq!(key("streams", "youtube"), "streams/youtube");
+         assert_eq!(key("radio", ""), "radio");
+         assert_eq!(clean(&json!({ "title": "x".repeat(500) })).unwrap()["title"].as_str().unwrap().len(), 120);
++        let j = clean(&json!({ "qualities": ["original", "720", "4k", "720"], "skip": "Skip intro", "controls": ["rewind", "skip", "forward"] })).unwrap();
++        assert_eq!(j["qualities"], json!(["original", "720"]));
++        assert_eq!(j["skip"], "Skip intro");
++        assert_eq!(j["controls"], json!(["rewind", "skip", "forward"]));
++        assert_eq!(clean(&json!({ "qualities": ["4k"] })).unwrap()["qualities"], Value::Null);
+     }
+ }
+diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
+index 94928ec..695ac40 100644
+--- a/src-tauri/src/plugins/mod.rs
++++ b/src-tauri/src/plugins/mod.rs
+@@ -20,6 +20,7 @@ pub mod media;
+ // Clicktrough: a plugin's overlay on a button in the meter's header.
+ pub mod overlays;
+ pub mod video;
++pub mod jellyfin;
+ pub mod widgets;
+ // Clicktrough: the world around the player (`events:world`).
+ pub mod world;
+@@ -163,7 +164,7 @@ const PLUGIN_SURFACE_COMMANDS: &[&str] = &[
+     "plugin_media_set",
+     // Clicktrough: video in a widget and the lists to pick it from (a2.video).
+     "plugin_video_play", "plugin_video_control", "plugin_video_twitch", "plugin_video_feed",
+-    "plugin_video_search", "plugin_video_freetube",
++    "plugin_video_search", "plugin_video_freetube", "plugin_video_jellyfin",
+ ];
+ 
+ /// Whether the window `label` may call the app command `command`: any of the
+@@ -1591,7 +1592,7 @@ fn describe_permission(t: &PromptTexts, permission: &str) -> String {
+         "events:shared" => "See what other plugins share (e.g. the pets they track)".into(),
+         "events:items" => "See your inventory and storages, and the items you get (from the game data)".into(),
+         "radio" => "Play internet radio stations (listening only, from the stations this build lists)".into(),
+-        "video" => "Play Twitch and YouTube videos with mpv, and list them (Twitch, YouTube, FreeTube's subscriptions)".into(),
++        "video" => "Play Twitch and YouTube videos and your own Jellyfin server's (home network only) with mpv, and list them (Twitch, YouTube, FreeTube's subscriptions, Jellyfin)".into(),
+         "media" => "Show what it plays, with its controls, in a row under the meter's header".into(),
+         p => match (p.strip_prefix("decoder:"), p.strip_prefix("web:")) {
+             (Some(name), _) => t.perm_decoder.replace("{name}", name),
+diff --git a/src-tauri/src/plugins/video.rs b/src-tauri/src/plugins/video.rs
+index 0edd22b..46d0d26 100644
+--- a/src-tauri/src/plugins/video.rs
++++ b/src-tauri/src/plugins/video.rs
+@@ -15,6 +15,10 @@
+ //! (www.youtube.com/feeds/videos.xml), and the player's subscriptions from
+ //! FreeTube's own file on this computer (read only). Nothing else is read,
+ //! and nothing is sent but the search words, channel names and ids.
++//!
++//! The player's own Jellyfin server, in the home network only, plays here
++//! too (`plugins::jellyfin`): its address mpv gets is built there, for the
++//! signed-in server alone.
+ 
+ use std::path::PathBuf;
+ use std::time::Duration;
+@@ -68,8 +72,30 @@ fn widget_window(app: &tauri::AppHandle, id: &str, name: &str) -> Result<tauri::
+     app.get_webview_window(&widgets::label(id, name)).ok_or_else(|| "open the widget first".to_string())
+ }
+ 
+-/// `a2.video.play(widget, { twitch | youtube, quality, volume })`.
++/// What mpv is told for one video.
++pub struct Load {
++    pub url: String,
++    /// yt-dlp's format (Twitch, YouTube).
++    pub format: String,
++    pub volume: f64,
++    /// An HTTP header mpv sends along (the Jellyfin server's key).
++    pub header: Option<String>,
++    /// Where to start, in seconds (0: the start).
++    pub start: f64,
++    /// The title mpv shows, in place of the address.
++    pub title: String,
++    pub audio_only: bool,
++}
++
++/// A Jellyfin stream's play session or media source id: letters, digits, `-`.
++fn token_ok(s: &str) -> bool {
++    s.len() <= 64 && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
++}
++
++/// `a2.video.play(widget, { twitch | youtube | jellyfin, quality, volume,
++/// start, title, source, session, audio })`.
+ #[tauri::command]
++#[allow(clippy::too_many_arguments)]
+ pub async fn plugin_video_play(
+     app: tauri::AppHandle,
+     window: tauri::WebviewWindow,
+@@ -79,20 +105,38 @@ pub async fn plugin_video_play(
+     name: String,
+     quality: Option<String>,
+     volume: Option<f64>,
++    start: Option<f64>,
++    title: Option<String>,
++    source: Option<String>,
++    session: Option<String>,
++    audio: Option<u32>,
+ ) -> Result<(), String> {
+     let id = window_plugin(&window, plugin.as_deref())?;
+     require(&app, &id, "video")?;
+-    let url = stream_url(&kind, &name)?;
++    let quality = quality.unwrap_or_else(|| "1080".into());
++    let title: String = title.unwrap_or_default().chars().filter(|c| !c.is_control()).take(200).collect();
++    let start = start.filter(|v| v.is_finite() && *v > 0.0).unwrap_or(0.0);
++    let load = if kind == "jellyfin" {
++        let (source, session) = (source.unwrap_or_default(), session.unwrap_or_default());
++        if !super::jellyfin::item_ok(&name) || !token_ok(&source) || !token_ok(&session) {
++            return Err("not a Jellyfin item".into());
++        }
++        let path = super::jellyfin::stream_path(&name, &source, &session, &quality, audio);
++        let (url, header) = super::jellyfin::mpv_source(&app, &path).await?;
++        Load { url, format: String::new(), volume: 0.0, header: Some(header), start, title, audio_only: quality == "audio" }
++    } else {
++        Load { url: stream_url(&kind, &name)?, format: ytdl_format(&quality), volume: 0.0, header: None, start, title, audio_only: false }
++    };
+     let target = widget_window(&app, &id, &widget)?;
+-    let format = ytdl_format(quality.as_deref().unwrap_or("1080"));
+     let volume = volume.filter(|v| v.is_finite()).unwrap_or(70.0).clamp(0.0, 100.0);
+     tracing::info!("Video: {id} plays {kind} {name} in {widget}");
+-    player::play(&app, &id, &target, &url, &format, volume)
++    player::play(&app, &id, &target, Load { volume, ..load })
+ }
+ 
+-/// `a2.video.control(widget, { pause, volume, mute, opacity, stop })`.
++/// `a2.video.control(widget, { pause, volume, mute, opacity, stop, seek,
++/// skip, audio, subtitle, subtitleFile })`.
+ #[tauri::command]
+-pub fn plugin_video_control(
++pub async fn plugin_video_control(
+     app: tauri::AppHandle,
+     window: tauri::WebviewWindow,
+     plugin: Option<String>,
+@@ -116,6 +160,36 @@ pub fn plugin_video_control(
+             let v = value.and_then(|v| v.as_f64()).filter(|v| v.is_finite()).ok_or("not an opacity")?;
+             player::opacity(&app, &label, v.clamp(0.2, 1.0))
+         }
++        // To a time (seconds), or by some seconds (skip; back when negative).
++        "seek" | "skip" => {
++            let v = value.and_then(|v| v.as_f64()).filter(|v| v.is_finite() && v.abs() < 1e7).ok_or("not a time")?;
++            let how = if action == "seek" { "absolute" } else { "relative" };
++            player::run(&label, &["seek", &format!("{v:.2}"), how])
++        }
++        // A track of the file: its number among its kind (1, 2, ...), or
++        // "no" / "auto".
++        "audio" | "subtitle" => {
++            let v = match value {
++                Some(Value::Number(n)) => n.as_u64().filter(|n| (1..100).contains(n)).map(|n| n.to_string()),
++                Some(Value::String(s)) if s == "no" || s == "auto" => Some(s),
++                _ => None,
++            }
++            .ok_or("not a track")?;
++            player::set(&label, if action == "audio" { "aid" } else { "sid" }, &v)
++        }
++        // A Jellyfin subtitle that isn't in the file: { item, source, index, format }.
++        "subtitleFile" => {
++            let v = value.unwrap_or(Value::Null);
++            let s = |k: &str| v.get(k).and_then(Value::as_str).unwrap_or("").to_string();
++            let (item, source, format) = (s("item"), s("source"), s("format"));
++            let index = v.get("index").and_then(Value::as_u64).filter(|i| *i < 1000).ok_or("not a subtitle")?;
++            if !super::jellyfin::item_ok(&item) || !token_ok(&source) || !["srt", "vtt", "ass", "ssa"].contains(&format.as_str()) {
++                return Err("not a subtitle".into());
++            }
++            let src = if source.is_empty() { item.clone() } else { source };
++            let (url, _) = super::jellyfin::mpv_source(&app, &format!("/Videos/{item}/{src}/Subtitles/{index}/0/Stream.{format}")).await?;
++            player::run(&label, &["sub-add", &url, "select"])
++        }
+         _ => Err("unknown video control".into()),
+     }
+ }
+@@ -380,9 +454,12 @@ mod net {
+ 
+ #[cfg(not(target_os = "linux"))]
+ mod player {
+-    pub fn play(_: &tauri::AppHandle, _: &str, _: &tauri::WebviewWindow, _: &str, _: &str, _: f64) -> Result<(), String> {
++    pub fn play(_: &tauri::AppHandle, _: &str, _: &tauri::WebviewWindow, _: super::Load) -> Result<(), String> {
+         Err("video plays on Linux only in this build".into())
+     }
++    pub fn run(_: &str, _: &[&str]) -> Result<(), String> {
++        Err("no video is playing".into())
++    }
+     pub fn stop(_: &tauri::AppHandle, _: &str) -> Result<(), String> {
+         Ok(())
+     }
+@@ -612,6 +689,11 @@ mod player {
+         }
+     }
+ 
++    /// A command for widget `label`'s mpv.
++    pub fn run(label: &str, args: &[&str]) -> Result<(), String> {
++        command(handle_of(label).ok_or("no video is playing")?, args)
++    }
++
+     fn command(h: Handle, args: &[&str]) -> Result<(), String> {
+         let m = mpv()?;
+         let owned: Vec<CString> = args.iter().map(|a| CString::new(*a).map_err(|e| e.to_string())).collect::<Result<_, _>>()?;
+@@ -668,7 +750,8 @@ mod player {
+             return Err(error(code));
+         }
+         for (name, format) in [("pause", FORMAT_FLAG), ("paused-for-cache", FORMAT_FLAG), ("media-title", FORMAT_STRING),
+-                               ("volume", FORMAT_DOUBLE), ("mute", FORMAT_FLAG)] {
++                               ("volume", FORMAT_DOUBLE), ("mute", FORMAT_FLAG),
++                               ("time-pos", FORMAT_DOUBLE), ("duration", FORMAT_DOUBLE)] {
+             let n = CString::new(name).unwrap_or_default();
+             unsafe { (m.observe_property)(h, 0, n.as_ptr(), format) };
+         }
+@@ -677,6 +760,8 @@ mod player {
+         let raw = h as usize;
+         std::thread::Builder::new().name("video-events".into()).spawn(move || {
+             let h = raw as Handle;
++            // The position goes to the plugin once a second, not each frame.
++            let mut said_at = f64::NAN;
+             loop {
+                 let ev = unsafe { &*(m.wait_event)(h, -1.0) };
+                 match ev.event_id {
+@@ -703,7 +788,15 @@ mod player {
+                             FORMAT_STRING => json!(unsafe { CStr::from_ptr(*(p.data as *const *const c_char)) }.to_string_lossy()),
+                             _ => continue,
+                         };
++                        if name == "time-pos" {
++                            let Some(t) = value.as_f64() else { continue };
++                            if (t - said_at).abs() < 1.0 && t.floor() == said_at.floor() {
++                                continue;
++                            }
++                            said_at = t;
++                        }
+                         let key = match name.as_str() {
++                            "time-pos" => "position",
+                             "media-title" => "title",
+                             "paused-for-cache" => "buffering",
+                             other => other,
+@@ -856,10 +949,11 @@ mod player {
+         }
+     }
+ 
+-    pub fn play(app: &tauri::AppHandle, id: &str, window: &tauri::WebviewWindow, url: &str, format: &str, volume: f64) -> Result<(), String> {
++    pub fn play(app: &tauri::AppHandle, id: &str, window: &tauri::WebviewWindow, load: super::Load) -> Result<(), String> {
+         mpv()?;
+         let label = window.label().to_string();
+-        let (app2, id, window, url, format) = (app.clone(), id.to_string(), window.clone(), url.to_string(), format.to_string());
++        let volume = load.volume;
++        let (app2, id, window) = (app.clone(), id.to_string(), window.clone());
+         let (tx, rx) = std::sync::mpsc::channel();
+         app.run_on_main_thread(move || {
+             let result = (|| -> Result<(), String> {
+@@ -877,14 +971,25 @@ mod player {
+                 }
+                 area.set_visible(true);
+                 area.queue_render();
+-                let f = CString::new("ytdl-format").unwrap_or_default();
+-                let fv = CString::new(format.as_str()).map_err(|e| e.to_string())?;
+-                if let Ok(m) = mpv() {
+-                    unsafe { (m.set_property_string)(h, f.as_ptr(), fv.as_ptr()) };
++                // Each video's own: what an earlier one set doesn't carry over.
++                if !load.format.is_empty() {
++                    set(&label, "ytdl-format", &load.format)?;
++                }
++                // Emptied with "clr": a plain set to "" leaves one empty
++                // field, which loses every field after it.
++                command(h, &["change-list", "http-header-fields", "clr", ""])?;
++                if let Some(header) = &load.header {
++                    // One field, commas and all (a plain set would split it).
++                    command(h, &["change-list", "http-header-fields", "append", header])?;
+                 }
++                set(&label, "start", &if load.start > 0.0 { format!("{:.1}", load.start) } else { "none".into() })?;
++                set(&label, "force-media-title", &load.title)?;
++                set(&label, "vid", if load.audio_only { "no" } else { "auto" })?;
++                set(&label, "aid", "auto")?;
++                set(&label, "sid", "auto")?;
+                 set(&label, "volume", &format!("{volume:.0}"))?;
+                 set(&label, "pause", "no")?;
+-                command(h, &["loadfile", &url, "replace"])
++                command(h, &["loadfile", &load.url, "replace"])
+             })();
+             let _ = tx.send(result);
+         }).map_err(|e| e.to_string())?;
+diff --git a/src/styles.css b/src/styles.css
+index beefb30..5c99ec6 100644
+--- a/src/styles.css
++++ b/src/styles.css
+@@ -9071,6 +9071,14 @@ html.a2-offline .historyUploadBtn {
+ .mediaRow .mediaSlider { display: inline-flex; align-items: center; gap: 3px; color: rgba(255, 255, 255, 0.6); }
+ .mediaRow .mediaSlider svg { width: 13px; height: 13px; }
+ .mediaRow .mediaSlider input { width: 56px; height: 14px; margin: 0; accent-color: var(--ct-accent); }
++.mediaRow button.mediaBtnText {
++  width: auto;
++  gap: 3px;
++  padding: 0 5px;
++  font-size: 10.5px;
++  color: var(--ct-accent);
++  border: 1px solid var(--ct-accent);
++}
+ .mediaRow .mediaQuality {
+   -webkit-appearance: none;
+   appearance: none;
+-- 
+2.43.0
+

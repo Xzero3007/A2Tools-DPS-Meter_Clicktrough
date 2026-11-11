@@ -47,7 +47,12 @@ with its own CLAUDE.md: plugin work happens there.
   queries), YouTube's channel feeds (www.youtube.com/feeds/videos.xml) and
   both picture servers through net_guard; the videos and YouTube's search
   through the person's mpv and yt-dlp, only for a Twitch channel or a
-  YouTube video id. Brave Origin (patch 0050, the person's decision,
+  YouTube video id. The person's own Jellyfin server in the home network
+  (patch 0053, the person's decision, 2026-11-11): only private addresses
+  or local names (`plugins/jellyfin.rs` refuses anything else), the
+  sign-in, lists, pictures and playback reports to that server alone; its
+  address and key stay in the meter's `jellyfin.json`, never in a repo.
+  Brave Origin (patch 0050, the person's decision,
   2026-11-11): the meter only starts and closes the person's own Brave
   Origin (own profile) and has KWin keep it above the game; Brave goes
   online by itself, the meter sends nothing. The release is the original's private
