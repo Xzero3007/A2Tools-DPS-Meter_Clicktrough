@@ -55,6 +55,11 @@ with its own CLAUDE.md: plugin work happens there.
   or local names (`plugins/jellyfin.rs` refuses anything else), the
   sign-in, lists, pictures and playback reports to that server alone; its
   address and key stay in the meter's `jellyfin.json`, never in a repo.
+  Twitch through the person's Streamlink when installed (patch 0061, the
+  person's decision, 2026-11-11: as Streamlink Twitch GUI, ad breaks left
+  out), and the Twitch sign-in: twitch.tv's auth-token, pasted by the
+  person, kept in the meter's `twitch.json`, sent to Twitch alone
+  (gql.twitch.tv for the followed channels, Streamlink's API header).
   Brave Origin (patch 0050, the person's decision,
   2026-11-11): the meter only starts and closes the person's own Brave
   Origin (own profile) and has KWin keep it above the game; Brave goes

@@ -69,6 +69,7 @@ patches).
 | 0058 | **YouTube videos play**: YouTube serves a video's stream only a few seconds after handing out its address; the Streams player asked at once, was refused and showed "No video or audio streams selected". It now tries again for up to 10 seconds (the same fix as in the person's own mpv settings for FreeTube). For YouTube alone: on Twitch's live streams it made the picture stall again and again. |
 | 0059 | **YouTube's search, newest first**: a plugin can ask yt-dlp's YouTube search for the newest uploads (`a2.video.search(words, { newest: true })`), for the Streams plugin's "AION 2 new". The same searches as before, sorted by date. |
 | 0060 | **"AION 2 new" finds videos again**: the newest uploads came from yt-dlp's date search, which newer yt-dlp versions dropped ("Unsupported url scheme"); now from YouTube's results page sorted by upload date, through yt-dlp as before. |
+| 0061 | **Twitch without the ad breaks, and your followed channels**: when Streamlink is installed (`sudo pacman -S streamlink`, as Streamlink Twitch GUI uses it), the Streams plugin plays Twitch through it, and Streamlink leaves Twitch's ad breaks out (a short pause instead). Signed in with twitch.tv's auth-token (Streams → Twitch → Followed; kept in `twitch.json` in the meter's own folder, sent to Twitch alone), the followed channels show there, and Streamlink sends it along (no ads at all with Turbo or a subscription). The person's decision, 2026-11-11. |
 
 ### Taken early from the original
 

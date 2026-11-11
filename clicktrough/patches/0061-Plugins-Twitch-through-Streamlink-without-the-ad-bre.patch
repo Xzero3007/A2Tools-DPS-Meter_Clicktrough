@@ -1,0 +1,344 @@
+From af0b2fd2b53970ada1e7f19b1d25bf452fb5d851 Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Wed, 11 Nov 2026 17:32:05 +0000
+Subject: [PATCH] Plugins: Twitch through Streamlink without the ad breaks; the
+ Twitch sign-in and followed channels
+
+When Streamlink is installed, a Twitch channel plays through it (its
+output piped to mpv), as Streamlink Twitch GUI plays it: Streamlink
+leaves Twitch's ad breaks out. a2.video.twitch gains account, login
+(twitch.tv's auth-token, kept in twitch.json in the meter's folder),
+logout and followed (the signed-in player's followed channels).
+---
+ src-tauri/src/plugins/video.rs | 255 ++++++++++++++++++++++++++++++++-
+ 1 file changed, 249 insertions(+), 6 deletions(-)
+
+diff --git a/src-tauri/src/plugins/video.rs b/src-tauri/src/plugins/video.rs
+index 88f76c0..5482fb9 100644
+--- a/src-tauri/src/plugins/video.rs
++++ b/src-tauri/src/plugins/video.rs
+@@ -16,6 +16,14 @@
+ //! FreeTube's own file on this computer (read only). Nothing else is read,
+ //! and nothing is sent but the search words, channel names and ids.
+ //!
++//! Twitch plays through the player's own Streamlink when it is installed
++//! (`streamlink` on the PATH), as Streamlink Twitch GUI plays it: Streamlink
++//! leaves Twitch's ad breaks out of the stream (a short pause instead), and
++//! mpv reads what it hands over through a pipe. Signed in (`a2.video.twitch`
++//! "login", the `auth-token` of twitch.tv, kept in `twitch.json` in the
++//! meter's own folder, never in a plugin), Streamlink and the followed
++//! channels' query send it to Twitch alone.
++//!
+ //! The player's own Jellyfin server, in the home network only, plays here
+ //! too (`plugins::jellyfin`): its address mpv gets is built there, for the
+ //! signed-in server alone.
+@@ -128,6 +136,22 @@ pub async fn plugin_video_play(
+         Load { url: stream_url(&kind, &name)?, format: ytdl_format(&quality), volume: 0.0, header: None, start, title, audio_only: false }
+     };
+     let target = widget_window(&app, &id, &widget)?;
++    // Twitch through Streamlink, when it is installed: the stream without
++    // Twitch's ad breaks, through a pipe.
++    #[cfg(target_os = "linux")]
++    let load = if kind == "twitch" && streamlink::path().is_some() {
++        let token = twitch_account(&app).map(|a| a.token);
++        let (app2, id2, widget2) = (app.clone(), id.clone(), widget.clone());
++        let url = streamlink::start(target.label(), &load.url, &quality, token.as_deref(), move |why| {
++            super::emit_plugin(&app2, &id2, json!({ "plugin": id2, "event": "video",
++                "data": { "state": "error", "error": format!("Streamlink: {why}"), "widget": widget2 } }));
++        })?;
++        tracing::info!("Video: Twitch through Streamlink");
++        Load { url, format: String::new(), ..load }
++    } else {
++        streamlink::stop(target.label());
++        load
++    };
+     let volume = volume.filter(|v| v.is_finite()).unwrap_or(70.0).clamp(0.0, 100.0);
+     tracing::info!("Video: {id} plays {kind} {name} in {widget}");
+     player::play(&app, &id, &target, Load { volume, ..load })?;
+@@ -152,7 +176,11 @@ pub async fn plugin_video_control(
+     require(&app, &id, "video")?;
+     let label = widgets::label(&id, &widget);
+     match action.as_str() {
+-        "stop" => player::stop(&app, &label),
++        "stop" => {
++            #[cfg(target_os = "linux")]
++            streamlink::stop(&label);
++            player::stop(&app, &label)
++        }
+         "pause" => player::set(&label, "pause", if value.and_then(|v| v.as_bool()).unwrap_or(true) { "yes" } else { "no" }),
+         "mute" => player::set(&label, "mute", if value.and_then(|v| v.as_bool()).unwrap_or(true) { "yes" } else { "no" }),
+         "volume" => {
+@@ -230,6 +258,10 @@ pub fn twitch_query(kind: &str, arg: &Value) -> Result<Value, String> {
+                 "variables": { "l": logins },
+             }))
+         }
++        // The signed-in player's followed channels (sent with the token).
++        "followed" => Ok(json!({
++            "query": format!("query {{ currentUser {{ follows(first: 100) {{ edges {{ node {{ {USER} }} }} }} }} }}"),
++        })),
+         "live" => match arg.as_str().map(str::trim).filter(|g| !g.is_empty()) {
+             Some(game) if game.len() <= 100 => Ok(json!({
+                 "query": format!("query($g: String!) {{ game(name: $g) {{ streams(first: 30) {{ edges {{ node {{ {STREAM} }} }} }} }} }}"),
+@@ -255,8 +287,194 @@ pub async fn plugin_video_twitch(
+ ) -> Result<Value, String> {
+     let id = window_plugin(&window, plugin.as_deref())?;
+     require(&app, &id, "video")?;
+-    let body = twitch_query(&kind, &arg)?;
+-    net::twitch(&app, body).await
++    match kind.as_str() {
++        // Whether Streamlink is installed, and who is signed in.
++        "account" => {
++            #[cfg(target_os = "linux")]
++            let streamlink = streamlink::path().is_some();
++            #[cfg(not(target_os = "linux"))]
++            let streamlink = false;
++            Ok(json!({ "streamlink": streamlink, "user": twitch_account(&app).map(|a| a.public()) }))
++        }
++        "login" => {
++            let token = twitch_token_of(arg.as_str().unwrap_or("")).ok_or("that is not a Twitch auth-token (30 letters and digits)")?;
++            let me = net::twitch(&app, json!({ "query": "query { currentUser { login displayName } }" }), Some(&token)).await
++                .map_err(|e| if e.contains("401") { "Twitch didn't take this auth-token".to_string() } else { e })?;
++            let user = me.get("currentUser").filter(|u| !u.is_null()).ok_or("Twitch didn't take this auth-token")?;
++            let account = TwitchAccount {
++                token,
++                login: user.get("login").and_then(Value::as_str).unwrap_or("").chars().take(25).collect(),
++                display_name: user.get("displayName").and_then(Value::as_str).unwrap_or("").chars().take(50).collect(),
++            };
++            store_twitch(&app, &account)?;
++            tracing::info!("Twitch: signed in");
++            Ok(account.public())
++        }
++        "logout" => {
++            let _ = std::fs::remove_file(twitch_file(&app)?);
++            Ok(Value::Null)
++        }
++        // The channels the signed-in player follows, live or not.
++        "followed" => {
++            let account = twitch_account(&app).ok_or("sign in to Twitch first")?;
++            net::twitch(&app, twitch_query("followed", &Value::Null)?, Some(&account.token)).await
++        }
++        _ => net::twitch(&app, twitch_query(&kind, &arg)?, None).await,
++    }
++}
++
++/// The signed-in Twitch account: twitch.tv's `auth-token`, which Streamlink
++/// and the followed channels' query send to Twitch.
++#[derive(serde::Serialize, serde::Deserialize, Default)]
++pub struct TwitchAccount {
++    token: String,
++    login: String,
++    display_name: String,
++}
++
++impl TwitchAccount {
++    /// What a plugin gets: the name, never the token.
++    fn public(&self) -> Value {
++        json!({ "login": self.login, "displayName": self.display_name })
++    }
++}
++
++/// An auth-token as pasted: 30 lowercase letters and digits, with or
++/// without "OAuth " before it.
++pub fn twitch_token_of(text: &str) -> Option<String> {
++    let t = text.trim();
++    let t = t.strip_prefix("OAuth ").or_else(|| t.strip_prefix("oauth:")).unwrap_or(t).trim();
++    (t.len() >= 20 && t.len() <= 64 && t.chars().all(|c| c.is_ascii_alphanumeric())).then(|| t.to_ascii_lowercase())
++}
++
++fn twitch_file(app: &tauri::AppHandle) -> Result<PathBuf, String> {
++    use tauri::Manager;
++    let state = app.try_state::<crate::app::AppState>().ok_or("no app state")?;
++    Ok(state.app_data_dir.join("twitch.json"))
++}
++
++fn twitch_account(app: &tauri::AppHandle) -> Option<TwitchAccount> {
++    let text = std::fs::read_to_string(twitch_file(app).ok()?).ok()?;
++    let a: TwitchAccount = serde_json::from_str(&text).ok()?;
++    twitch_token_of(&a.token).map(|token| TwitchAccount { token, ..a })
++}
++
++fn store_twitch(app: &tauri::AppHandle, account: &TwitchAccount) -> Result<(), String> {
++    use std::io::Write;
++    let path = twitch_file(app)?;
++    let tmp = path.with_extension("json.tmp");
++    {
++        let mut opts = std::fs::OpenOptions::new();
++        opts.write(true).create(true).truncate(true);
++        #[cfg(unix)]
++        {
++            use std::os::unix::fs::OpenOptionsExt;
++            opts.mode(0o600);
++        }
++        let mut f = opts.open(&tmp).map_err(|e| e.to_string())?;
++        f.write_all(serde_json::to_string_pretty(account).map_err(|e| e.to_string())?.as_bytes()).map_err(|e| e.to_string())?;
++    }
++    std::fs::rename(&tmp, &path).map_err(|e| e.to_string())
++}
++
++/// Streamlink for one widget: started for a Twitch channel, its output
++/// through a pipe to mpv (`fdclose://`), stopped with the video.
++#[cfg(target_os = "linux")]
++mod streamlink {
++    use std::collections::HashMap;
++    use std::io::{BufRead, BufReader};
++    use std::os::fd::IntoRawFd;
++    use std::path::PathBuf;
++    use std::process::{Child, Command, Stdio};
++    use std::sync::{Mutex, OnceLock};
++
++    fn children() -> &'static Mutex<HashMap<String, Child>> {
++        static C: OnceLock<Mutex<HashMap<String, Child>>> = OnceLock::new();
++        C.get_or_init(|| Mutex::new(HashMap::new()))
++    }
++
++    /// `streamlink` on the PATH.
++    pub fn path() -> Option<PathBuf> {
++        std::env::split_paths(&std::env::var_os("PATH")?).map(|d| d.join("streamlink")).find(|p| p.is_file())
++    }
++
++    /// Streamlink's stream names for a quality the player picked: that
++    /// height (60 frames first), else the best there is.
++    pub fn quality(q: &str) -> String {
++        match q {
++            "audio" => "audio_only,worst".into(),
++            q => match q.parse::<u32>() {
++                Ok(h) if (144..=2160).contains(&h) => format!("{h}p60,{h}p,best"),
++                _ => "best".into(),
++            },
++        }
++    }
++
++    /// Streamlink's arguments (the token, when signed in, goes to Twitch's
++    /// API only).
++    pub fn args(url: &str, quality: &str, token: Option<&str>) -> Vec<String> {
++        let mut a: Vec<String> = vec!["--stdout".into(), "--loglevel".into(), "error".into()];
++        if let Some(t) = token {
++            a.push("--twitch-api-header".into());
++            a.push(format!("Authorization=OAuth {t}"));
++        }
++        a.push(url.into());
++        a.push(self::quality(quality));
++        a
++    }
++
++    /// Started for widget `label` (an earlier one stopped): the address mpv
++    /// reads. `failed` gets Streamlink's error when it ends with one.
++    pub fn start(label: &str, url: &str, quality: &str, token: Option<&str>, failed: impl FnOnce(String) + Send + 'static) -> Result<String, String> {
++        stop(label);
++        let exe = path().ok_or("Streamlink isn't installed")?;
++        let mut child = Command::new(exe)
++            .args(args(url, quality, token))
++            .stdin(Stdio::null())
++            .stdout(Stdio::piped())
++            .stderr(Stdio::piped())
++            .spawn()
++            .map_err(|e| format!("Streamlink didn't start: {e}"))?;
++        let out = child.stdout.take().ok_or("Streamlink gave no output")?;
++        let err = child.stderr.take();
++        let pid = child.id();
++        children().lock().unwrap_or_else(|p| p.into_inner()).insert(label.to_string(), child);
++        let label = label.to_string();
++        let _ = std::thread::Builder::new().name("streamlink".into()).spawn(move || {
++            let mut last = String::new();
++            if let Some(err) = err {
++                for line in BufReader::new(err).lines().map_while(Result::ok) {
++                    let line = line.trim().trim_start_matches("error:").trim().to_string();
++                    if !line.is_empty() {
++                        tracing::warn!("Video: Streamlink: {line}");
++                        last = line.chars().take(240).collect();
++                    }
++                }
++            }
++            // Ended by itself (not stopped): reaped here, its error told.
++            let mut map = children().lock().unwrap_or_else(|p| p.into_inner());
++            if map.get(&label).is_some_and(|c| c.id() == pid) {
++                if let Some(mut c) = map.remove(&label) {
++                    drop(map);
++                    let ok = c.wait().map(|s| s.success()).unwrap_or(false);
++                    if !ok && !last.is_empty() {
++                        failed(last);
++                    }
++                }
++            }
++        });
++        // mpv reads the pipe and closes it when the video ends.
++        Ok(format!("fdclose://{}", out.into_raw_fd()))
++    }
++
++    /// Widget `label`'s Streamlink stopped, if one runs.
++    pub fn stop(label: &str) {
++        let child = children().lock().unwrap_or_else(|p| p.into_inner()).remove(label);
++        if let Some(mut c) = child {
++            let _ = c.kill();
++            let _ = c.wait();
++        }
++    }
+ }
+ 
+ /// `a2.video.feed(channelId)`: a YouTube channel's newest videos, its public
+@@ -428,12 +646,16 @@ mod net {
+         *next = std::time::Instant::now() + Duration::from_millis(250);
+     }
+ 
+-    pub async fn twitch(app: &tauri::AppHandle, body: Value) -> Result<Value, String> {
++    pub async fn twitch(app: &tauri::AppHandle, body: Value, token: Option<&str>) -> Result<Value, String> {
+         const URL: &str = "https://gql.twitch.tv/gql";
+         wait_turn().await;
+         crate::net_guard::check(URL)?;
+         let state = app.try_state::<AppState>().ok_or("no app state")?;
+-        let res = state.http.post(URL)
++        let mut req = state.http.post(URL);
++        if let Some(t) = token {
++            req = req.header("Authorization", format!("OAuth {t}"));
++        }
++        let res = req
+             .header("Client-Id", TWITCH_CLIENT_ID)
+             .header("Content-Type", "application/json")
+             .body(body.to_string())
+@@ -472,7 +694,7 @@ mod net {
+ #[cfg(not(feature = "net"))]
+ mod net {
+     use super::*;
+-    pub async fn twitch(_app: &tauri::AppHandle, _body: Value) -> Result<Value, String> {
++    pub async fn twitch(_app: &tauri::AppHandle, _body: Value, _token: Option<&str>) -> Result<Value, String> {
+         Err("this meter is built without network features".into())
+     }
+     pub async fn text(_app: &tauri::AppHandle, _url: &str) -> Result<String, String> {
+@@ -1200,6 +1422,7 @@ mod player {
+                 unsafe { (m.render_free)(r) };
+             }
+         }
++        super::streamlink::stop(label);
+         if let Some(p) = players().lock().unwrap_or_else(|p| p.into_inner()).remove(label) {
+             let _ = command(p.handle as Handle, &["quit"]);
+         }
+@@ -1317,6 +1540,26 @@ mod tests {
+         }
+     }
+ 
++    #[test]
++    fn a_twitch_auth_token_as_pasted() {
++        assert_eq!(twitch_token_of(" OAuth abcdefghij0123456789abcdefghij "), Some("abcdefghij0123456789abcdefghij".into()));
++        assert_eq!(twitch_token_of("ABCDEFGHIJ0123456789abcdefghij"), Some("abcdefghij0123456789abcdefghij".into()));
++        assert_eq!(twitch_token_of("abc"), None);
++        assert_eq!(twitch_token_of("abcdefghij0123456789abcdefghij; rm"), None);
++    }
++
++    #[cfg(target_os = "linux")]
++    #[test]
++    fn streamlink_gets_the_channel_and_a_quality() {
++        assert_eq!(streamlink::quality("720"), "720p60,720p,best");
++        assert_eq!(streamlink::quality("audio"), "audio_only,worst");
++        assert_eq!(streamlink::quality("x"), "best");
++        let a = streamlink::args("https://www.twitch.tv/whelp", "1080", None);
++        assert_eq!(a, ["--stdout", "--loglevel", "error", "https://www.twitch.tv/whelp", "1080p60,1080p,best"]);
++        let a = streamlink::args("https://www.twitch.tv/whelp", "1080", Some("tok"));
++        assert_eq!(&a[3..5], ["--twitch-api-header", "Authorization=OAuth tok"]);
++    }
++
+     #[test]
+     fn a_quality_is_a_height_or_sound_only() {
+         assert_eq!(ytdl_format("720"), "bestvideo[height<=?720]+bestaudio/best[height<=?720]/best");
+-- 
+2.43.0
+
