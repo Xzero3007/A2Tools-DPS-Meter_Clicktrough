@@ -47,7 +47,10 @@ with its own CLAUDE.md: plugin work happens there.
   queries), YouTube's channel feeds (www.youtube.com/feeds/videos.xml) and
   both picture servers through net_guard; the videos and YouTube's search
   through the person's mpv and yt-dlp, only for a Twitch channel or a
-  YouTube video id. The release is the original's private
+  YouTube video id. Brave Origin (patch 0050, the person's decision,
+  2026-11-11): the meter only starts and closes the person's own Brave
+  Origin (own profile) and has KWin keep it above the game; Brave goes
+  online by itself, the meter sends nothing. The release is the original's private
   build (`--no-default-features --features desktop,net`). Anything else needs
   the person's yes first.
 - **This repo is public. No network analysis goes in here**: no write-ups of

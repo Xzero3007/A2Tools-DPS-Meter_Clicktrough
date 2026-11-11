@@ -1,0 +1,1065 @@
+From e120b600563b00f9412b7f62a0d52f0267bc04fa Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Wed, 11 Nov 2026 00:33:13 +0000
+Subject: [PATCH] Meter: Brave Origin above the game, shown or hidden from the
+ title
+
+A globe button in the meter's title starts the player's own Brave Origin
+(with a profile of its own) and shows or hides it. A KWin rule keeps that
+browser above a fullscreen game, without a frame, back where it was left;
+a small KWin script minimises it, brings it back and sets its opacity
+(Settings, Browser). It closes with the meter. The meter sends nothing:
+Brave goes online by itself.
+---
+ index.html                                    |  33 +++
+ packaging/arch/PKGBUILD                       |   3 +-
+ public/src/js/browserButton.js                |  87 ++++++
+ src-tauri/src/app.rs                          |  12 +-
+ src-tauri/src/browser.rs                      | 125 +++++++++
+ src-tauri/src/lib.rs                          |   3 +
+ src-tauri/src/platform/kwin_rules.rs          |  45 +++
+ src-tauri/src/platform/linux/browser.rs       | 256 ++++++++++++++++++
+ src-tauri/src/platform/linux/focus.rs         |   7 +
+ src-tauri/src/platform/linux/mod.rs           |   1 +
+ src-tauri/src/platform/linux/window_rules.rs  |  12 +-
+ src-tauri/src/platform/mod.rs                 |   2 +-
+ src-tauri/src/platform/unsupported/browser.rs |  33 +++
+ src-tauri/src/platform/unsupported/mod.rs     |   1 +
+ .../src/platform/unsupported/window_rules.rs  |   5 +
+ src-tauri/src/platform/win32/mod.rs           |   2 +
+ src/data/i18n/ui/de.json                      |   9 +-
+ src/data/i18n/ui/en.json                      |   9 +-
+ src/styles.css                                |   4 +
+ tests/browser-button.test.mjs                 | 116 ++++++++
+ 20 files changed, 758 insertions(+), 7 deletions(-)
+ create mode 100644 public/src/js/browserButton.js
+ create mode 100644 src-tauri/src/browser.rs
+ create mode 100644 src-tauri/src/platform/linux/browser.rs
+ create mode 100644 src-tauri/src/platform/unsupported/browser.rs
+ create mode 100644 tests/browser-button.test.mjs
+
+diff --git a/index.html b/index.html
+index 791e0f7..ee89bfb 100644
+--- a/index.html
++++ b/index.html
+@@ -465,6 +465,7 @@
+                 <button class="settingsNavItem" type="button" role="tab" id="settingsTab-streaming" aria-controls="settingsSection-streaming" aria-selected="false" tabindex="-1" data-section="streaming"><i data-lucide="cast" aria-hidden="true"></i><span data-i18n="settings.streamOverlay.title">Streaming</span></button>
+                 <button class="settingsNavItem" type="button" role="tab" id="settingsTab-keybinds" aria-controls="settingsSection-keybinds" aria-selected="false" tabindex="-1" data-section="keybinds"><i data-lucide="keyboard" aria-hidden="true"></i><span data-i18n="settings.keybinds">Keybinds</span></button>
+                 <button class="settingsNavItem" type="button" role="tab" id="settingsTab-plugins" aria-controls="settingsSection-plugins" aria-selected="false" tabindex="-1" data-section="plugins"><i data-lucide="puzzle" aria-hidden="true"></i><span data-i18n="settings.plugins.title">Plugins</span></button>
++                <button class="settingsNavItem browserNavItem" type="button" role="tab" id="settingsTab-browser" aria-controls="settingsSection-browser" aria-selected="false" tabindex="-1" data-section="browser"><i data-lucide="globe" aria-hidden="true"></i><span data-i18n="settings.browser.title">Browser</span></button>
+                 <button class="settingsNavItem" type="button" role="tab" id="settingsTab-privacy" aria-controls="settingsSection-privacy" aria-selected="false" tabindex="-1" data-section="privacy"><i data-lucide="shield" aria-hidden="true"></i><span data-i18n="privacy.title">Privacy</span></button>
+                 <button class="settingsNavItem" type="button" role="tab" id="settingsTab-advanced" aria-controls="settingsSection-advanced" aria-selected="false" tabindex="-1" data-section="advanced"><i data-lucide="sliders-horizontal" aria-hidden="true"></i><span data-i18n="settings.advanced">Advanced</span></button>
+               </div>
+@@ -1163,6 +1164,37 @@
+                   </div>
+                 </div>
+               </section>
++              <section class="settingsSection" id="settingsSection-browser" role="tabpanel" aria-labelledby="settingsTab-browser" data-section="browser" hidden>
++                <h2 class="settingsSectionTitle" data-i18n="settings.browser.title">Browser</h2>
++                <div class="settingsGroupBody browserSettings">
++                  <div class="settingsRow">
++                    <div class="settingsInfo">
++                      <div class="settingsLabel" data-i18n="settings.browser.program">Brave Origin</div>
++                    </div>
++                    <div class="settingsValue browserProgram"></div>
++                  </div>
++                  <div class="settingsRow settingsRowInput">
++                    <div class="settingsInfo">
++                      <div class="settingsLabel" data-i18n="settings.browser.opacity" title="How see-through the browser is, over the game." data-i18n-title="settings.browser.opacityTip">Opacity</div>
++                    </div>
++                    <div class="settingsRangeInline">
++                      <input
++                        id="browserOpacityInput"
++                        class="settingsRange browserOpacityInput"
++                        type="range"
++                        min="20"
++                        max="100"
++                        step="5"
++                        value="100"
++                        aria-label="Opacity"
++                        data-i18n-aria-label="settings.browser.opacity" />
++                      <div class="settingsValue browserOpacityValue">100%</div>
++                    </div>
++                  </div>
++                  <div class="streamOverlayHelp browserHelp" data-i18n="settings.browser.help">The globe in the meter's title shows or hides Brave Origin above the game, without a frame. Drag it by its tab bar, or anywhere with the Meta key held; it opens again where you left it. It has a profile of its own: add your extensions there once. Clicks don't go through it: hide it to play. It closes with the meter.</div>
++                  <div class="streamOverlayHelp browserProfile"></div>
++                </div>
++              </section>
+               <section class="settingsSection" id="settingsSection-privacy" role="tabpanel" aria-labelledby="settingsTab-privacy" data-section="privacy" hidden>
+                 <h2 class="settingsSectionTitle" data-i18n="privacy.title">Privacy</h2>
+                 <p class="settingsHint privacyIntro" data-i18n="privacy.intro">What this meter shares with a2tools.app. Each one is your choice.</p>
+@@ -1572,6 +1604,7 @@
+     <script src="/src/js/pluginsButton.js"></script>
+     <script src="/src/js/overlayButtons.js"></script>
+     <script src="/src/js/mediaRow.js"></script>
++    <script src="/src/js/browserButton.js"></script>
+     <script src="/src/js/pluginIcons.js"></script>
+     <script src="/src/js/pluginSettings.js"></script>
+   </body>
+diff --git a/packaging/arch/PKGBUILD b/packaging/arch/PKGBUILD
+index dbebb74..baa5c08 100644
+--- a/packaging/arch/PKGBUILD
++++ b/packaging/arch/PKGBUILD
+@@ -28,7 +28,8 @@ optdepends=('libayatana-appindicator: tray icon'
+             'gst-libav: AAC radio streams in the Radio plugin'
+             'gst-plugins-bad: HLS radio streams in the Radio plugin (MPEG-TS)'
+             'mpv: videos in the Streams plugin (its library, libmpv)'
+-            'yt-dlp: Twitch and YouTube in the Streams plugin')
++            'yt-dlp: Twitch and YouTube in the Streams plugin'
++            'brave-origin-bin: the browser above the game (AUR)')
+ makedepends=('rust' 'nodejs' 'npm' 'git' 'pkgconf')
+ install=a2tools-dps-meter.install
+ options=('!lto' '!debug')
+diff --git a/public/src/js/browserButton.js b/public/src/js/browserButton.js
+new file mode 100644
+index 0000000..fec3dc8
+--- /dev/null
++++ b/public/src/js/browserButton.js
+@@ -0,0 +1,87 @@
++// Clicktrough: Brave Origin as an overlay (src-tauri/src/browser.rs). A globe
++// button in the meter's header, before the plugin overlays' buttons, shows or
++// hides the Brave Origin the meter starts (gold while it shows); it appears
++// only when Brave Origin is installed. Settings → Browser: where it was
++// found, its profile folder, and its opacity.
++(() => {
++  const view = window.A2_VIEW || window.__A2_VIEW__ || "main";
++  const invoke = window.__TAURI__?.core?.invoke;
++  const listen = window.__TAURI__?.event?.listen;
++  if (typeof invoke !== "function") return;
++
++  const start = () => {
++    let btn = null;
++    const bar = view === "main" ? document.querySelector(".headerBtns") : null;
++    if (bar) {
++      btn = document.createElement("div");
++      btn.className = "headerBtn browserBtn";
++      btn.hidden = true;
++      btn.setAttribute("role", "button");
++      btn.setAttribute("tabindex", "0");
++      btn.setAttribute("aria-label", "Show or hide the browser");
++      btn.setAttribute("aria-pressed", "false");
++      const icon = document.createElement("i");
++      icon.setAttribute("data-lucide", "globe");
++      btn.append(icon);
++      const toggle = () => Promise.resolve(invoke("browser_toggle")).then(render).catch(() => {});
++      btn.addEventListener("click", (event) => {
++        event.stopPropagation();
++        toggle();
++      });
++      btn.addEventListener("keydown", (event) => {
++        if (event.key !== "Enter" && event.key !== " ") return;
++        event.preventDefault();
++        toggle();
++      });
++      const first = bar.querySelector(".overlayBtn, .pluginsBtn");
++      bar.insertBefore(btn, first && first.parentNode === bar ? first : null);
++      try { window.lucide?.createIcons?.({ root: bar }); } catch {}
++    }
++
++    const program = document.querySelector(".browserProgram");
++    const profile = document.querySelector(".browserProfile");
++    const slider = document.querySelector(".browserOpacityInput");
++    const value = document.querySelector(".browserOpacityValue");
++
++    let shownFound = null;
++    function render(state) {
++      if (!state || typeof state !== "object") return;
++      if (btn) {
++        // The button found again (`.headerBtn` is display flex): hidden by style too.
++        btn.hidden = !state.found;
++        btn.style.display = state.found ? "" : "none";
++        btn.classList.toggle("isActive", !!state.visible);
++        btn.setAttribute("aria-pressed", String(!!state.visible));
++        btn.title = state.visible ? "Browser: hide" : "Browser: show";
++        if (shownFound !== !!state.found) {
++          shownFound = !!state.found;
++          // The header's buttons moved: the lock button's place is sent again.
++          requestAnimationFrame(() => window._dpsApp?._sendLockBtnRect?.());
++        }
++      }
++      if (program) {
++        program.textContent = state.found ? state.program : "Not installed (AUR: brave-origin-bin), then restart the meter";
++      }
++      if (profile) profile.textContent = state.profile ? `Its profile: ${state.profile}` : "";
++      if (slider && document.activeElement !== slider) slider.value = String(state.opacity ?? 100);
++      if (value) value.textContent = `${slider ? slider.value : state.opacity}%`;
++    }
++
++    if (slider) {
++      let timer = 0;
++      slider.addEventListener("input", () => {
++        if (value) value.textContent = `${slider.value}%`;
++        clearTimeout(timer);
++        timer = setTimeout(() => {
++          Promise.resolve(invoke("browser_set_opacity", { percent: Number(slider.value) })).then(render).catch(() => {});
++        }, 120);
++      });
++    }
++
++    const refresh = () => Promise.resolve(invoke("browser_state")).then(render).catch(() => {});
++    refresh();
++    Promise.resolve(listen?.("browser-changed", (event) => render(event?.payload))).catch(() => {});
++  };
++  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start, { once: true });
++  else start();
++})();
+diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
+index ce31537..8faa5aa 100644
+--- a/src-tauri/src/app.rs
++++ b/src-tauri/src/app.rs
+@@ -3739,6 +3739,10 @@ pub fn run() {
+                     save_queued_fights(app);
+                     flush_settings_before_exit(app);
+                 }
++                // Clicktrough: the browser the meter started closes with it.
++                if matches!(event, tauri::RunEvent::Exit) {
++                    crate::browser::close();
++                }
+             })
+             .build())
+         .plugin(tauri_plugin_process::init())
+@@ -3977,11 +3981,12 @@ pub fn run() {
+                     // overlay takes no focus, so a click on it leaves the game
+                     // focused (#71); nor do plugins' icons. Plugin windows
+                     // stay above the game, so their alerts are seen.
+-                    let rules: [(&str, fn(bool) -> Result<bool, String>); 4] = [
++                    let rules: [(&str, fn(bool) -> Result<bool, String>); 5] = [
+                         ("above", platform::window_rules::keep_above_fullscreen),
+                         ("no-focus", platform::window_rules::click_without_focus),
+                         ("icons", platform::window_rules::icons_without_focus),
+                         ("plugin windows", platform::window_rules::plugin_windows_above),
++                        ("browser", platform::window_rules::browser_above),
+                     ];
+                     for (name, ensure) in rules {
+                         if let Err(e) = ensure(false) {
+@@ -4182,6 +4187,8 @@ pub fn run() {
+             // Clicktrough: start and close with AION2.
+             let handle = app.handle().clone();
+             std::thread::spawn(move || follow_the_game(handle));
++            // Clicktrough: the header's browser button hears when Brave closes.
++            crate::browser::spawn_watch(app.handle().clone());
+ 
+             // Housekeeping every 500 ms: ping, auto-hide, window positions.
+             let handle = app.handle().clone();
+@@ -4591,6 +4598,9 @@ pub fn run() {
+             crate::plugins::media::media_list,
+             crate::plugins::media::media_control,
+             crate::plugins::overlays::plugin_overlay_toggle,
++            crate::browser::browser_state,
++            crate::browser::browser_toggle,
++            crate::browser::browser_set_opacity,
+             crate::plugins::dock::dock_fold,
+             crate::plugins::dock::plugin_set_docked,
+             crate::plugins::set_plugin_theme,
+diff --git a/src-tauri/src/browser.rs b/src-tauri/src/browser.rs
+new file mode 100644
+index 0000000..eea2b1c
+--- /dev/null
++++ b/src-tauri/src/browser.rs
+@@ -0,0 +1,125 @@
++//! Clicktrough: Brave Origin as an overlay (`platform::browser`): the
++//! header's browser button and its Settings. Shown or hidden with the
++//! button, at the opacity set in Settings; closed with the meter.
++
++use tauri::{Emitter, Manager};
++
++use crate::app::AppState;
++use crate::platform;
++
++/// The browser's opacity in Settings, 20 to 100 (percent).
++const OPACITY_KEY: &str = "dpsMeter.browserOpacity";
++
++/// What the header's button and Settings show.
++#[derive(Debug, Clone, PartialEq, serde::Serialize)]
++pub struct BrowserState {
++    /// Brave Origin is installed: the button shows only then.
++    pub found: bool,
++    /// Its program, for Settings ("" when not found).
++    pub program: String,
++    /// Its profile folder, for Settings.
++    pub profile: String,
++    pub running: bool,
++    pub visible: bool,
++    pub opacity: u32,
++}
++
++/// The opacity kept in Settings (100 unless set).
++pub fn parse_opacity(value: Option<&str>) -> u32 {
++    value.and_then(|v| v.trim().parse::<f64>().ok()).filter(|v| v.is_finite()).map_or(100, |v| (v.round() as u32).clamp(20, 100))
++}
++
++fn opacity(app: &tauri::AppHandle) -> u32 {
++    parse_opacity(app.try_state::<AppState>().and_then(|s| s.settings.get(OPACITY_KEY)).as_deref())
++}
++
++fn state(app: &tauri::AppHandle) -> BrowserState {
++    let program = platform::browser::program();
++    let running = platform::browser::is_running();
++    BrowserState {
++        found: program.is_some(),
++        program: program.map(|p| p.display().to_string()).unwrap_or_default(),
++        profile: platform::browser::profile_dir().map(|p| p.display().to_string()).unwrap_or_default(),
++        running,
++        visible: running && platform::browser::is_visible(),
++        opacity: opacity(app),
++    }
++}
++
++#[tauri::command]
++pub fn browser_state(app: tauri::AppHandle) -> BrowserState {
++    state(&app)
++}
++
++/// The header's button: shows the browser (started when it isn't running)
++/// or hides it.
++#[tauri::command]
++pub async fn browser_toggle(app: tauri::AppHandle) -> Result<BrowserState, String> {
++    let handle = app.clone();
++    tauri::async_runtime::spawn_blocking(move || {
++        let show = !platform::browser::is_visible();
++        platform::browser::set_visible(show, opacity(&handle))?;
++        let now = state(&handle);
++        let _ = handle.emit("browser-changed", &now);
++        Ok(now)
++    })
++    .await
++    .map_err(|e| e.to_string())?
++}
++
++/// Settings' opacity slider (20 to 100), kept and applied at once.
++#[tauri::command]
++pub async fn browser_set_opacity(app: tauri::AppHandle, percent: u32) -> Result<BrowserState, String> {
++    let percent = percent.clamp(20, 100);
++    if let Some(s) = app.try_state::<AppState>() {
++        s.settings.set(OPACITY_KEY, &percent.to_string());
++    }
++    let handle = app.clone();
++    tauri::async_runtime::spawn_blocking(move || {
++        platform::browser::set_opacity(percent);
++        state(&handle)
++    })
++    .await
++    .map_err(|e| e.to_string())
++}
++
++/// Tell the windows when the browser comes or goes on its own (closed with
++/// its own ×): looked at every 2 s.
++pub fn spawn_watch(app: tauri::AppHandle) {
++    if platform::browser::program().is_none() {
++        return;
++    }
++    std::thread::spawn(move || {
++        let mut last = (false, false);
++        loop {
++            std::thread::sleep(std::time::Duration::from_secs(2));
++            let running = platform::browser::is_running();
++            let now = (running, running && platform::browser::is_visible());
++            if now != last {
++                last = now;
++                let _ = app.emit("browser-changed", state(&app));
++            }
++        }
++    });
++}
++
++/// The meter is closing: the browser it started closes too.
++pub fn close() {
++    platform::browser::close();
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn the_opacity_is_kept_between_20_and_100() {
++        assert_eq!(parse_opacity(None), 100);
++        assert_eq!(parse_opacity(Some("")), 100);
++        assert_eq!(parse_opacity(Some("nope")), 100);
++        assert_eq!(parse_opacity(Some("85")), 85);
++        assert_eq!(parse_opacity(Some("5")), 20);
++        assert_eq!(parse_opacity(Some("250")), 100);
++        assert_eq!(parse_opacity(Some("70.4")), 70);
++    }
++}
+diff --git a/src-tauri/src/lib.rs b/src-tauri/src/lib.rs
+index 4a3ce1b..5beb4bb 100644
+--- a/src-tauri/src/lib.rs
++++ b/src-tauri/src/lib.rs
+@@ -58,6 +58,9 @@ mod npcap_setup;
+ 
+ #[cfg(feature = "desktop")]
+ mod app;
++// Clicktrough: Brave Origin as an overlay.
++#[cfg(feature = "desktop")]
++mod browser;
+ 
+ #[cfg(feature = "desktop")]
+ mod atomic_file;
+diff --git a/src-tauri/src/platform/kwin_rules.rs b/src-tauri/src/platform/kwin_rules.rs
+index 3820580..6a51966 100644
+--- a/src-tauri/src/platform/kwin_rules.rs
++++ b/src-tauri/src/platform/kwin_rules.rs
+@@ -143,6 +143,37 @@ pub fn plugin_windows_rule_entries() -> Vec<(&'static str, &'static str)> {
+     ]
+ }
+ 
++/// Clicktrough: the fifth rule's group, Brave Origin as an overlay
++/// (`linux/browser`): the browser the meter starts, above a fullscreen game.
++pub const BROWSER_GROUP: &str = "a2tools-dps-meter-browser";
++
++/// The window class the meter gives the Brave Origin it starts (`--class`,
++/// under XWayland, where Chromium sets it as asked). Only that browser has
++/// it: Brave started otherwise keeps its own class and stays a normal window.
++pub const BROWSER_CLASS: &str = "a2tools-browser";
++
++/// The browser's rule: its class only, forced to the overlay layer and Keep
++/// Above like the meter's windows (a focused fullscreen game covers a Keep
++/// Above window), without KWin's frame, and back at the place and size it
++/// was left (`positionrule`/`sizerule` 4: Remember). It keeps taking focus,
++/// so it can be typed in.
++pub fn browser_rule_entries() -> Vec<(&'static str, &'static str)> {
++    vec![
++        ("Description", "A2Tools DPS Meter: Brave Origin above fullscreen games (added by the meter)"),
++        ("wmclass", "^[aA]2tools-browser$"),
++        ("wmclassmatch", "3"),
++        ("wmclasscomplete", "false"),
++        ("layer", "overlay"),
++        ("layerrule", "2"),
++        ("above", "true"),
++        ("aboverule", "2"),
++        ("noborder", "true"),
++        ("noborderrule", "2"),
++        ("positionrule", "4"),
++        ("sizerule", "4"),
++    ]
++}
++
+ /// The `[General]` entries that list the rules, with the meter's added.
+ ///
+ /// KWin loads the rules named in `rules` (with `count`), and deletes every
+@@ -337,4 +368,18 @@ mod tests {
+         assert!(!is_kde("ubuntu:GNOME"));
+         assert!(!is_kde(""));
+     }
++
++    #[test]
++    fn the_browser_rule_matches_only_the_browser_the_meter_starts() {
++        let entries = browser_rule_entries();
++        let value = |key: &str| entries.iter().find(|(k, _)| *k == key).map(|(_, v)| *v);
++        assert_eq!(value("wmclass"), Some("^[aA]2tools-browser$"));
++        assert_eq!(value("wmclassmatch"), Some("3"));
++        assert!(value("wmclass").unwrap().contains(&BROWSER_CLASS[1..]));
++        assert_eq!((value("layer"), value("layerrule")), (Some("overlay"), Some("2")));
++        assert_eq!((value("noborder"), value("noborderrule")), (Some("true"), Some("2")));
++        assert_eq!((value("positionrule"), value("sizerule")), (Some("4"), Some("4")));
++        // No title: Brave's title is the page's.
++        assert_eq!(value("title"), None);
++    }
+ }
+diff --git a/src-tauri/src/platform/linux/browser.rs b/src-tauri/src/platform/linux/browser.rs
+new file mode 100644
+index 0000000..f16cb35
+--- /dev/null
++++ b/src-tauri/src/platform/linux/browser.rs
+@@ -0,0 +1,256 @@
++//! Clicktrough: Brave Origin as an overlay. A browser's window can't be put
++//! inside another program's on Wayland, so the meter starts the player's own
++//! Brave Origin, with a profile of its own, and has KWin keep that window
++//! above the game (`kwin_rules::browser_rule_entries`: overlay layer, no
++//! frame, its place remembered). A button in the meter's title shows or hides
++//! it; a small KWin script, loaded again with each change, minimises it,
++//! brings it back and sets its opacity. The meter sends nothing: Brave goes
++//! online by itself, as it always does. It closes with the meter.
++
++use std::path::{Path, PathBuf};
++use std::process::{Command, Stdio};
++use std::sync::Mutex;
++
++use crate::platform::kwin_rules::BROWSER_CLASS;
++
++/// Where Brave Origin is looked for, in order: the AUR package's
++/// (`brave-origin-bin`), then its beta and nightly; each also on `PATH`.
++const PROGRAMS: [&str; 3] = ["brave-origin", "brave-origin-beta", "brave-origin-nightly"];
++
++/// The script's name in KWin, so the one before is replaced.
++const PLUGIN: &str = "a2tools-dps-meter-browser";
++
++/// The script: every window of the browser's class shown or minimised as the
++/// meter says, at the opacity it says; a window opening later too.
++/// `__VISIBLE__` is true or false, `__OPACITY__` 0.2 to 1.
++const SCRIPT: &str = r#"// A2Tools DPS Meter: shows or hides the browser it started, at the
++// opacity set in its Settings. Loaded again by the meter with each change.
++var CLASS = "__CLASS__", VISIBLE = __VISIBLE__, OPACITY = __OPACITY__;
++function ours(w) {
++    return !!w && String(w.resourceClass).toLowerCase() === CLASS && !w.deleted;
++}
++function apply(w, front) {
++    if (!ours(w)) return;
++    w.opacity = OPACITY;
++    if (!VISIBLE) {
++        w.minimized = true;
++        return;
++    }
++    w.minimized = false;
++    if (front) {
++        if (workspace.windowActivated) workspace.activeWindow = w;
++        else workspace.activeClient = w;
++    }
++}
++var list = workspace.windowList ? workspace.windowList() : workspace.clientList();
++var shown = list.filter(ours);
++shown.forEach(function (w, i) { apply(w, i === shown.length - 1); });
++if (workspace.windowAdded) workspace.windowAdded.connect(function (w) { apply(w, true); });
++else workspace.clientAdded.connect(function (w) { apply(w, true); });
++"#;
++
++/// The browser's profile: `~/.local/share/a2tools-dps-meter/brave`. Brave
++/// makes it at its first start; the player's own Brave profile stays apart.
++pub fn profile_dir() -> Option<PathBuf> {
++    let data = std::env::var_os("XDG_DATA_HOME")
++        .map(PathBuf::from)
++        .filter(|p| p.is_absolute())
++        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))?;
++    Some(data.join("a2tools-dps-meter").join("brave"))
++}
++
++/// Brave Origin's program, if installed.
++pub fn program() -> Option<PathBuf> {
++    let path = std::env::var_os("PATH").unwrap_or_default();
++    PROGRAMS.iter().find_map(|name| {
++        std::iter::once(PathBuf::from("/usr/bin"))
++            .chain(std::env::split_paths(&path))
++            .map(|dir| dir.join(name))
++            .find(|p| is_program(p))
++    })
++}
++
++fn is_program(path: &Path) -> bool {
++    use std::os::unix::fs::PermissionsExt;
++    std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
++}
++
++/// The arguments the browser is started with: its own profile, and the class
++/// the KWin rule knows it by. `--class` sets the window class under X11
++/// only, so it runs through XWayland (`--ozone-platform=x11`).
++pub fn arguments(profile: &Path) -> Vec<String> {
++    vec![
++        format!("--user-data-dir={}", profile.display()),
++        format!("--class={BROWSER_CLASS}"),
++        "--ozone-platform=x11".into(),
++        "--no-default-browser-check".into(),
++    ]
++}
++
++/// Whether a process's command line (NUL-separated) is the browser's own
++/// main process with this profile (not one of its helpers, `--type=...`).
++pub fn is_browser_main(cmdline: &[u8], profile: &Path) -> bool {
++    let want = format!("--user-data-dir={}", profile.display());
++    let mut has_profile = false;
++    for arg in cmdline.split(|b| *b == 0) {
++        if arg == want.as_bytes() {
++            has_profile = true;
++        }
++        if arg.starts_with(b"--type=") {
++            return false;
++        }
++    }
++    has_profile
++}
++
++/// The browser's main processes now running with the meter's profile.
++fn running(profile: &Path) -> Vec<i32> {
++    let Ok(dir) = std::fs::read_dir("/proc") else { return Vec::new() };
++    dir.filter_map(|e| e.ok())
++        .filter_map(|e| e.file_name().to_str()?.parse::<i32>().ok())
++        .filter(|pid| std::fs::read(format!("/proc/{pid}/cmdline")).is_ok_and(|c| is_browser_main(&c, profile)))
++        .collect()
++}
++
++/// Shown or hidden, as the meter last asked.
++static VISIBLE: Mutex<bool> = Mutex::new(false);
++
++/// Whether the browser the meter starts is running.
++pub fn is_running() -> bool {
++    profile_dir().is_some_and(|p| !running(&p).is_empty())
++}
++
++/// Whether it is running and shown.
++pub fn is_visible() -> bool {
++    *VISIBLE.lock().unwrap_or_else(|p| p.into_inner()) && is_running()
++}
++
++/// Show the browser (starting it when it isn't running) or hide it.
++/// `opacity` is 20 to 100 (percent). Returns whether it is shown now.
++pub fn set_visible(show: bool, opacity: u32) -> Result<bool, String> {
++    let profile = profile_dir().ok_or("no home folder")?;
++    if show && running(&profile).is_empty() {
++        let program = program().ok_or("Brave Origin is not installed")?;
++        std::fs::create_dir_all(&profile).map_err(|e| format!("{}: {e}", profile.display()))?;
++        Command::new(&program)
++            .args(arguments(&profile))
++            .stdin(Stdio::null())
++            .stdout(Stdio::null())
++            .stderr(Stdio::null())
++            .spawn()
++            .map_err(|e| format!("{}: {e}", program.display()))?;
++        tracing::info!("Browser: started {}", program.display());
++    }
++    *VISIBLE.lock().unwrap_or_else(|p| p.into_inner()) = show;
++    apply(show, opacity);
++    Ok(show)
++}
++
++/// Its opacity changed in Settings (20 to 100).
++pub fn set_opacity(opacity: u32) {
++    if is_running() {
++        apply(*VISIBLE.lock().unwrap_or_else(|p| p.into_inner()), opacity);
++    }
++}
++
++/// The script with the meter's wishes in it.
++pub fn script(visible: bool, opacity: u32) -> String {
++    let opacity = f64::from(opacity.clamp(20, 100)) / 100.0;
++    SCRIPT
++        .replace("__CLASS__", BROWSER_CLASS)
++        .replace("__VISIBLE__", if visible { "true" } else { "false" })
++        .replace("__OPACITY__", &format!("{opacity:.2}"))
++}
++
++static CONNECTION: std::sync::OnceLock<Option<zbus::blocking::Connection>> = std::sync::OnceLock::new();
++
++/// Load the script into KWin again (KDE only; elsewhere the browser is a
++/// normal window that only starts and closes).
++fn apply(visible: bool, opacity: u32) {
++    if !super::process::is_kde() {
++        return;
++    }
++    let Some(connection) = CONNECTION.get_or_init(|| zbus::blocking::Connection::session().ok()).as_ref() else {
++        return;
++    };
++    let dir = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
++    let path = dir.join("a2tools-dps-meter-browser.js");
++    if let Err(e) = std::fs::write(&path, script(visible, opacity)) {
++        tracing::warn!("Browser: writing the KWin script: {e}");
++        return;
++    }
++    let Ok(kwin) = zbus::blocking::Proxy::new(connection, "org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting") else {
++        return;
++    };
++    let _ = kwin.call_method("unloadScript", &(PLUGIN,));
++    match kwin.call::<_, _, i32>("loadScript", &(path.to_string_lossy().as_ref(), PLUGIN)) {
++        Ok(id) if id >= 0 => {
++            let _ = kwin.call_method("start", &());
++        }
++        Ok(_) => tracing::warn!("Browser: KWin did not load the script"),
++        Err(e) => tracing::warn!("Browser: loading the KWin script: {e}"),
++    }
++}
++
++/// Close the browser the meter started (the meter is closing). Brave takes
++/// SIGTERM as a normal quit and keeps its tabs for the next start.
++pub fn close() {
++    let Some(profile) = profile_dir() else { return };
++    let pids = running(&profile);
++    for pid in &pids {
++        // SAFETY: kill(2) with a process id read from /proc just now.
++        unsafe {
++            libc::kill(*pid, libc::SIGTERM);
++        }
++    }
++    if !pids.is_empty() {
++        tracing::info!("Browser: closed with the meter");
++    }
++    if super::process::is_kde()
++        && let Some(Some(connection)) = CONNECTION.get()
++        && let Ok(kwin) = zbus::blocking::Proxy::new(connection, "org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting")
++    {
++        let _ = kwin.call_method("unloadScript", &(PLUGIN,));
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn only_the_main_process_with_the_meters_profile_is_the_browser() {
++        let profile = Path::new("/home/p/.local/share/a2tools-dps-meter/brave");
++        let main = b"/opt/brave-origin/brave\0--user-data-dir=/home/p/.local/share/a2tools-dps-meter/brave\0--class=a2tools-browser\0";
++        assert!(is_browser_main(main, profile));
++        let helper = b"/opt/brave-origin/brave\0--type=renderer\0--user-data-dir=/home/p/.local/share/a2tools-dps-meter/brave\0";
++        assert!(!is_browser_main(helper, profile));
++        let own = b"/opt/brave-origin/brave\0";
++        assert!(!is_browser_main(own, profile));
++        let other = b"/opt/brave-origin/brave\0--user-data-dir=/home/p/.local/share/a2tools-dps-meter/brave2\0";
++        assert!(!is_browser_main(other, profile));
++    }
++
++    #[test]
++    fn the_browser_starts_with_its_profile_and_class_under_xwayland() {
++        let args = arguments(Path::new("/x/brave"));
++        assert!(args.contains(&"--user-data-dir=/x/brave".to_string()));
++        assert!(args.contains(&"--class=a2tools-browser".to_string()));
++        assert!(args.contains(&"--ozone-platform=x11".to_string()));
++        // What the browser's main process is known by, as started.
++        let cmdline = format!("brave-origin\0{}\0", args.join("\0"));
++        assert!(is_browser_main(cmdline.as_bytes(), Path::new("/x/brave")));
++    }
++
++    #[test]
++    fn the_script_carries_the_class_the_wish_and_the_opacity() {
++        let s = script(true, 85);
++        assert!(s.contains("CLASS = \"a2tools-browser\""));
++        assert!(s.contains("VISIBLE = true"));
++        assert!(s.contains("OPACITY = 0.85"));
++        assert!(!s.contains("__"));
++        let s = script(false, 5);
++        assert!(s.contains("VISIBLE = false"));
++        assert!(s.contains("OPACITY = 0.20"));
++    }
++}
+diff --git a/src-tauri/src/platform/linux/focus.rs b/src-tauri/src/platform/linux/focus.rs
+index e88d757..37279a3 100644
+--- a/src-tauri/src/platform/linux/focus.rs
++++ b/src-tauri/src/platform/linux/focus.rs
+@@ -367,6 +367,11 @@ fn classify(pid: u32, class: &str, caption: &str) -> Who {
+     if pid == std::process::id() {
+         return Who::Meter;
+     }
++    // Clicktrough: the browser the meter starts (linux/browser) counts as
++    // the meter's: typing in it doesn't hide the meter.
++    if class.eq_ignore_ascii_case(crate::platform::kwin_rules::BROWSER_CLASS) {
++        return Who::Meter;
++    }
+     let dir = std::path::PathBuf::from(format!("/proc/{pid}"));
+     let comm = std::fs::read_to_string(dir.join("comm")).unwrap_or_default();
+     let cmdline = std::fs::read(dir.join("cmdline")).unwrap_or_default();
+@@ -425,5 +430,7 @@ mod tests {
+         assert_eq!(classify(0, "aion2.exe", ""), Who::Game);
+         assert_eq!(classify(std::process::id(), "a2tools-dps-meter", "A2Tools DPS Meter"), Who::Meter);
+         assert_eq!(classify(0, "firefox", "Mozilla Firefox"), Who::Other);
++        assert_eq!(classify(1, "a2tools-browser", "New Tab - Brave"), Who::Meter);
++        assert_eq!(classify(1, "A2tools-browser", "New Tab - Brave"), Who::Meter);
+     }
+ }
+diff --git a/src-tauri/src/platform/linux/mod.rs b/src-tauri/src/platform/linux/mod.rs
+index 1eaf93c..09743f7 100644
+--- a/src-tauri/src/platform/linux/mod.rs
++++ b/src-tauri/src/platform/linux/mod.rs
+@@ -9,6 +9,7 @@
+ //! from `../unsupported/` and does the safe nothing until it is ported here.
+ 
+ pub mod admin;
++pub mod browser;
+ pub mod atomic_file;
+ pub mod clock;
+ pub mod dialog;
+diff --git a/src-tauri/src/platform/linux/window_rules.rs b/src-tauri/src/platform/linux/window_rules.rs
+index 7633dae..0877f3c 100644
+--- a/src-tauri/src/platform/linux/window_rules.rs
++++ b/src-tauri/src/platform/linux/window_rules.rs
+@@ -7,7 +7,8 @@ use std::process::Command;
+ 
+ use crate::platform::kwin_rules::{
+     general_entries_for, icons_rule_entries, is_kde, no_focus_rule_entries, order_only_entries, parse_version,
+-    plugin_windows_rule_entries, reads_order_only, rule_entries, GROUP, ICONS_GROUP, NO_FOCUS_GROUP, PLUGIN_WINDOWS_GROUP,
++    plugin_windows_rule_entries, reads_order_only, rule_entries, browser_rule_entries, BROWSER_GROUP, GROUP, ICONS_GROUP,
++    NO_FOCUS_GROUP, PLUGIN_WINDOWS_GROUP,
+ };
+ 
+ fn tool(names: &[&'static str]) -> Option<&'static str> {
+@@ -93,13 +94,20 @@ pub fn plugin_windows_above(done: bool) -> Result<bool, String> {
+     add_rule(PLUGIN_WINDOWS_GROUP, &plugin_windows_rule_entries(), done, "plugin windows stay above fullscreen games")
+ }
+ 
++/// Clicktrough: make sure the Brave Origin the meter starts stays above a
++/// fullscreen game (`linux/browser`).
++pub fn browser_above(done: bool) -> Result<bool, String> {
++    add_rule(BROWSER_GROUP, &browser_rule_entries(), done, "the browser stays above fullscreen games")
++}
++
+ /// The meter's rules, each with its group, entries and what it does.
+-fn rules() -> [(&'static str, Vec<(&'static str, &'static str)>, &'static str); 4] {
++fn rules() -> [(&'static str, Vec<(&'static str, &'static str)>, &'static str); 5] {
+     [
+         (GROUP, rule_entries(), "the meter stays above fullscreen games"),
+         (NO_FOCUS_GROUP, no_focus_rule_entries(), "clicking the overlay keeps the game focused"),
+         (ICONS_GROUP, icons_rule_entries(), "plugin icons keep the game focused"),
+         (PLUGIN_WINDOWS_GROUP, plugin_windows_rule_entries(), "plugin windows stay above fullscreen games"),
++        (BROWSER_GROUP, browser_rule_entries(), "the browser stays above fullscreen games"),
+     ]
+ }
+ 
+diff --git a/src-tauri/src/platform/mod.rs b/src-tauri/src/platform/mod.rs
+index 2d0bdd1..4fc0a97 100644
+--- a/src-tauri/src/platform/mod.rs
++++ b/src-tauri/src/platform/mod.rs
+@@ -39,7 +39,7 @@ pub mod procfs;
+ pub mod screenshot;
+ 
+ pub use os::{
+-    admin, clock, dialog, discord_ipc, fps, game_launch, pcap, process, secret, shell, updater, window, window_detector, window_rules, window_startup,
++    admin, browser, clock, dialog, discord_ipc, fps, game_launch, pcap, process, secret, shell, updater, window, window_detector, window_rules, window_startup,
+ };
+ 
+ pub use os::atomic_file;
+diff --git a/src-tauri/src/platform/unsupported/browser.rs b/src-tauri/src/platform/unsupported/browser.rs
+new file mode 100644
+index 0000000..47a51b4
+--- /dev/null
++++ b/src-tauri/src/platform/unsupported/browser.rs
+@@ -0,0 +1,33 @@
++//! Clicktrough: Brave Origin as an overlay (see the Linux implementation).
++//! Linux only: elsewhere there is no browser to start.
++
++/// See the Linux implementation. None here.
++pub fn program() -> Option<std::path::PathBuf> {
++    None
++}
++
++/// See the Linux implementation. None here.
++pub fn profile_dir() -> Option<std::path::PathBuf> {
++    None
++}
++
++/// See the Linux implementation. Never.
++pub fn is_running() -> bool {
++    false
++}
++
++/// See the Linux implementation. Never.
++pub fn is_visible() -> bool {
++    false
++}
++
++/// See the Linux implementation. Not here.
++pub fn set_visible(_show: bool, _opacity: u32) -> Result<bool, String> {
++    Err("not on this system".into())
++}
++
++/// See the Linux implementation. Nothing to do.
++pub fn set_opacity(_opacity: u32) {}
++
++/// See the Linux implementation. Nothing to close.
++pub fn close() {}
+diff --git a/src-tauri/src/platform/unsupported/mod.rs b/src-tauri/src/platform/unsupported/mod.rs
+index be92e8f..d114787 100644
+--- a/src-tauri/src/platform/unsupported/mod.rs
++++ b/src-tauri/src/platform/unsupported/mod.rs
+@@ -4,6 +4,7 @@
+ //! replaces this for its target.
+ 
+ pub mod admin;
++pub mod browser;
+ pub mod atomic_file;
+ pub mod clock;
+ pub mod dialog;
+diff --git a/src-tauri/src/platform/unsupported/window_rules.rs b/src-tauri/src/platform/unsupported/window_rules.rs
+index 09b4d5b..4db751c 100644
+--- a/src-tauri/src/platform/unsupported/window_rules.rs
++++ b/src-tauri/src/platform/unsupported/window_rules.rs
+@@ -21,5 +21,10 @@ pub fn plugin_windows_above(_done: bool) -> Result<bool, String> {
+     Ok(true)
+ }
+ 
++/// See the Linux implementation. Always done.
++pub fn browser_above(_done: bool) -> Result<bool, String> {
++    Ok(true)
++}
++
+ /// See the Linux implementation. Nothing to keep.
+ pub fn keep_rules() {}
+diff --git a/src-tauri/src/platform/win32/mod.rs b/src-tauri/src/platform/win32/mod.rs
+index ce369d7..5ebe181 100644
+--- a/src-tauri/src/platform/win32/mod.rs
++++ b/src-tauri/src/platform/win32/mod.rs
+@@ -10,6 +10,8 @@ pub mod clock;
+ pub mod dialog;
+ pub mod discord_ipc;
+ pub mod fps;
++#[path = "../unsupported/browser.rs"]
++pub mod browser;
+ #[path = "../unsupported/game_launch.rs"]
+ pub mod game_launch;
+ pub mod hotkeys;
+diff --git a/src/data/i18n/ui/de.json b/src/data/i18n/ui/de.json
+index 9edfb54..7a0e290 100644
+--- a/src/data/i18n/ui/de.json
++++ b/src/data/i18n/ui/de.json
+@@ -682,7 +682,14 @@
+     "runAsAdmin": "Als Administrator ausführen",
+     "runAsAdminTitle": "A2Tools - Als Administrator ausführen",
+     "runAsAdminAsk": "Um die Bildrate des Spiels anzuzeigen, muss das Meter als Administrator laufen.\n\nDas Meter jetzt als Administrator neu starten? Windows fragt bei jedem Start des Meters nach. Du kannst das in den Einstellungen wieder ausschalten.",
+-    "shareData": "Nützliche Daten mit A2Tools synchronisieren"
++    "shareData": "Nützliche Daten mit A2Tools synchronisieren",
++    "browser": {
++      "title": "Browser",
++      "program": "Brave Origin",
++      "opacity": "Deckkraft",
++      "opacityTip": "Wie durchsichtig der Browser über dem Spiel ist.",
++      "help": "Die Weltkugel im Titel des Meters zeigt oder versteckt Brave Origin über dem Spiel, ohne Rahmen. Zum Verschieben an der Tableiste ziehen, oder irgendwo mit gedrückter Meta-Taste; er öffnet wieder dort, wo du ihn gelassen hast. Er hat ein eigenes Profil: richte deine Erweiterungen dort einmal ein. Klicks gehen nicht durch ihn hindurch: zum Spielen ausblenden. Er schließt mit dem Meter."
++    }
+   },
+   "support": {
+     "button": "Unterstütze mich",
+diff --git a/src/data/i18n/ui/en.json b/src/data/i18n/ui/en.json
+index 711dd1e..cb95073 100644
+--- a/src/data/i18n/ui/en.json
++++ b/src/data/i18n/ui/en.json
+@@ -694,7 +694,14 @@
+     "runAsAdmin": "Run as administrator",
+     "runAsAdminTitle": "A2Tools - Run as administrator",
+     "runAsAdminAsk": "Showing the game's frame rate needs the meter to run as administrator.\n\nRestart the meter as administrator now? Windows will ask each time the meter starts. You can turn this off in Settings.",
+-    "shareData": "Sync useful data to A2Tools"
++    "shareData": "Sync useful data to A2Tools",
++    "browser": {
++      "title": "Browser",
++      "program": "Brave Origin",
++      "opacity": "Opacity",
++      "opacityTip": "How see-through the browser is, over the game.",
++      "help": "The globe in the meter's title shows or hides Brave Origin above the game, without a frame. Drag it by its tab bar, or anywhere with the Meta key held; it opens again where you left it. It has a profile of its own: add your extensions there once. Clicks don't go through it: hide it to play. It closes with the meter."
++    }
+   },
+   "support": {
+     "button": "Support Me",
+diff --git a/src/styles.css b/src/styles.css
+index f65acb3..0c29e83 100644
+--- a/src/styles.css
++++ b/src/styles.css
+@@ -571,6 +571,10 @@ body.linuxOverlay .meter {
+ /* Clicktrough: a plugin overlay's own button (overlayButtons.js): gold while it shows. */
+ .header .headerBtns .overlayBtn.isActive { color: var(--ct-accent); }
+ .header .headerBtns .overlayBtn.isActive:hover { color: var(--ct-accent-light); }
++/* Clicktrough: the browser button (browserButton.js), gold while Brave shows. */
++.header .headerBtns .browserBtn.isActive { color: var(--ct-accent); }
++.header .headerBtns .browserBtn.isActive:hover { color: var(--ct-accent-light); }
++.settingsPanel .browserProgram { white-space: normal; overflow-wrap: anywhere; text-align: right; max-width: 60%; }
+ 
+ /* ---------- boss HP: the waterline ---------- */
+ 
+diff --git a/tests/browser-button.test.mjs b/tests/browser-button.test.mjs
+new file mode 100644
+index 0000000..3603144
+--- /dev/null
++++ b/tests/browser-button.test.mjs
+@@ -0,0 +1,116 @@
++// Clicktrough: the browser button in the meter's header (browserButton.js):
++// before the overlay and plugin buttons, shown only with Brave Origin
++// installed, gold while it shows, a click asks browser_toggle; Settings'
++// opacity slider asks browser_set_opacity.
++import assert from "node:assert/strict";
++import { readFileSync } from "node:fs";
++import test from "node:test";
++import vm from "node:vm";
++
++const source = readFileSync(new URL("../public/src/js/browserButton.js", import.meta.url), "utf8");
++const tick = () => new Promise((resolve) => setImmediate(resolve));
++
++function element(tag) {
++  const attrs = {};
++  const classes = new Set();
++  const el = {
++    tag, children: [], handlers: {}, dataset: {}, style: {}, title: "", hidden: false, parentNode: null, textContent: "", value: "",
++    set className(v) { classes.clear(); for (const c of String(v).split(/\s+/).filter(Boolean)) classes.add(c); },
++    get className() { return [...classes].join(" "); },
++    classList: { toggle: (n, on) => (on ? classes.add(n) : classes.delete(n)), contains: (n) => classes.has(n) },
++    setAttribute: (k, v) => { attrs[k] = String(v); },
++    getAttribute: (k) => attrs[k],
++    addEventListener: (n, h) => { el.handlers[n] = h; },
++    append: (...kids) => { for (const k of kids) { k.parentNode = el; el.children.push(k); } },
++    attrs, classes,
++  };
++  return el;
++}
++
++function setup(state, { view = "main" } = {}) {
++  const calls = [];
++  const listeners = {};
++  const bar = element("div");
++  const plugins = element("div");
++  plugins.className = "headerBtn pluginsBtn";
++  bar.append(plugins);
++  bar.insertBefore = (node, ref) => {
++    node.parentNode = bar;
++    const i = ref ? bar.children.indexOf(ref) : bar.children.length;
++    bar.children.splice(i, 0, node);
++  };
++  bar.querySelector = (sel) => (sel.includes("pluginsBtn") ? plugins : null);
++  const slider = element("input");
++  slider.value = "100";
++  const value = element("div");
++  const program = element("div");
++  const profile = element("div");
++  const found = { ".headerBtns": bar, ".browserOpacityInput": slider, ".browserOpacityValue": value, ".browserProgram": program, ".browserProfile": profile };
++  const now = { ...state };
++  const context = vm.createContext({
++    window: {
++      A2_VIEW: view,
++      __TAURI__: {
++        core: {
++          invoke: async (cmd, args) => {
++            calls.push([cmd, args]);
++            if (cmd === "browser_toggle") now.visible = !now.visible;
++            if (cmd === "browser_set_opacity") now.opacity = args.percent;
++            return { ...now };
++          },
++        },
++        event: { listen: async (name, fn) => { listeners[name] = fn; } },
++      },
++      lucide: { createIcons() {} },
++    },
++    document: { readyState: "complete", activeElement: null, querySelector: (sel) => found[sel] ?? null, createElement: element },
++    requestAnimationFrame: (fn) => fn(),
++    setTimeout: (fn) => { fn(); return 1; },
++    clearTimeout() {},
++    Promise, String, Number, JSON,
++  });
++  vm.runInContext(source, context);
++  return { bar, plugins, slider, value, program, profile, calls, listeners };
++}
++
++test("the button comes before the plugins button and shows only with Brave installed", async () => {
++  const { bar, plugins } = setup({ found: true, program: "/usr/bin/brave-origin", profile: "/h/brave", visible: false, opacity: 100 });
++  await tick();
++  const btn = bar.children[0];
++  assert.ok(btn.classes.has("browserBtn"));
++  assert.equal(bar.children[1], plugins);
++  assert.equal(btn.hidden, false);
++
++  const none = setup({ found: false, program: "", profile: "/h/brave", visible: false, opacity: 100 });
++  await tick();
++  assert.equal(none.bar.children[0].hidden, true);
++  assert.match(none.program.textContent, /Not installed/);
++});
++
++test("a click asks browser_toggle and the button turns gold while Brave shows", async () => {
++  const { bar, calls, listeners } = setup({ found: true, program: "/usr/bin/brave-origin", profile: "/h/brave", visible: false, opacity: 100 });
++  await tick();
++  const btn = bar.children[0];
++  btn.handlers.click({ stopPropagation() {} });
++  await tick();
++  assert.deepEqual(calls.at(-1), ["browser_toggle", undefined]);
++  assert.ok(btn.classes.has("isActive"));
++  assert.equal(btn.getAttribute("aria-pressed"), "true");
++  // Closed with its own ×: the backend tells, the gold goes.
++  listeners["browser-changed"]({ payload: { found: true, visible: false, opacity: 100 } });
++  assert.ok(!btn.classes.has("isActive"));
++});
++
++test("Settings: the slider sets the opacity, where Brave was found is shown", async () => {
++  const { slider, value, program, profile, calls } = setup({ found: true, program: "/usr/bin/brave-origin", profile: "/h/brave", visible: true, opacity: 80 }, { view: "settings" });
++  await tick();
++  assert.equal(program.textContent, "/usr/bin/brave-origin");
++  assert.match(profile.textContent, /\/h\/brave/);
++  assert.equal(slider.value, "80");
++  assert.equal(value.textContent, "80%");
++  slider.value = "55";
++  slider.handlers.input();
++  await tick();
++  assert.deepEqual(JSON.parse(JSON.stringify(calls.at(-1))), ["browser_set_opacity", { percent: 55 }]);
++  assert.equal(value.textContent, "55%");
++});
+-- 
+2.43.0
+
