@@ -1,0 +1,76 @@
+From 6a3d02c702ea31e21b33cd63506a0e55788a6ea9 Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Wed, 11 Nov 2026 16:12:40 +0000
+Subject: [PATCH] Plugins: YouTube's newest uploads from its results page
+ sorted by date
+
+yt-dlp no longer knows ytsearchdate ("Unsupported url scheme"): the
+newest uploads come from YouTube's results page sorted by upload date
+(sp=CAI=), its first 20.
+---
+ src-tauri/src/plugins/video.rs | 29 +++++++++++++++++++++++++----
+ 1 file changed, 25 insertions(+), 4 deletions(-)
+
+diff --git a/src-tauri/src/plugins/video.rs b/src-tauri/src/plugins/video.rs
+index c581ec9..9b54931 100644
+--- a/src-tauri/src/plugins/video.rs
++++ b/src-tauri/src/plugins/video.rs
+@@ -290,16 +290,22 @@ pub async fn plugin_video_search(
+     let id = window_plugin(&window, plugin.as_deref())?;
+     require(&app, &id, "video")?;
+     let text = text.trim().replace(['\n', '\r'], " ");
+-    // Clicktrough: newest uploads first (the Streams plugin's tracker).
+-    let search = if newest.unwrap_or(false) { "ytsearchdate20" } else { "ytsearch20" };
++    // Clicktrough: newest uploads first (the Streams plugin's tracker):
++    // YouTube's results page sorted by upload date (sp=CAI=; yt-dlp has no
++    // ytsearchdate any more), its first 20.
++    let target = if newest.unwrap_or(false) {
++        format!("https://www.youtube.com/results?search_query={}&sp=CAI%3D", query_encode(&text))
++    } else {
++        format!("ytsearch20:{text}")
++    };
+     if text.is_empty() || text.len() > 100 {
+         return Err("no search words".into());
+     }
+     let out = tokio::time::timeout(
+         Duration::from_secs(40),
+         tokio::process::Command::new("yt-dlp")
+-            .args(["--ignore-config", "--no-warnings", "--flat-playlist", "--dump-single-json", "--"])
+-            .arg(format!("{search}:{text}"))
++            .args(["--ignore-config", "--no-warnings", "--flat-playlist", "--playlist-end", "20", "--dump-single-json", "--"])
++            .arg(&target)
+             .kill_on_drop(true)
+             .output(),
+     )
+@@ -314,6 +320,20 @@ pub async fn plugin_video_search(
+     Ok(search_entries(&all))
+ }
+ 
++/// Search words for a URL's query: letters and digits as they are, a space
++/// as "+", everything else percent-encoded (UTF-8).
++fn query_encode(text: &str) -> String {
++    let mut out = String::new();
++    for b in text.bytes() {
++        match b {
++            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
++            b' ' => out.push('+'),
++            _ => out.push_str(&format!("%{b:02X}")),
++        }
++    }
++    out
++}
++
+ /// yt-dlp's search answer, cut to what a list shows.
+ pub fn search_entries(all: &Value) -> Value {
+     let entries = all.get("entries").and_then(Value::as_array).cloned().unwrap_or_default();
+@@ -1298,6 +1318,7 @@ mod tests {
+     fn a_quality_is_a_height_or_sound_only() {
+         assert_eq!(ytdl_format("720"), "bestvideo[height<=?720]+bestaudio/best[height<=?720]/best");
+         assert_eq!(ytdl_format("audio"), "bestaudio/best");
++        assert_eq!(query_encode("AION 2 türkçe&x"), "AION+2+t%C3%BCrk%C3%A7e%26x");
+         assert!(ytdl_format("; rm -rf").contains("1080"));
+     }
+ 
+-- 
+2.43.0
+
