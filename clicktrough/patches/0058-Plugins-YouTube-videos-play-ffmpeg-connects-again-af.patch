@@ -1,0 +1,32 @@
+From c977ad2b472651a901822c32820702762e92de37 Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Wed, 11 Nov 2026 09:42:43 +0000
+Subject: [PATCH] Plugins: YouTube videos play (ffmpeg connects again after a
+ 403)
+
+YouTube hands out a stream's address a few seconds before it serves it;
+mpv asked at once, got 403 Forbidden and played nothing ("No video or
+audio streams selected"). ffmpeg now reconnects on 4xx, up to 10 s.
+---
+ src-tauri/src/plugins/video.rs | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/src-tauri/src/plugins/video.rs b/src-tauri/src/plugins/video.rs
+index 7abd6fb..32ece0c 100644
+--- a/src-tauri/src/plugins/video.rs
++++ b/src-tauri/src/plugins/video.rs
+@@ -768,6 +768,11 @@ mod player {
+             ("idle", "yes"),
+             ("keep-open", "no"),
+             ("ytdl", "yes"),
++            // YouTube hands out a stream's address a few seconds before it
++            // serves it (yt-dlp waits, "Sleeping 5.00 seconds as required by
++            // the site"); mpv asked at once, got 403 and played nothing ("No
++            // video or audio streams selected"). ffmpeg connects again.
++            ("stream-lavf-o", "reconnect=1,reconnect_on_http_error=4xx,reconnect_delay_max=10"),
+             ("cache", "yes"),
+             ("demuxer-max-bytes", "64MiB"),
+             ("audio-client-name", "A2Tools Streams"),
+-- 
+2.43.0
+
