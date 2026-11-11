@@ -1,0 +1,73 @@
+From 4c96425854a9923dbdad8b45b5a22f5705075993 Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Wed, 11 Nov 2026 01:50:35 +0000
+Subject: [PATCH] Meter: started with the game, it still closes with it after
+ an update
+
+---
+ src-tauri/src/app.rs                    |  6 ++++++
+ src-tauri/src/platform/linux/updater.rs | 10 ++++++++--
+ 2 files changed, 14 insertions(+), 2 deletions(-)
+
+diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
+index 8faa5aa..966cc15 100644
+--- a/src-tauri/src/app.rs
++++ b/src-tauri/src/app.rs
+@@ -395,6 +395,12 @@ static GAME_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBo
+ /// closes once the game is gone. A start by hand meanwhile clears it.
+ static WITH_GAME: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+ 
++/// Whether this meter closes with the game (the updater starts the new one
++/// the same way).
++pub(crate) fn started_with_game() -> bool {
++    WITH_GAME.load(std::sync::atomic::Ordering::Relaxed)
++}
++
+ /// The setting "Start and close with AION2" (on unless turned off).
+ const START_WITH_GAME_KEY: &str = "dpsMeter.startWithGame";
+ 
+diff --git a/src-tauri/src/platform/linux/updater.rs b/src-tauri/src/platform/linux/updater.rs
+index cbc9cb3..26d0971 100644
+--- a/src-tauri/src/platform/linux/updater.rs
++++ b/src-tauri/src/platform/linux/updater.rs
+@@ -125,7 +125,9 @@ exit $s"#
+ }
+ 
+ /// The script that waits for the meter to exit, installs, and starts it again
+-/// (`$1` the package, `$2` the meter's pid, `$3` its SHA-256).
++/// (`$1` the package, `$2` the meter's pid, `$3` its SHA-256, `$4` the
++/// arguments to start it with: `--with-game` for a meter the game started,
++/// so the new one still closes with the game).
+ fn installer_script(root: &str, helper: bool) -> String {
+     let fast = if helper {
+         format!("/usr/bin/pkexec {UPDATE_HELPER} <\"$1\" ||\n        ")
+@@ -137,7 +139,7 @@ fn installer_script(root: &str, helper: bool) -> String {
+         while kill -0 "$2" 2>/dev/null; do sleep 0.2; done
+         {fast}pkexec /bin/sh -c '{root}' a2tools-update "$1" "$3"
+         rm -f "$1"
+-        exec {INSTALLED_BINARY}
++        exec {INSTALLED_BINARY} $4
+     "#
+     )
+ }
+@@ -163,6 +165,9 @@ pub fn run_installer(package: &Path, sha256: &str, _install_dir: &str) -> Result
+         .arg(package)
+         .arg(std::process::id().to_string())
+         .arg(sha256.to_ascii_lowercase())
++        // Clicktrough: started with the game, started again the same way:
++        // updated by hand, a meter started by hand closed with nothing.
++        .arg(if crate::app::started_with_game() { crate::platform::game_watch::WITH_GAME_ARG } else { "" })
+         .stdin(Stdio::null())
+         // Its own process group, so closing a terminal the meter was started
+         // from does not take the update down with it.
+@@ -205,6 +210,7 @@ mod tests {
+         let helper = with.find("/usr/bin/pkexec /usr/lib/a2tools-dps-meter-update <\"$1\" ||").unwrap();
+         let prompt = with.find("pkexec /bin/sh -c").unwrap();
+         assert!(helper < prompt);
++        assert!(with.contains("exec /usr/bin/a2tools-dps-meter $4"));
+         // Nothing but the package on stdin: no argument the script could trust.
+         assert!(!with.contains("a2tools-dps-meter-update \""));
+         let without = installer_script(&root, false);
+-- 
+2.43.0
+
