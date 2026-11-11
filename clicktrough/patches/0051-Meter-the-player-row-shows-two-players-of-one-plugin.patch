@@ -1,0 +1,333 @@
+From 5ccbcdc38196cbd5f27f16593f6f90b18aabfe40 Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Wed, 11 Nov 2026 01:05:22 +0000
+Subject: [PATCH] Meter: the player row shows two players of one plugin, and
+ their quality
+
+---
+ public/src/js/mediaRow.js      | 60 ++++++++++++++++++++++---------
+ public/src/js/pluginFrame.js   |  4 +--
+ src-tauri/src/plugins/a2.js    | 11 +++---
+ src-tauri/src/plugins/media.rs | 65 ++++++++++++++++++++++++++++------
+ src/styles.css                 |  9 +++++
+ 5 files changed, 116 insertions(+), 33 deletions(-)
+
+diff --git a/public/src/js/mediaRow.js b/public/src/js/mediaRow.js
+index 49e37fd..24c2b71 100644
+--- a/public/src/js/mediaRow.js
++++ b/public/src/js/mediaRow.js
+@@ -20,7 +20,7 @@
+   };
+   const NAMES = {
+     prev: "Previous", next: "Next", stop: "Stop", favourite: "Favourite", playStop: "Play or stop",
+-    pause: "Pause or play", mute: "Mute", volume: "Volume", opacity: "Video opacity",
++    pause: "Pause or play", mute: "Mute", volume: "Volume", opacity: "Video opacity", quality: "Quality",
+   };
+ 
+   const el = (tag, cls) => {
+@@ -50,7 +50,7 @@
+ 
+     let list = [];
+     let shownKey = "";
+-    const send = (id, action, value) => Promise.resolve(invoke("media_control", { id, action, value: value ?? null })).catch(() => {});
++    const send = (key, action, value) => Promise.resolve(invoke("media_control", { key, action, value: value ?? null })).catch(() => {});
+ 
+     const button = (id, action, iconName, label, pressed) => {
+       const b = el("button", `mediaBtn mediaBtn-${action}`);
+@@ -82,6 +82,32 @@
+       return box;
+     };
+ 
++    // The quality as a button, not a <select>: its list is the desktop's
++    // menu, drawn in the desktop's colours. A click steps to the next one
++    // (right-click: back); it changes a moment after the last click, since
++    // each change starts the video again.
++    const QUALITY_NAMES = { audio: "Sound" };
++    const quality = (key, value, list) => {
++      const qs = Array.isArray(list) && list.length ? list : ["1080"];
++      let at = Math.max(0, qs.indexOf(value));
++      let timer = 0;
++      const b = el("button", "mediaQuality");
++      b.type = "button";
++      b.title = "Quality: click for the next, right-click for the one before (it starts again)";
++      b.setAttribute("aria-label", "Quality");
++      const show = () => { b.textContent = QUALITY_NAMES[qs[at]] || `${qs[at]}p`; };
++      const step = (by) => {
++        at = (at + by + qs.length) % qs.length;
++        show();
++        clearTimeout(timer);
++        timer = setTimeout(() => send(key, "quality", qs[at]), 900);
++      };
++      b.addEventListener("click", (event) => { event.stopPropagation(); step(1); });
++      b.addEventListener("contextmenu", (event) => { event.preventDefault(); event.stopPropagation(); step(-1); });
++      show();
++      return b;
++    };
++
+     const render = () => {
+       const playing = list.filter((p) => p && p.state);
+       row.hidden = !playing.length;
+@@ -90,26 +116,27 @@
+         shownKey = "";
+         return;
+       }
+-      if (!playing.some((p) => p.id === picked)) picked = playing[0].id;
+-      const cur = playing.find((p) => p.id === picked);
++      if (!playing.some((p) => p.key === picked)) picked = playing[0].key;
++      const cur = playing.find((p) => p.key === picked);
+       const s = cur.state;
+       title.textContent = s.title || cur.name;
+       sub.textContent = s.sub || "";
+       now.title = [s.title, s.sub].filter(Boolean).join(" · ");
+       // Rebuilt only when what is shown changes; a slider being dragged keeps its place.
+-      const key = JSON.stringify([playing.map((p) => [p.id, p.state.icon, p.name]), picked, s.controls, s.paused, s.muted, s.playing, s.favourite]);
++      const key = JSON.stringify([playing.map((p) => [p.key, p.state.icon, p.name]), picked, s.controls, s.paused, s.muted, s.playing, s.favourite, s.quality]);
+       if (key !== shownKey) {
+         shownKey = key;
+         tabs.replaceChildren(...playing.map((p) => {
+           const b = el("button", "mediaTab");
+           b.type = "button";
+-          b.title = p.name;
+-          b.setAttribute("aria-label", p.name);
+-          b.setAttribute("aria-pressed", String(p.id === picked));
++          const name = p.state.sub ? `${p.name}: ${p.state.title || p.state.sub}` : p.name;
++          b.title = name;
++          b.setAttribute("aria-label", name);
++          b.setAttribute("aria-pressed", String(p.key === picked));
+           b.append(icon(p.state.icon || "music"));
+           b.addEventListener("click", (event) => {
+             event.stopPropagation();
+-            picked = p.id;
++            picked = p.key;
+             try { localStorage.setItem(PICK_KEY, picked); } catch {}
+             render();
+           });
+@@ -117,13 +144,14 @@
+         }));
+         const parts = [];
+         for (const c of s.controls || []) {
+-          if (c === "volume") parts.push(slider(cur.id, c, s.volume, 0, null));
+-          else if (c === "opacity") parts.push(slider(cur.id, c, s.opacity, 20, "contrast"));
+-          else if (c === "pause") parts.push(button(cur.id, c, s.paused ? "play" : "pause", NAMES[c], s.paused));
+-          else if (c === "playStop") parts.push(button(cur.id, c, s.playing ? "square" : "play", NAMES[c], s.playing));
+-          else if (c === "mute") parts.push(button(cur.id, c, s.muted ? "volume-x" : "volume-2", NAMES[c], s.muted));
+-          else if (c === "favourite") parts.push(button(cur.id, c, "star", NAMES[c], s.favourite));
+-          else parts.push(button(cur.id, c, ICONS[c] || "circle", NAMES[c] || c));
++          if (c === "volume") parts.push(slider(cur.key, c, s.volume, 0, null));
++          else if (c === "opacity") parts.push(slider(cur.key, c, s.opacity, 20, "contrast"));
++          else if (c === "quality") parts.push(quality(cur.key, s.quality, cur.qualities));
++          else if (c === "pause") parts.push(button(cur.key, c, s.paused ? "play" : "pause", NAMES[c], s.paused));
++          else if (c === "playStop") parts.push(button(cur.key, c, s.playing ? "square" : "play", NAMES[c], s.playing));
++          else if (c === "mute") parts.push(button(cur.key, c, s.muted ? "volume-x" : "volume-2", NAMES[c], s.muted));
++          else if (c === "favourite") parts.push(button(cur.key, c, "star", NAMES[c], s.favourite));
++          else parts.push(button(cur.key, c, ICONS[c] || "circle", NAMES[c] || c));
+         }
+         ctl.replaceChildren(...parts);
+         try { window.lucide?.createIcons?.({ root: row }); } catch {}
+diff --git a/public/src/js/pluginFrame.js b/public/src/js/pluginFrame.js
+index d930e0b..f5452bb 100644
+--- a/public/src/js/pluginFrame.js
++++ b/public/src/js/pluginFrame.js
+@@ -219,9 +219,9 @@
+       },
+       // Clicktrough: what the plugin plays, for the meter's player row
+       // (permission "media"; plugins/media.rs). null: nothing plays.
+-      "media.set": ([state]) => {
++      "media.set": ([state, slot]) => {
+         if (!allowed("media")) throw new Error('the plugin lacks the "media" permission');
+-        return call("plugin_media_set", { state: state ?? null });
++        return call("plugin_media_set", { state: state ?? null, slot: slot == null ? null : String(slot) });
+       },
+       // Clicktrough: share a value with plugins allowed to hear it.
+       share: ([value]) => {
+diff --git a/src-tauri/src/plugins/a2.js b/src-tauri/src/plugins/a2.js
+index 698fe05..d219bfb 100644
+--- a/src-tauri/src/plugins/a2.js
++++ b/src-tauri/src/plugins/a2.js
+@@ -100,9 +100,12 @@
+ //   Player row (permission "media", Clicktrough): what the plugin plays, shown with its controls
+ //   in a row under the meter's header while anything plays; a control there comes as an event:
+ //   await a2.media.set({ icon: "tv", title, sub, paused, muted, volume: 0..1, opacity: 0.2..1,
+-//                       controls: ["prev", "playStop", "pause", "next", "mute", "volume", "opacity", "favourite", "stop"] })
+-//   await a2.media.set(null)                   nothing plays: the plugin's entry leaves the row
+-//   a2.on("media", ({ action, value }) => ...) a control in the row (value: 0..1 for volume and opacity)
++//                       controls: ["prev", "playStop", "pause", "next", "mute", "volume", "opacity", "quality", "favourite", "stop"],
++//                       quality: "1080" | "720" | "480" | "360" | "audio" }, slot)
++//   await a2.media.set(null, slot)             nothing plays: the entry leaves the row
++//                                              (slot: optional, for two things playing at once)
++//   a2.on("media", ({ action, value, slot }) => ...) a control in the row (value: 0..1 for volume
++//                                              and opacity, the quality for "quality")
+ //   await a2.video.search(words)               YouTube's search (yt-dlp): [{ id, title, channel, ... }]
+ //   await a2.video.feed(channelId)             a YouTube channel's newest videos (its Atom feed, text)
+ //   await a2.video.freetube()                  FreeTube's subscriptions on this computer, or null
+@@ -301,7 +304,7 @@
+     }),
+     // Clicktrough: the meter's player row (permission "media").
+     media: Object.freeze({
+-      set: (state) => call("media.set", [state ?? null]),
++      set: (state, slot) => call("media.set", [state ?? null, slot ?? null]),
+     }),
+     widgets: Object.freeze({
+       open: (name, size) => call("widgets.open", [String(name), size || {}]),
+diff --git a/src-tauri/src/plugins/media.rs b/src-tauri/src/plugins/media.rs
+index 1edad59..d4c6def 100644
+--- a/src-tauri/src/plugins/media.rs
++++ b/src-tauri/src/plugins/media.rs
+@@ -5,11 +5,16 @@
+ //! plugin, and the chosen one's controls. A control sends the plugin an
+ //! event `media` (`{ action, value }`), which it handles as its own buttons.
+ //!
++//! A plugin playing two things at once (the Streams plugin's Twitch and
++//! YouTube) gives each a slot of its own (`a2.media.set(state, "youtube")`):
++//! each is a button in the row, and its controls' events carry the slot.
++//!
+ //! The state a plugin gives, every field optional:
+ //!
+ //! ```json
+ //! { "icon": "tv", "title": "Stoopzz", "sub": "Twitch", "paused": false,
+-//!   "muted": false, "volume": 0.7, "opacity": 1, "controls": ["pause", "mute", "volume", "opacity", "stop"] }
++//!   "muted": false, "volume": 0.7, "opacity": 1, "quality": "720",
++//!   "controls": ["pause", "mute", "volume", "opacity", "quality", "stop"] }
+ //! ```
+ //!
+ //! `null` takes it away (nothing plays). Only the controls listed here exist.
+@@ -21,7 +26,20 @@ use serde_json::{json, Value};
+ use tauri::Emitter;
+ 
+ /// The controls a plugin may show in the row.
+-const CONTROLS: &[&str] = &["prev", "playStop", "pause", "next", "mute", "volume", "opacity", "favourite", "stop"];
++const CONTROLS: &[&str] = &["prev", "playStop", "pause", "next", "mute", "volume", "opacity", "quality", "favourite", "stop"];
++
++/// The qualities the row offers (the Streams plugin's).
++const QUALITIES: &[&str] = &["1080", "720", "480", "360", "audio"];
++
++/// A slot's name: short, lower case.
++fn slot_ok(s: &str) -> bool {
++    s.len() <= 16 && s.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
++}
++
++/// The row's key of a plugin's slot: "<id>" or "<id>/<slot>".
++fn key(id: &str, slot: &str) -> String {
++    if slot.is_empty() { id.to_string() } else { format!("{id}/{slot}") }
++}
+ 
+ fn states() -> &'static Mutex<BTreeMap<String, Value>> {
+     static S: std::sync::OnceLock<Mutex<BTreeMap<String, Value>>> = std::sync::OnceLock::new();
+@@ -59,6 +77,7 @@ fn clean(state: &Value) -> Option<Value> {
+         "favourite": s.get("favourite").and_then(Value::as_bool).unwrap_or(false),
+         "volume": unit(s.get("volume"), 0.0),
+         "opacity": unit(s.get("opacity"), 0.2),
++        "quality": s.get("quality").and_then(Value::as_str).filter(|q| QUALITIES.contains(q)),
+         "controls": controls,
+     }))
+ }
+@@ -69,10 +88,15 @@ fn listed(app: &tauri::AppHandle) -> Value {
+         .unwrap_or_default();
+     let order = super::order(app);
+     let mut list: Vec<(String, Value)> = states().lock().unwrap_or_else(|p| p.into_inner()).iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+-    list.sort_by_key(|(id, _)| order.iter().position(|o| o == id).unwrap_or(usize::MAX));
++    let plugin = |k: &str| k.split('/').next().unwrap_or("").to_string();
++    list.sort_by_key(|(k, _)| (order.iter().position(|o| *o == plugin(k)).unwrap_or(usize::MAX), k.clone()));
+     Value::Array(
+         list.into_iter()
+-            .map(|(id, state)| json!({ "id": id, "name": names.get(&id).cloned().unwrap_or_else(|| id.clone()), "state": state }))
++            .map(|(k, state)| {
++                let id = plugin(&k);
++                let slot = k.split_once('/').map(|(_, s)| s.to_string()).unwrap_or_default();
++                json!({ "key": k, "id": id, "slot": slot, "name": names.get(&id).cloned().unwrap_or_else(|| id.clone()), "state": state, "qualities": QUALITIES })
++            })
+             .collect(),
+     )
+ }
+@@ -83,17 +107,28 @@ fn notify(app: &tauri::AppHandle) {
+ 
+ /// A plugin turned off or gone: its entry leaves the row.
+ pub fn forget(app: &tauri::AppHandle, id: &str) {
+-    let gone = states().lock().unwrap_or_else(|p| p.into_inner()).remove(id).is_some();
++    let gone = {
++        let mut all = states().lock().unwrap_or_else(|p| p.into_inner());
++        let before = all.len();
++        all.retain(|k, _| k != id && !k.starts_with(&format!("{id}/")));
++        all.len() != before
++    };
+     if gone {
+         notify(app);
+     }
+ }
+ 
+-/// `a2.media.set(state)`: what the plugin plays now, or null for nothing.
++/// `a2.media.set(state, slot)`: what the plugin plays now (in that slot),
++/// or null for nothing.
+ #[tauri::command]
+-pub fn plugin_media_set(app: tauri::AppHandle, window: tauri::WebviewWindow, plugin: Option<String>, state: Option<Value>) -> Result<(), String> {
++pub fn plugin_media_set(app: tauri::AppHandle, window: tauri::WebviewWindow, plugin: Option<String>, state: Option<Value>, slot: Option<String>) -> Result<(), String> {
+     let id = super::window_plugin(&window, plugin.as_deref())?;
+     super::require(&app, &id, "media")?;
++    let slot = slot.unwrap_or_default();
++    if !slot_ok(&slot) {
++        return Err("a slot is up to 16 letters, digits or '-'".into());
++    }
++    let id = key(&id, &slot);
+     let cleaned = state.as_ref().filter(|s| !s.is_null()).map(|s| clean(s).ok_or("not a player state")).transpose()?;
+     {
+         let mut all = states().lock().unwrap_or_else(|p| p.into_inner());
+@@ -121,10 +156,11 @@ pub fn media_list(app: tauri::AppHandle) -> Value {
+     listed(&app)
+ }
+ 
+-/// A control in the meter's row: the plugin hears `media` `{ action, value }`.
++/// A control in the meter's row (`key`: the entry's, "<id>" or
++/// "<id>/<slot>"): the plugin hears `media` `{ action, value, slot }`.
+ #[tauri::command]
+-pub fn media_control(app: tauri::AppHandle, id: String, action: String, value: Option<Value>) -> Result<(), String> {
+-    if !states().lock().unwrap_or_else(|p| p.into_inner()).contains_key(&id) {
++pub fn media_control(app: tauri::AppHandle, key: String, action: String, value: Option<Value>) -> Result<(), String> {
++    if !states().lock().unwrap_or_else(|p| p.into_inner()).contains_key(&key) {
+         return Err("nothing of that plugin plays".into());
+     }
+     if !CONTROLS.contains(&action.as_str()) {
+@@ -133,9 +169,11 @@ pub fn media_control(app: tauri::AppHandle, id: String, action: String, value: O
+     let value = match value {
+         Some(Value::Number(n)) => n.as_f64().filter(|v| v.is_finite()).map(|v| json!(v.clamp(0.0, 1.0))).unwrap_or(Value::Null),
+         Some(Value::Bool(b)) => Value::Bool(b),
++        Some(Value::String(q)) if action == "quality" && QUALITIES.contains(&q.as_str()) => Value::String(q),
+         _ => Value::Null,
+     };
+-    super::emit_plugin(&app, &id, json!({ "plugin": id, "event": "media", "data": { "action": action, "value": value } }));
++    let (id, slot) = key.split_once('/').unwrap_or((key.as_str(), ""));
++    super::emit_plugin(&app, id, json!({ "plugin": id, "event": "media", "data": { "action": action, "value": value, "slot": slot } }));
+     Ok(())
+ }
+ 
+@@ -159,6 +197,11 @@ mod tests {
+         assert!(s.get("url").is_none());
+         assert_eq!(clean(&json!({ "icon": "../x" })).unwrap()["icon"], "music");
+         assert!(clean(&json!("text")).is_none());
++        assert_eq!(clean(&json!({ "quality": "720" })).unwrap()["quality"], "720");
++        assert_eq!(clean(&json!({ "quality": "4k" })).unwrap()["quality"], Value::Null);
++        assert!(slot_ok("youtube") && slot_ok("") && !slot_ok("a/b") && !slot_ok("Twitch"));
++        assert_eq!(key("streams", "youtube"), "streams/youtube");
++        assert_eq!(key("radio", ""), "radio");
+         assert_eq!(clean(&json!({ "title": "x".repeat(500) })).unwrap()["title"].as_str().unwrap().len(), 120);
+     }
+ }
+diff --git a/src/styles.css b/src/styles.css
+index 0c29e83..4b4d04b 100644
+--- a/src/styles.css
++++ b/src/styles.css
+@@ -9071,3 +9071,12 @@ html.a2-offline .historyUploadBtn {
+ .mediaRow .mediaSlider { display: inline-flex; align-items: center; gap: 3px; color: rgba(255, 255, 255, 0.6); }
+ .mediaRow .mediaSlider svg { width: 13px; height: 13px; }
+ .mediaRow .mediaSlider input { width: 56px; height: 14px; margin: 0; accent-color: var(--ct-accent); }
++.mediaRow button.mediaQuality {
++  width: auto;
++  min-width: 40px;
++  padding: 0 5px;
++  border: 1px solid rgba(255, 255, 255, 0.18);
++  font-size: 10.5px;
++  font-variant-numeric: tabular-nums;
++  color: rgba(255, 255, 255, 0.85);
++}
+-- 
+2.43.0
+
