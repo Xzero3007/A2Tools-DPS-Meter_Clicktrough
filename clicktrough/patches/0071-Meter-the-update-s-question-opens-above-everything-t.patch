@@ -1,0 +1,173 @@
+From 4ddc0794f860b2aa2d069a3a92ec3e68095518c8 Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Thu, 12 Nov 2026 08:00:34 +0000
+Subject: [PATCH] Meter: the update's question opens above everything,
+ the game and overlays
+
+A sixth KWin rule (a2tools-dps-meter-dialogs): the meter's own dialogs,
+titled "A2Tools - ..." (the update's Yes/No, its error, plugin updates),
+forced to the overlay layer and Keep Above, focus stealing prevention off.
+The dialog itself opens centred, asks for attention and is presented.
+---
+ src-tauri/src/app.rs                          |  3 +-
+ src-tauri/src/platform/kwin_rules.rs          | 49 +++++++++++++++++++
+ src-tauri/src/platform/linux/dialog.rs        |  6 +++
+ src-tauri/src/platform/linux/window_rules.rs  | 11 ++++-
+ .../src/platform/unsupported/window_rules.rs  |  5 ++
+ 5 files changed, 71 insertions(+), 3 deletions(-)
+
+diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
+index 3e5e865..0670534 100644
+--- a/src-tauri/src/app.rs
++++ b/src-tauri/src/app.rs
+@@ -4015,12 +4015,13 @@ pub fn run() {
+                     // overlay takes no focus, so a click on it leaves the game
+                     // focused (#71); nor do plugins' icons. Plugin windows
+                     // stay above the game, so their alerts are seen.
+-                    let rules: [(&str, fn(bool) -> Result<bool, String>); 5] = [
++                    let rules: [(&str, fn(bool) -> Result<bool, String>); 6] = [
+                         ("above", platform::window_rules::keep_above_fullscreen),
+                         ("no-focus", platform::window_rules::click_without_focus),
+                         ("icons", platform::window_rules::icons_without_focus),
+                         ("plugin windows", platform::window_rules::plugin_windows_above),
+                         ("browser", platform::window_rules::browser_above),
++                        ("dialogs", platform::window_rules::dialogs_above),
+                     ];
+                     for (name, ensure) in rules {
+                         if let Err(e) = ensure(false) {
+diff --git a/src-tauri/src/platform/kwin_rules.rs b/src-tauri/src/platform/kwin_rules.rs
+index 6a51966..dff7608 100644
+--- a/src-tauri/src/platform/kwin_rules.rs
++++ b/src-tauri/src/platform/kwin_rules.rs
+@@ -143,6 +143,37 @@ pub fn plugin_windows_rule_entries() -> Vec<(&'static str, &'static str)> {
+     ]
+ }
+ 
++/// Clicktrough: the sixth rule's group, the meter's own questions above
++/// everything. The update's Yes/No ("A2Tools - Update Available") was Keep
++/// Above only, which a focused fullscreen game and the overlay layer (the
++/// meter's own windows) cover, so it could open unseen behind them.
++pub const DIALOGS_GROUP: &str = "a2tools-dps-meter-dialogs";
++
++/// The meter's dialogs' titles: "A2Tools - " and what is asked (the update,
++/// its error, plugin updates; Russian has a dash of its own). No other window
++/// of the meter's is titled so: the overlay is "A2Tools DPS Meter".
++pub const DIALOG_TITLE_MATCH: &str = "^A2Tools [-\u{2014}] ";
++
++/// The dialogs' rule: class and title, forced to the overlay layer and Keep
++/// Above, and focus stealing prevention off (`fsplevel` 0, forced), so the
++/// question comes to the front with the focus and is answered at once.
++pub fn dialog_rule_entries() -> Vec<(&'static str, &'static str)> {
++    vec![
++        ("Description", "A2Tools DPS Meter questions above everything (added by the meter)"),
++        ("wmclass", WINDOW_CLASS_MATCH),
++        ("wmclassmatch", "3"),
++        ("wmclasscomplete", "false"),
++        ("title", DIALOG_TITLE_MATCH),
++        ("titlematch", "3"),
++        ("layer", "overlay"),
++        ("layerrule", "2"),
++        ("above", "true"),
++        ("aboverule", "2"),
++        ("fsplevel", "0"),
++        ("fsplevelrule", "2"),
++    ]
++}
++
+ /// Clicktrough: the fifth rule's group, Brave Origin as an overlay
+ /// (`linux/browser`): the browser the meter starts, above a fullscreen game.
+ pub const BROWSER_GROUP: &str = "a2tools-dps-meter-browser";
+@@ -382,4 +413,22 @@ mod tests {
+         // No title: Brave's title is the page's.
+         assert_eq!(value("title"), None);
+     }
++
++    /// Only the meter's questions, by their title, above everything and
++    /// focused; never the overlay or another window of the meter's.
++    #[test]
++    fn the_dialogs_rule_matches_only_the_meters_questions() {
++        let entries = dialog_rule_entries();
++        let value = |key: &str| entries.iter().find(|(k, _)| *k == key).map(|(_, v)| *v);
++        assert_eq!(value("wmclass"), Some(WINDOW_CLASS_MATCH));
++        assert_eq!((value("title"), value("titlematch")), (Some(DIALOG_TITLE_MATCH), Some("3")));
++        assert_eq!((value("layer"), value("layerrule")), (Some("overlay"), Some("2")));
++        assert_eq!((value("above"), value("aboverule")), (Some("true"), Some("2")));
++        assert_eq!((value("fsplevel"), value("fsplevelrule")), (Some("0"), Some("2")));
++        assert_eq!(value("acceptfocus"), None, "a question takes the focus");
++        // The pattern, read as KWin does: "A2Tools", a space, a dash or the
++        // Russian one, a space. The overlay's title has none.
++        assert_eq!(DIALOG_TITLE_MATCH, "^A2Tools [-\u{2014}] ");
++        assert!(!OVERLAY_TITLE.starts_with("A2Tools - "));
++    }
+ }
+diff --git a/src-tauri/src/platform/linux/dialog.rs b/src-tauri/src/platform/linux/dialog.rs
+index cfcb312..ad18cf3 100644
+--- a/src-tauri/src/platform/linux/dialog.rs
++++ b/src-tauri/src/platform/linux/dialog.rs
+@@ -23,6 +23,12 @@ fn run(title: &str, message: &str, kind: gtk::MessageType, buttons: gtk::Buttons
+         dialog.set_title(&title);
+         // The overlay stays on top; the question must not open behind it.
+         dialog.set_keep_above(true);
++        // Clicktrough: in the middle of the screen, brought to the front and
++        // asking for attention; the KWin rule for the meter's questions
++        // (`kwin_rules::dialog_rule_entries`) puts it above the game too.
++        dialog.set_position(gtk::WindowPosition::Center);
++        dialog.set_urgency_hint(true);
++        dialog.present();
+         let response = dialog.run();
+         dialog.close();
+         response
+diff --git a/src-tauri/src/platform/linux/window_rules.rs b/src-tauri/src/platform/linux/window_rules.rs
+index 0877f3c..19b367d 100644
+--- a/src-tauri/src/platform/linux/window_rules.rs
++++ b/src-tauri/src/platform/linux/window_rules.rs
+@@ -7,7 +7,7 @@ use std::process::Command;
+ 
+ use crate::platform::kwin_rules::{
+     general_entries_for, icons_rule_entries, is_kde, no_focus_rule_entries, order_only_entries, parse_version,
+-    plugin_windows_rule_entries, reads_order_only, rule_entries, browser_rule_entries, BROWSER_GROUP, GROUP, ICONS_GROUP,
++    plugin_windows_rule_entries, reads_order_only, dialog_rule_entries, DIALOGS_GROUP, rule_entries, browser_rule_entries, BROWSER_GROUP, GROUP, ICONS_GROUP,
+     NO_FOCUS_GROUP, PLUGIN_WINDOWS_GROUP,
+ };
+ 
+@@ -100,14 +100,21 @@ pub fn browser_above(done: bool) -> Result<bool, String> {
+     add_rule(BROWSER_GROUP, &browser_rule_entries(), done, "the browser stays above fullscreen games")
+ }
+ 
++/// Clicktrough: make sure the meter's questions (the update's Yes/No) open
++/// above everything, the game and the overlays, with the focus.
++pub fn dialogs_above(done: bool) -> Result<bool, String> {
++    add_rule(DIALOGS_GROUP, &dialog_rule_entries(), done, "the meter's questions open above everything")
++}
++
+ /// The meter's rules, each with its group, entries and what it does.
+-fn rules() -> [(&'static str, Vec<(&'static str, &'static str)>, &'static str); 5] {
++fn rules() -> [(&'static str, Vec<(&'static str, &'static str)>, &'static str); 6] {
+     [
+         (GROUP, rule_entries(), "the meter stays above fullscreen games"),
+         (NO_FOCUS_GROUP, no_focus_rule_entries(), "clicking the overlay keeps the game focused"),
+         (ICONS_GROUP, icons_rule_entries(), "plugin icons keep the game focused"),
+         (PLUGIN_WINDOWS_GROUP, plugin_windows_rule_entries(), "plugin windows stay above fullscreen games"),
+         (BROWSER_GROUP, browser_rule_entries(), "the browser stays above fullscreen games"),
++        (DIALOGS_GROUP, dialog_rule_entries(), "the meter's questions open above everything"),
+     ]
+ }
+ 
+diff --git a/src-tauri/src/platform/unsupported/window_rules.rs b/src-tauri/src/platform/unsupported/window_rules.rs
+index 4db751c..abb4789 100644
+--- a/src-tauri/src/platform/unsupported/window_rules.rs
++++ b/src-tauri/src/platform/unsupported/window_rules.rs
+@@ -26,5 +26,10 @@ pub fn browser_above(_done: bool) -> Result<bool, String> {
+     Ok(true)
+ }
+ 
++/// See the Linux implementation. Always done.
++pub fn dialogs_above(_done: bool) -> Result<bool, String> {
++    Ok(true)
++}
++
+ /// See the Linux implementation. Nothing to keep.
+ pub fn keep_rules() {}
+-- 
+2.43.0
+
