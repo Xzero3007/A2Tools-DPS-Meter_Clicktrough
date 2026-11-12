@@ -1,0 +1,123 @@
+From d177878f3bcc4db0b4305959f4980b61d6b93857 Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Thu, 12 Nov 2026 00:13:27 +0000
+Subject: [PATCH] Plugin dock: its own lock kept as last set, across the
+ meter's lock and restarts
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_012bGvDmLJG8nVqKXAfDMRub
+---
+ public/src/js/pluginDock.js |  4 +--
+ src-tauri/src/app.rs        | 51 +++++++++++++++++++++++++++++--------
+ 2 files changed, 43 insertions(+), 12 deletions(-)
+
+diff --git a/public/src/js/pluginDock.js b/public/src/js/pluginDock.js
+index 45f8c8d..f94c35a 100644
+--- a/public/src/js/pluginDock.js
++++ b/public/src/js/pluginDock.js
+@@ -415,8 +415,8 @@
+ 
+   // Clicktrough: this window's own lock. With every meter window locked, it
+   // frees this one alone (clicks and scrolling in the plugins), and locks it
+-  // again; with them free, it locks this one alone. The meter keeps it until
+-  // the lock of all windows changes, then this window follows that again.
++  // again; with them free, it locks this one alone. The meter keeps it as
++  // last set, across the meter's lock and restarts (ct.dockLock).
+   const lockBtn = document.querySelector(".dockLock");
+   const showLock = (locked) => {
+     if (!lockBtn) return;
+diff --git a/src-tauri/src/app.rs b/src-tauri/src/app.rs
+index 76aa155..3e5e865 100644
+--- a/src-tauri/src/app.rs
++++ b/src-tauri/src/app.rs
+@@ -503,11 +503,32 @@ fn other_window_ignores(label: &str, screenshot: bool, all_locked: bool) -> Opti
+ }
+ 
+ /// Clicktrough: the plugin dock's own lock, set by its lock button: 0 as
+-/// the other windows, 1 locked, 2 free. Back to 0 when the lock of all
+-/// windows changes, so the dock follows it again.
++/// the other windows (until the button was first pressed), 1 locked, 2
++/// free. Kept as set, across the meter's lock and restarts (DOCK_LOCK_KEY):
++/// the person's last choice stands.
+ static DOCK_LOCK: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+-/// The lock of all windows when last synced: 0 off, 1 on, 2 not yet.
+-static LAST_ALL_LOCKED: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(2);
++/// Whether DOCK_LOCK was read from the settings yet.
++static DOCK_LOCK_LOADED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
++/// Clicktrough: where the dock's own lock is kept: "locked" or "free".
++pub const DOCK_LOCK_KEY: &str = "ct.dockLock";
++
++fn dock_lock_from(value: Option<&str>) -> u8 {
++    match value {
++        Some("locked") => 1,
++        Some("free") => 2,
++        _ => 0,
++    }
++}
++
++/// The dock's own lock as last kept, read once.
++fn load_dock_lock(app: &tauri::AppHandle) {
++    use std::sync::atomic::Ordering;
++    if DOCK_LOCK_LOADED.swap(true, Ordering::Relaxed) {
++        return;
++    }
++    let kept = app.try_state::<AppState>().and_then(|s| s.settings.get(DOCK_LOCK_KEY));
++    DOCK_LOCK.store(dock_lock_from(kept.as_deref()), Ordering::Relaxed);
++}
+ 
+ /// Clicktrough: whether the plugin dock lets clicks through now: its own
+ /// lock where its button set one, else as the other windows.
+@@ -524,15 +545,20 @@ fn dock_locked(all_locked: bool) -> bool {
+ /// Answers whether it is locked now.
+ #[tauri::command]
+ fn dock_lock_toggle(app: tauri::AppHandle) -> bool {
++    load_dock_lock(&app);
+     let locked = !dock_locked(ALL_WINDOWS_LOCKED.load(std::sync::atomic::Ordering::Relaxed));
+     DOCK_LOCK.store(if locked { 1 } else { 2 }, std::sync::atomic::Ordering::Relaxed);
++    if let Some(state) = app.try_state::<AppState>() {
++        state.settings.set(DOCK_LOCK_KEY, if locked { "locked" } else { "free" });
++    }
+     sync_other_windows(&app);
+     locked
+ }
+ 
+ /// Clicktrough: whether the dock is locked now, for its lock button.
+ #[tauri::command]
+-fn dock_lock_state() -> bool {
++fn dock_lock_state(app: tauri::AppHandle) -> bool {
++    load_dock_lock(&app);
+     dock_locked(ALL_WINDOWS_LOCKED.load(std::sync::atomic::Ordering::Relaxed))
+ }
+ 
+@@ -546,11 +572,8 @@ pub fn sync_other_windows(app: &tauri::AppHandle) {
+             && s.settings.get(LOCK_ALL_WINDOWS_KEY).as_deref() == Some("true")
+     });
+     ALL_WINDOWS_LOCKED.store(locked, Ordering::Relaxed);
+-    // Clicktrough: the lock of all windows changed: the dock follows it again.
+-    let was = LAST_ALL_LOCKED.swap(locked as u8, Ordering::Relaxed);
+-    if was != 2 && was != locked as u8 {
+-        DOCK_LOCK.store(0, Ordering::Relaxed);
+-    }
++    // Clicktrough: the dock's own lock as the person last set it.
++    load_dock_lock(app);
+     let dock = dock_locked(locked);
+     let _ = app.emit_to(crate::plugins::dock::LABEL, "dock-locked", dock);
+     // The pages stop offering their resize edges while locked: the right
+@@ -4741,6 +4764,14 @@ pub fn run() {
+ 
+ #[cfg(test)]
+ mod tests {
++    #[test]
++    fn the_docks_own_lock_is_read_back() {
++        assert_eq!(super::dock_lock_from(Some("locked")), 1);
++        assert_eq!(super::dock_lock_from(Some("free")), 2);
++        assert_eq!(super::dock_lock_from(None), 0);
++        assert_eq!(super::dock_lock_from(Some("junk")), 0);
++    }
++
+     #[test]
+     fn updates_come_only_from_the_cdn() {
+         use super::{update_url_allowed as ok, version_shaped};
+-- 
+2.43.0
+
