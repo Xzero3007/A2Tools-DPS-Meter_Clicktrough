@@ -79,6 +79,7 @@ patches).
 | 0067 | **One window per widget**: when a plugin opened the same small window twice in one moment, the meter built two, and the second stayed on screen empty and could not be closed (the Closet window at the Black Cloud shop, 2026-11-11). Opening a widget now waits for the one before. |
 | 0068 | **Twitch's followed channels show**: the Followed list came back empty, because Twitch answers the plain question for followed channels with "service error". The meter now asks as twitch.tv's own pages do: the followed channels live now (sorted by relevance, the only way Twitch answers), then every followed channel by id (twitch.tv's query for its following page, up to 1000) and those channels; if all stay empty, the plugin shows Twitch's reason. |
 | 0069 | **The plugin window's lock remembered**: its own lock (the lock in the plugin window's bar) is kept as you last set it, after a restart and when you switch the meter's lock; before, it was forgotten and the plugin window followed the meter's lock again (locked at every start). |
+| 0070 | **The game's icons kept on your PC**: every picture the meter fetches for a plugin from the game's icon server (assets.playnccdn.com) is kept in `picture-cache/` in the meter's data folder and read from there afterwards, so the server is asked once for each picture, not again at every start. NC's portraits change and are not kept. Nothing new is fetched or sent. |
 
 ### Taken early from the original
 

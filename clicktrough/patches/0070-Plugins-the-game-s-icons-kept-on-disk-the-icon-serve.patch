@@ -1,0 +1,137 @@
+From 3a18509d14e47255d5f3c846000c2d8ed6770abb Mon Sep 17 00:00:00 2001
+From: A2Tools-patch <patch@localhost>
+Date: Thu, 12 Nov 2026 07:32:27 +0000
+Subject: [PATCH] Plugins: the game's icons kept on disk, the icon server asked
+ once for each
+
+---
+ src-tauri/src/plugins/mod.rs | 85 +++++++++++++++++++++++++++++++++++-
+ 1 file changed, 84 insertions(+), 1 deletion(-)
+
+diff --git a/src-tauri/src/plugins/mod.rs b/src-tauri/src/plugins/mod.rs
+index 95efbf4..41d6aa7 100644
+--- a/src-tauri/src/plugins/mod.rs
++++ b/src-tauri/src/plugins/mod.rs
+@@ -2707,7 +2707,8 @@ pub async fn plugin_web_get(app: tauri::AppHandle, window: tauri::WebviewWindow,
+ /// Clicktrough: `a2.web.image(url)`: a picture from one of `IMAGE_HOSTS`
+ /// (permission "web:<host>") as a data: URL for an <img>, since a plugin's
+ /// page loads nothing from the network itself. Pictures are kept for the
+-/// meter's run (up to 800), and the meter fetches at most ten a second.
++/// meter's run (up to 800), the game's icons on disk too (`picture-cache/`),
++/// and the meter fetches at most ten a second.
+ #[tauri::command]
+ pub async fn plugin_web_image(app: tauri::AppHandle, window: tauri::WebviewWindow, plugin: Option<String>, url: String) -> Result<String, String> {
+     let id = window_plugin(&window, plugin.as_deref())?;
+@@ -2722,6 +2723,55 @@ fn picture_kind(content_type: &str) -> Option<&'static str> {
+     ["image/png", "image/webp", "image/jpeg", "image/gif"].into_iter().find(|k| *k == kind)
+ }
+ 
++/// Clicktrough: the game's icons never change, so each one fetched is kept
++/// on disk (`picture-cache/` in the app's data folder) and read from there
++/// afterwards: the icon server is asked once for a picture, not once a run.
++/// NC's portraits change and are not kept.
++const DISK_IMAGE_HOSTS: &[&str] = &["assets.playnccdn.com"];
++
++/// Most pictures kept on disk.
++const MAX_DISK_IMAGES: usize = 20_000;
++
++/// Where a picture of `url` is kept, or None for one not kept on disk.
++#[cfg_attr(not(feature = "net"), allow(dead_code))]
++fn disk_image_path(dir: &Path, url: &str) -> Option<PathBuf> {
++    let host = url.strip_prefix("https://")?.split(['/', '?', '#']).next()?;
++    if !DISK_IMAGE_HOSTS.contains(&host) {
++        return None;
++    }
++    // FNV-1a: a stable name for the address (the file holds the address too).
++    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
++    for b in url.bytes() {
++        h = (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3);
++    }
++    Some(dir.join(format!("{h:016x}.txt")))
++}
++
++/// The kept data: URL of `url`, if there is one.
++#[cfg_attr(not(feature = "net"), allow(dead_code))]
++fn disk_image_read(dir: &Path, url: &str) -> Option<String> {
++    let text = std::fs::read_to_string(disk_image_path(dir, url)?).ok()?;
++    let (kept_url, data) = text.split_once('\n')?;
++    (kept_url == url && data.starts_with("data:image/")).then(|| data.to_string())
++}
++
++/// Keep the data: URL of `url` (best effort: a picture not kept is fetched
++/// again next time).
++#[cfg_attr(not(feature = "net"), allow(dead_code))]
++fn disk_image_write(dir: &Path, url: &str, data: &str) {
++    let Some(path) = disk_image_path(dir, url) else { return };
++    if std::fs::create_dir_all(dir).is_err() {
++        return;
++    }
++    if std::fs::read_dir(dir).map(|d| d.count()).unwrap_or(usize::MAX) >= MAX_DISK_IMAGES {
++        return;
++    }
++    let tmp = path.with_extension("tmp");
++    if std::fs::write(&tmp, format!("{url}\n{data}")).is_ok() {
++        let _ = std::fs::rename(&tmp, &path);
++    }
++}
++
+ #[cfg(feature = "net")]
+ async fn web_image(app: &tauri::AppHandle, url: &str) -> Result<String, String> {
+     static CACHE: std::sync::OnceLock<Mutex<HashMap<String, String>>> = std::sync::OnceLock::new();
+@@ -2730,6 +2780,15 @@ async fn web_image(app: &tauri::AppHandle, url: &str) -> Result<String, String>
+     if let Some(hit) = cache.lock().unwrap_or_else(|p| p.into_inner()).get(url) {
+         return Ok(hit.clone());
+     }
++    let disk = app.try_state::<AppState>().map(|s| s.app_data_dir.join("picture-cache"));
++    if let Some(data) = disk.as_deref().and_then(|dir| disk_image_read(dir, url)) {
++        let mut cache = cache.lock().unwrap_or_else(|p| p.into_inner());
++        if cache.len() >= 800 {
++            cache.clear();
++        }
++        cache.insert(url.to_string(), data.clone());
++        return Ok(data);
++    }
+     {
+         let mut next = NEXT.get_or_init(|| tokio::sync::Mutex::new(Instant::now())).lock().await;
+         let now = Instant::now();
+@@ -2761,6 +2820,9 @@ async fn web_image(app: &tauri::AppHandle, url: &str) -> Result<String, String>
+         return Err("the picture is too large".into());
+     }
+     let data = format!("data:{kind};base64,{}", base64(&bytes));
++    if let Some(dir) = disk.as_deref() {
++        disk_image_write(dir, url, &data);
++    }
+     let mut cache = cache.lock().unwrap_or_else(|p| p.into_inner());
+     if cache.len() >= 800 {
+         cache.clear();
+@@ -3312,6 +3374,27 @@ fn percent_decode(s: &str) -> String {
+ 
+ #[cfg(test)]
+ mod tests {
++
++    #[test]
++    fn game_icons_are_kept_on_disk_portraits_are_not() {
++        let dir = std::env::temp_dir().join(format!("ct-picture-cache-{}", std::process::id()));
++        let _ = std::fs::remove_dir_all(&dir);
++        let icon = "https://assets.playnccdn.com/static-aion2-gamedata/resources/Icon_GM_0067_T05_Torso.png";
++        let other = "https://assets.playnccdn.com/static-aion2-gamedata/resources/Icon_GM_0067_T05_Pants.png";
++        let portrait = "https://profileimg.plaync.com/game_profile_images/aion2/images/x.png";
++        assert_eq!(super::disk_image_read(&dir, icon), None);
++        super::disk_image_write(&dir, icon, "data:image/png;base64,AAAA");
++        assert_eq!(super::disk_image_read(&dir, icon).as_deref(), Some("data:image/png;base64,AAAA"));
++        assert_eq!(super::disk_image_read(&dir, other), None);
++        assert_ne!(super::disk_image_path(&dir, icon), super::disk_image_path(&dir, other));
++        assert_eq!(super::disk_image_path(&dir, portrait), None);
++        super::disk_image_write(&dir, portrait, "data:image/png;base64,BBBB");
++        assert_eq!(super::disk_image_read(&dir, portrait), None);
++        // A file that isn't a kept picture of that address is not taken.
++        std::fs::write(super::disk_image_path(&dir, other).unwrap(), format!("{icon}\ndata:image/png;base64,CCCC")).unwrap();
++        assert_eq!(super::disk_image_read(&dir, other), None);
++        let _ = std::fs::remove_dir_all(&dir);
++    }
+     #[test]
+     fn percent_decode_takes_any_text() {
+         assert_eq!(super::percent_decode("a%20b%2Fc"), "a b/c");
+-- 
+2.43.0
+
